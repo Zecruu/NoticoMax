@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 320px;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #fafafa;
+      color: #0a0a0a;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      border-bottom: 1px solid #e5e5e5;
+    }
+    .header img { width: 20px; height: 20px; }
+    .header span { font-size: 14px; font-weight: 600; }
+    .form { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    label { font-size: 12px; font-weight: 500; color: #666; }
+    input, textarea, select {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #e5e5e5;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+    }
+    input:focus, textarea:focus, select:focus { border-color: #0a0a0a; }
+    textarea { resize: vertical; min-height: 80px; }
+    .type-btns { display: flex; gap: 6px; }
+    .type-btn {
+      flex: 1;
+      padding: 6px;
+      border: 1px solid #e5e5e5;
+      border-radius: 6px;
+      background: #fff;
+      font-size: 12px;
+      cursor: pointer;
+      text-align: center;
+    }
+    .type-btn.active { background: #0a0a0a; color: #fff; border-color: #0a0a0a; }
+    .save-btn {
+      width: 100%;
+      padding: 10px;
+      background: #0a0a0a;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .save-btn:hover { background: #333; }
+    .save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .settings-link {
+      display: block;
+      text-align: center;
+      padding: 8px;
+      font-size: 11px;
+      color: #999;
+      text-decoration: none;
+      border-top: 1px solid #e5e5e5;
+    }
+    .settings-link:hover { color: #666; }
+    .status { font-size: 12px; text-align: center; padding: 4px; }
+    .status.success { color: #16a34a; }
+    .status.error { color: #dc2626; }
+    #settings-view { display: none; }
+    #settings-view .form { gap: 10px; }
+    .back-btn {
+      background: none;
+      border: none;
+      font-size: 12px;
+      color: #666;
+      cursor: pointer;
+      padding: 4px 0;
+    }
+    .back-btn:hover { color: #0a0a0a; }
+  </style>
+</head>
+<body>
+  <div id="main-view">
+    <div class="header">
+      <img src="icons/icon-48.png" alt="">
+      <span>Save to Notico</span>
+    </div>
+    <div class="form">
+      <div class="type-btns">
+        <button class="type-btn active" data-type="note">Note</button>
+        <button class="type-btn" data-type="url">URL</button>
+      </div>
+      <div>
+        <label>Title</label>
+        <input type="text" id="title" placeholder="Title">
+      </div>
+      <div id="url-field" style="display:none">
+        <label>URL</label>
+        <input type="text" id="url" placeholder="https://...">
+      </div>
+      <div>
+        <label>Content</label>
+        <textarea id="content" placeholder="Add a note..."></textarea>
+      </div>
+      <div id="status"></div>
+      <button class="save-btn" id="save">Save</button>
+    </div>
+    <a href="#" class="settings-link" id="open-settings">Settings</a>
+  </div>
+
+  <div id="settings-view">
+    <div class="header">
+      <span>Settings</span>
+    </div>
+    <div class="form">
+      <button class="back-btn" id="back">&larr; Back</button>
+      <div>
+        <label>Notico URL</label>
+        <input type="text" id="notico-url" placeholder="https://notico.app">
+      </div>
+      <div>
+        <label>API Token</label>
+        <input type="password" id="notico-token" placeholder="Your API token">
+      </div>
+      <button class="save-btn" id="save-settings">Save Settings</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
