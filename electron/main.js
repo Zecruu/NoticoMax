@@ -3,6 +3,18 @@ const path = require("path");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const logger = require("./logger");
+const { autoUpdater } = require("electron-updater");
+
+// Auto-updater configuration
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = false;
+autoUpdater.allowDowngrade = false;
+autoUpdater.logger = {
+  info: (...args) => logger.info("updater", args.join(" ")),
+  warn: (...args) => logger.warn("updater", args.join(" ")),
+  error: (...args) => logger.error("updater", args.join(" ")),
+  debug: (...args) => logger.info("updater", "[debug] " + args.join(" ")),
+};
 
 const isDev = process.env.NODE_ENV === "development";
 const DEV_URL = "http://localhost:5467";
@@ -220,41 +232,57 @@ ipcMain.handle("get-app-version", () => {
 
 ipcMain.handle("check-for-update", async () => {
   try {
-    const https = require("https");
-    const data = await new Promise((resolve, reject) => {
-      const req = https.get(
-        "https://api.github.com/repos/Zecruu/NoticoMax/releases/latest",
-        { headers: { "User-Agent": "NoticoMax" } },
-        (res) => {
-          let body = "";
-          res.on("data", (chunk) => (body += chunk));
-          res.on("end", () => resolve(JSON.parse(body)));
-        }
-      );
-      req.on("error", reject);
-      req.setTimeout(10000, () => req.destroy());
-    });
-
-    const currentVersion = app.getVersion();
-    const latestVersion = (data.tag_name || "").replace(/^v/, "");
-    const hasUpdate = latestVersion && latestVersion !== currentVersion;
-
-    // Find the .exe asset download URL
-    const exeAsset = (data.assets || []).find((a) => a.name.endsWith(".exe"));
-    const downloadUrl = exeAsset
-      ? exeAsset.browser_download_url
-      : data.html_url;
-
-    return { hasUpdate, currentVersion, latestVersion, downloadUrl };
+    const result = await autoUpdater.checkForUpdates();
+    if (result && result.updateInfo) {
+      const currentVersion = app.getVersion();
+      const latestVersion = result.updateInfo.version;
+      const hasUpdate = latestVersion !== currentVersion;
+      return { hasUpdate, currentVersion, latestVersion };
+    }
+    return { hasUpdate: false, currentVersion: app.getVersion() };
   } catch (err) {
-    logger.error("electron", `Update check failed: ${err.message}`);
+    logger.error("updater", `Update check failed: ${err.message}`);
     return { hasUpdate: false, error: err.message };
   }
 });
 
-ipcMain.handle("open-download-url", (event, url) => {
-  if (url && url.startsWith("https://")) {
-    shell.openExternal(url);
+ipcMain.handle("download-update", async () => {
+  try {
+    await autoUpdater.downloadUpdate();
+    return { success: true };
+  } catch (err) {
+    logger.error("updater", `Download failed: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("install-update", () => {
+  autoUpdater.quitAndInstall(false, true);
+});
+
+// Forward auto-updater events to renderer
+autoUpdater.on("download-progress", (progress) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("update-download-progress", {
+      percent: progress.percent,
+      transferred: progress.transferred,
+      total: progress.total,
+      bytesPerSecond: progress.bytesPerSecond,
+    });
+  }
+});
+
+autoUpdater.on("update-downloaded", (info) => {
+  logger.info("updater", `Update downloaded: ${info.version}`);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("update-downloaded", { version: info.version });
+  }
+});
+
+autoUpdater.on("error", (err) => {
+  logger.error("updater", `Auto-updater error: ${err.message}`);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("update-error", { message: err.message });
   }
 });
 

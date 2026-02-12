@@ -5,7 +5,7 @@ import { signOut } from "next-auth/react";
 import { useSubscription } from "@/hooks/use-subscription";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Crown, LogIn, Download, Upload, Key, Copy, RefreshCw, Monitor, RotateCw } from "lucide-react";
+import { ArrowLeft, Crown, LogIn, Download, Upload, Key, Copy, RefreshCw, RotateCw } from "lucide-react";
 import { exportData, importData } from "@/lib/import-export";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -19,8 +19,11 @@ export default function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isDesktop = typeof window !== "undefined" && window.electronAPI?.isElectron;
   const [appVersion, setAppVersion] = useState<string>("");
-  const [updateInfo, setUpdateInfo] = useState<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string; error?: string } | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<{ hasUpdate: boolean; latestVersion?: string; error?: string } | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<number>(0);
+  const [updateDownloaded, setUpdateDownloaded] = useState(false);
   const [openAtLogin, setOpenAtLogin] = useState(false);
 
   useEffect(() => {
@@ -28,6 +31,31 @@ export default function SettingsPage() {
       window.electronAPI.getAppVersion().then(setAppVersion);
       window.electronAPI.getOpenAtLogin().then(setOpenAtLogin);
     }
+  }, []);
+
+  useEffect(() => {
+    if (!window.electronAPI?.isElectron) return;
+
+    const cleanupProgress = window.electronAPI.onUpdateDownloadProgress((data) => {
+      setDownloadProgress(Math.round(data.percent));
+    });
+
+    const cleanupDownloaded = window.electronAPI.onUpdateDownloaded(() => {
+      setDownloading(false);
+      setUpdateDownloaded(true);
+      toast.success("Update downloaded! Click 'Install & Restart' to apply.");
+    });
+
+    const cleanupError = window.electronAPI.onUpdateError((data) => {
+      setDownloading(false);
+      toast.error(`Update error: ${data.message}`);
+    });
+
+    return () => {
+      cleanupProgress();
+      cleanupDownloaded();
+      cleanupError();
+    };
   }, []);
 
   useEffect(() => {
@@ -106,7 +134,7 @@ export default function SettingsPage() {
                   variant="outline"
                   size="sm"
                   className="gap-1.5"
-                  disabled={checkingUpdate}
+                  disabled={checkingUpdate || downloading || updateDownloaded}
                   onClick={async () => {
                     setCheckingUpdate(true);
                     setUpdateInfo(null);
@@ -127,22 +155,62 @@ export default function SettingsPage() {
                 </Button>
               </div>
 
-              {updateInfo?.hasUpdate && (
-                <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
+              {updateInfo?.hasUpdate && !updateDownloaded && (
+                <div className="rounded-md border border-primary/20 bg-primary/5 p-3 space-y-3">
                   <p className="text-sm font-medium">
                     Update available: v{updateInfo.latestVersion}
                   </p>
+
+                  {downloading && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>Downloading...</span>
+                        <span>{downloadProgress}%</span>
+                      </div>
+                      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
+                          style={{ width: `${downloadProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {!downloading && (
+                    <Button
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={async () => {
+                        setDownloading(true);
+                        setDownloadProgress(0);
+                        const result = await window.electronAPI!.downloadUpdate();
+                        if (!result.success) {
+                          setDownloading(false);
+                          toast.error(result.error || "Download failed");
+                        }
+                      }}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Download Update
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {updateDownloaded && (
+                <div className="rounded-md border border-green-500/20 bg-green-500/5 p-3 space-y-2">
+                  <p className="text-sm font-medium text-green-700 dark:text-green-400">
+                    Update ready to install
+                  </p>
                   <Button
                     size="sm"
-                    className="mt-2 gap-1.5"
+                    className="gap-1.5"
                     onClick={() => {
-                      if (updateInfo.downloadUrl) {
-                        window.electronAPI!.openDownloadUrl(updateInfo.downloadUrl);
-                      }
+                      window.electronAPI!.installUpdate();
                     }}
                   >
-                    <Download className="h-3.5 w-3.5" />
-                    Download Update
+                    <RotateCw className="h-3.5 w-3.5" />
+                    Install & Restart
                   </Button>
                 </div>
               )}

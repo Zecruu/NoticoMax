@@ -1,6 +1,6 @@
 {
   "name": "notico-max",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -19,6 +19,13 @@
     "directories": {
       "output": "dist-electron"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Zecruu",
+        "repo": "NoticoMax"
+      }
+    ],
     "files": [
       "electron/**/*"
     ],
@@ -34,35 +41,49 @@
       {
         "from": ".next/standalone/node_modules",
         "to": "standalone/node_modules",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": ".next/standalone/.next",
         "to": "standalone/.next",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": ".next/static",
         "to": "standalone/.next/static",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "public",
         "to": "standalone/public",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "public/logo.ico"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "public/logo.png",
       "category": "public.app-category.productivity"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "icon": "public/logo.png",
       "category": "Office"
     },
@@ -82,6 +103,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "dexie": "^4.3.0",
+    "electron-updater": "^6.7.3",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.563.0",
     "mongoose": "^9.2.0",
