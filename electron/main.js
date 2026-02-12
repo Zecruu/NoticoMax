@@ -10,6 +10,19 @@ const PROD_PORT = 3099;
 let mainWindow;
 let serverProcess;
 
+// Prevent multiple instances
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 function createWindow(url) {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -45,14 +58,12 @@ function createWindow(url) {
 function findServerJs() {
   const standaloneDir = path.join(process.resourcesPath, "standalone");
 
-  // Direct path (when turbopack root is set correctly)
   const directPath = path.join(standaloneDir, "server.js");
   if (fs.existsSync(directPath)) {
     return { serverPath: directPath, cwd: standaloneDir };
   }
 
-  // Nested path (when Next.js infers wrong workspace root)
-  // Look for server.js recursively in subdirectories
+  // Fallback: search for server.js in subdirectories
   function findFile(dir, filename, depth = 0) {
     if (depth > 4) return null;
     try {
@@ -85,9 +96,12 @@ function startProductionServer() {
     console.log("[electron] Starting server:", serverPath);
     console.log("[electron] CWD:", cwd);
 
+    // ELECTRON_RUN_AS_NODE=1 makes the Electron binary behave as plain Node.js
+    // Without this, spawning process.execPath opens another Electron window
     serverProcess = spawn(process.execPath, [serverPath], {
       env: {
         ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
         PORT: String(PROD_PORT),
         HOSTNAME: "localhost",
         NODE_ENV: "production",
