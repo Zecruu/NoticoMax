@@ -1,11 +1,5 @@
 import mongoose from "mongoose";
 
-const MONGODB_URI = process.env.MONGODB_URI || "";
-
-if (!MONGODB_URI && typeof window === "undefined" && process.env.NODE_ENV !== "production") {
-  console.warn("MONGODB_URI not defined – cloud features will be unavailable.");
-}
-
 interface MongooseCache {
   conn: typeof mongoose | null;
   promise: Promise<typeof mongoose> | null;
@@ -23,12 +17,18 @@ if (!global.mongooseCache) {
 }
 
 async function dbConnect(): Promise<typeof mongoose> {
+  const uri = process.env.MONGODB_URI;
+
+  if (!uri) {
+    throw new Error("MONGODB_URI not configured");
+  }
+
   if (cached.conn) {
     return cached.conn;
   }
 
   if (!cached.promise) {
-    cached.promise = mongoose.connect(MONGODB_URI).then((m) => m);
+    cached.promise = mongoose.connect(uri).then((m) => m);
   }
 
   cached.conn = await cached.promise;

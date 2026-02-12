@@ -1,17 +1,26 @@
 const fs = require("fs");
 const path = require("path");
-const { app } = require("electron");
 
-const LOG_DIR = path.join(app.getPath("userData"), "logs");
+let LOG_DIR = null;
 const MAX_LOG_SIZE = 5 * 1024 * 1024; // 5MB
 
-// Ensure logs directory exists
-if (!fs.existsSync(LOG_DIR)) {
-  fs.mkdirSync(LOG_DIR, { recursive: true });
+function init(userDataPath) {
+  LOG_DIR = path.join(userDataPath, "logs");
+  try {
+    if (!fs.existsSync(LOG_DIR)) {
+      fs.mkdirSync(LOG_DIR, { recursive: true });
+    }
+  } catch (err) {
+    // Fallback to temp directory
+    LOG_DIR = path.join(require("os").tmpdir(), "noticomax-logs");
+    if (!fs.existsSync(LOG_DIR)) {
+      fs.mkdirSync(LOG_DIR, { recursive: true });
+    }
+  }
 }
 
 function getLogPath() {
-  const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const date = new Date().toISOString().slice(0, 10);
   return path.join(LOG_DIR, `noticomax-${date}.log`);
 }
 
@@ -33,29 +42,33 @@ function formatMessage(level, source, message) {
 }
 
 function writeLog(level, source, ...args) {
-  const message = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
-  const logPath = getLogPath();
+  const message = args
+    .map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
+    .join(" ");
+  const formatted = formatMessage(level, source, message);
 
-  rotateIfNeeded(logPath);
+  // Write to file if initialized
+  if (LOG_DIR) {
+    try {
+      const logPath = getLogPath();
+      rotateIfNeeded(logPath);
+      fs.appendFileSync(logPath, formatted);
+    } catch {}
+  }
 
-  try {
-    fs.appendFileSync(logPath, formatMessage(level, source, message));
-  } catch {}
-
-  // Also output to console for dev
+  // Also output to console
   if (level === "ERROR") {
-    process.stderr.write(formatMessage(level, source, message));
+    process.stderr.write(formatted);
   } else {
-    process.stdout.write(formatMessage(level, source, message));
+    process.stdout.write(formatted);
   }
 }
 
-const logger = {
+module.exports = {
+  init,
   info: (source, ...args) => writeLog("INFO", source, ...args),
   warn: (source, ...args) => writeLog("WARN", source, ...args),
   error: (source, ...args) => writeLog("ERROR", source, ...args),
   getLogDir: () => LOG_DIR,
   getLogPath,
 };
-
-module.exports = logger;

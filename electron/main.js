@@ -11,6 +11,9 @@ const PROD_PORT = 3099;
 let mainWindow;
 let serverProcess;
 
+// Initialize logger immediately with userData path
+logger.init(app.getPath("userData"));
+
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -26,10 +29,12 @@ if (!gotTheLock) {
   });
 }
 
-logger.info("electron", `NOTICO MAX starting (v${require("../package.json").version})`);
+logger.info("electron", "=== NOTICO MAX STARTING ===");
+logger.info("electron", `Version: ${require("../package.json").version}`);
 logger.info("electron", `Mode: ${isDev ? "development" : "production"}`);
 logger.info("electron", `Platform: ${process.platform} ${process.arch}`);
 logger.info("electron", `Electron: ${process.versions.electron}`);
+logger.info("electron", `User data: ${app.getPath("userData")}`);
 logger.info("electron", `Log directory: ${logger.getLogDir()}`);
 
 function createWindow(url) {
@@ -82,15 +87,12 @@ function findServerJs() {
     return { serverPath: directPath, cwd: standaloneDir };
   }
 
-  // Fallback: search for server.js in subdirectories
   function findFile(dir, filename, depth = 0) {
     if (depth > 4) return null;
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
-        if (entry.isFile() && entry.name === filename) {
-          return dir;
-        }
+        if (entry.isFile() && entry.name === filename) return dir;
         if (entry.isDirectory() && entry.name !== "node_modules" && entry.name !== ".next") {
           const found = findFile(path.join(dir, entry.name), filename, depth + 1);
           if (found) return found;
@@ -124,12 +126,14 @@ function loadEnvFile(envPath) {
           env[key] = value;
         }
       }
-      logger.info("electron", `Loaded env file: ${envPath} (${Object.keys(env).length} vars)`);
+      logger.info("electron", `Loaded .env file: ${envPath} (${Object.keys(env).length} vars)`);
+      // Log keys (not values) for debugging
+      logger.info("electron", `Env keys: ${Object.keys(env).join(", ")}`);
     } else {
-      logger.warn("electron", `No env file found at: ${envPath}`);
+      logger.warn("electron", `No .env file found at: ${envPath}`);
     }
   } catch (err) {
-    logger.error("electron", `Failed to load env file: ${err.message}`);
+    logger.error("electron", `Failed to load .env file: ${err.message}`);
   }
   return env;
 }
@@ -144,7 +148,6 @@ function startProductionServer() {
     // Load .env from the standalone resources
     const envVars = loadEnvFile(path.join(cwd, ".env"));
 
-    // ELECTRON_RUN_AS_NODE=1 makes the Electron binary behave as plain Node.js
     serverProcess = spawn(process.execPath, [serverPath], {
       env: {
         ...process.env,
@@ -160,7 +163,7 @@ function startProductionServer() {
 
     serverProcess.stdout.on("data", (data) => {
       const output = data.toString().trim();
-      logger.info("server", output);
+      if (output) logger.info("server", output);
       if (output.includes("Ready") || output.includes("started") || output.includes("listening")) {
         logger.info("server", `Server is ready on port ${PROD_PORT}`);
         resolve(`http://localhost:${PROD_PORT}`);
@@ -168,7 +171,8 @@ function startProductionServer() {
     });
 
     serverProcess.stderr.on("data", (data) => {
-      logger.error("server", data.toString().trim());
+      const output = data.toString().trim();
+      if (output) logger.error("server", output);
     });
 
     serverProcess.on("error", (err) => {
@@ -180,7 +184,6 @@ function startProductionServer() {
       logger.warn("server", `Process exited with code ${code}, signal ${signal}`);
     });
 
-    // Fallback: if no "Ready" message, try after a delay
     setTimeout(() => {
       logger.warn("server", "No ready signal received, proceeding after timeout.");
       resolve(`http://localhost:${PROD_PORT}`);
@@ -190,7 +193,7 @@ function startProductionServer() {
 
 app.whenReady().then(async () => {
   if (isDev) {
-    logger.info("electron", "Dev mode — connecting to dev server.");
+    logger.info("electron", "Dev mode - connecting to dev server.");
     createWindow(DEV_URL);
   } else {
     try {
@@ -205,25 +208,17 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => {
   logger.info("electron", "All windows closed.");
-  if (serverProcess) {
-    serverProcess.kill();
-  }
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  if (serverProcess) serverProcess.kill();
+  if (process.platform !== "darwin") app.quit();
 });
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    if (isDev) {
-      createWindow(DEV_URL);
-    }
+  if (BrowserWindow.getAllWindows().length === 0 && isDev) {
+    createWindow(DEV_URL);
   }
 });
 
 app.on("before-quit", () => {
   logger.info("electron", "App quitting.");
-  if (serverProcess) {
-    serverProcess.kill();
-  }
+  if (serverProcess) serverProcess.kill();
 });
