@@ -49,6 +49,27 @@ export interface LocalStudySet {
   updatedAt: string;
 }
 
+export interface QuizOption {
+  text: string;
+  isCorrect: boolean;
+}
+
+export interface QuizQuestion {
+  question: string;
+  options: QuizOption[];
+}
+
+export interface LocalQuiz {
+  id?: number;
+  clientId: string;
+  name: string;
+  questions: QuizQuestion[];
+  deleted: boolean;
+  deletedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SyncQueueEntry {
   id?: number;
   action: "create" | "update" | "delete";
@@ -62,6 +83,7 @@ class NoticoDatabase extends Dexie {
   items!: EntityTable<LocalItem, "id">;
   folders!: EntityTable<LocalFolder, "id">;
   studySets!: EntityTable<LocalStudySet, "id">;
+  quizzes!: EntityTable<LocalQuiz, "id">;
   syncQueue!: EntityTable<SyncQueueEntry, "id">;
 
   constructor() {
@@ -82,6 +104,14 @@ class NoticoDatabase extends Dexie {
       items: "++id, clientId, serverId, type, title, updatedAt, pinned, deleted, folderId",
       folders: "++id, clientId, serverId, name, deleted",
       studySets: "++id, clientId, name, deleted",
+      syncQueue: "++id, clientId, action, entityType, timestamp",
+    });
+
+    this.version(4).stores({
+      items: "++id, clientId, serverId, type, title, updatedAt, pinned, deleted, folderId",
+      folders: "++id, clientId, serverId, name, deleted",
+      studySets: "++id, clientId, name, deleted",
+      quizzes: "++id, clientId, name, deleted",
       syncQueue: "++id, clientId, action, entityType, timestamp",
     });
   }
