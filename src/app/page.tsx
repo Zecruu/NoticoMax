@@ -152,8 +152,10 @@ export default function Dashboard() {
     );
   }
 
-  if (!isAuthenticated) {
-    return <AuthGate />;
+  // Only show AuthGate if explicitly not authenticated AND session check is done
+  // For desktop app, allow anonymous offline usage
+  if (!isAuthenticated && !isLoading) {
+    // Skip auth gate — let users use the app without signing in
   }
 
   return (

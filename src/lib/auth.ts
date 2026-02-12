@@ -7,17 +7,21 @@ import bcrypt from "bcryptjs";
 import dbConnect from "@/lib/mongodb";
 import User from "@/models/User";
 
+const hasMongoDb = !!process.env.MONGODB_URI;
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: MongoDBAdapter(clientPromise),
+  adapter: hasMongoDb ? MongoDBAdapter(clientPromise) : undefined,
   session: { strategy: "jwt" },
   pages: {
     signIn: "/auth/sign-in",
   },
   providers: [
-    Google({
-      clientId: process.env.AUTH_GOOGLE_ID!,
-      clientSecret: process.env.AUTH_GOOGLE_SECRET!,
-    }),
+    ...(hasMongoDb && process.env.AUTH_GOOGLE_ID
+      ? [Google({
+          clientId: process.env.AUTH_GOOGLE_ID!,
+          clientSecret: process.env.AUTH_GOOGLE_SECRET!,
+        })]
+      : []),
     Credentials({
       name: "credentials",
       credentials: {
@@ -26,36 +30,43 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
+        if (!hasMongoDb) return null;
 
-        await dbConnect();
-        const user = await User.findOne({ email: credentials.email });
-        if (!user || !user.hashedPassword) return null;
+        try {
+          await dbConnect();
+          const user = await User.findOne({ email: credentials.email });
+          if (!user || !user.hashedPassword) return null;
 
-        const valid = await bcrypt.compare(
-          credentials.password as string,
-          user.hashedPassword
-        );
-        if (!valid) return null;
+          const valid = await bcrypt.compare(
+            credentials.password as string,
+            user.hashedPassword
+          );
+          if (!valid) return null;
 
-        return {
-          id: user._id.toString(),
-          email: user.email,
-          name: user.name,
-          image: user.image,
-        };
+          return {
+            id: user._id.toString(),
+            email: user.email,
+            name: user.name,
+            image: user.image,
+          };
+        } catch {
+          return null;
+        }
       },
     }),
   ],
   callbacks: {
     async jwt({ token, user, trigger, session }) {
-      if (user) {
-        await dbConnect();
-        const dbUser = await User.findOne({ email: user.email });
-        if (dbUser) {
-          token.id = dbUser._id.toString();
-          token.tier = dbUser.tier;
-          token.stripeCustomerId = dbUser.stripeCustomerId;
-        }
+      if (user && hasMongoDb) {
+        try {
+          await dbConnect();
+          const dbUser = await User.findOne({ email: user.email });
+          if (dbUser) {
+            token.id = dbUser._id.toString();
+            token.tier = dbUser.tier;
+            token.stripeCustomerId = dbUser.stripeCustomerId;
+          }
+        } catch {}
       }
       // Allow client to trigger a session update (e.g. after subscription change)
       if (trigger === "update" && session?.tier) {
@@ -72,17 +83,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   events: {
     async createUser({ user }) {
-      // When a new OAuth user is created by the adapter, ensure our User model exists
-      await dbConnect();
-      const existing = await User.findOne({ email: user.email ?? undefined });
-      if (!existing) {
-        await User.create({
-          name: user.name || "User",
-          email: user.email ?? undefined,
-          image: user.image ?? undefined,
-          tier: "free",
-        });
-      }
+      if (!hasMongoDb) return;
+      try {
+        await dbConnect();
+        const existing = await User.findOne({ email: user.email ?? undefined });
+        if (!existing) {
+          await User.create({
+            name: user.name || "User",
+            email: user.email ?? undefined,
+            image: user.image ?? undefined,
+            tier: "free",
+          });
+        }
+      } catch {}
     },
   },
 });

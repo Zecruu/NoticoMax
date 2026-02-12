@@ -14,7 +14,9 @@ export function useSubscription() {
       : "free";
 
   const isProUser = tier === "pro";
-  const isAuthenticated = status === "authenticated";
+  // Treat both authenticated AND unauthenticated as "ready" for the desktop app
+  // Users can use the app offline without signing in
+  const isAuthenticated = status !== "loading";
   const isLoading = status === "loading";
 
   return {

@@ -2,6 +2,7 @@ const { app, BrowserWindow, shell } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
 const fs = require("fs");
+const logger = require("./logger");
 
 const isDev = process.env.NODE_ENV === "development";
 const DEV_URL = "http://localhost:5467";
@@ -13,9 +14,11 @@ let serverProcess;
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
+  logger.info("electron", "Another instance is already running. Quitting.");
   app.quit();
 } else {
   app.on("second-instance", () => {
+    logger.info("electron", "Second instance detected, focusing existing window.");
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
@@ -23,7 +26,15 @@ if (!gotTheLock) {
   });
 }
 
+logger.info("electron", `NOTICO MAX starting (v${require("../package.json").version})`);
+logger.info("electron", `Mode: ${isDev ? "development" : "production"}`);
+logger.info("electron", `Platform: ${process.platform} ${process.arch}`);
+logger.info("electron", `Electron: ${process.versions.electron}`);
+logger.info("electron", `Log directory: ${logger.getLogDir()}`);
+
 function createWindow(url) {
+  logger.info("electron", `Creating window with URL: ${url}`);
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -42,6 +53,14 @@ function createWindow(url) {
   });
 
   mainWindow.loadURL(url);
+
+  mainWindow.webContents.on("did-finish-load", () => {
+    logger.info("electron", "Window finished loading.");
+  });
+
+  mainWindow.webContents.on("did-fail-load", (event, errorCode, errorDescription) => {
+    logger.error("electron", `Window failed to load: ${errorCode} ${errorDescription}`);
+  });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("http")) {
@@ -86,21 +105,50 @@ function findServerJs() {
     return { serverPath: path.join(serverDir, "server.js"), cwd: serverDir };
   }
 
+  logger.error("electron", `server.js not found in ${standaloneDir}`);
   return { serverPath: directPath, cwd: standaloneDir };
+}
+
+function loadEnvFile(envPath) {
+  const env = {};
+  try {
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, "utf-8");
+      for (const line of content.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eqIndex = trimmed.indexOf("=");
+        if (eqIndex > 0) {
+          const key = trimmed.slice(0, eqIndex).trim();
+          const value = trimmed.slice(eqIndex + 1).trim();
+          env[key] = value;
+        }
+      }
+      logger.info("electron", `Loaded env file: ${envPath} (${Object.keys(env).length} vars)`);
+    } else {
+      logger.warn("electron", `No env file found at: ${envPath}`);
+    }
+  } catch (err) {
+    logger.error("electron", `Failed to load env file: ${err.message}`);
+  }
+  return env;
 }
 
 function startProductionServer() {
   return new Promise((resolve, reject) => {
     const { serverPath, cwd } = findServerJs();
 
-    console.log("[electron] Starting server:", serverPath);
-    console.log("[electron] CWD:", cwd);
+    logger.info("server", `Starting Next.js server: ${serverPath}`);
+    logger.info("server", `Working directory: ${cwd}`);
+
+    // Load .env from the standalone resources
+    const envVars = loadEnvFile(path.join(cwd, ".env"));
 
     // ELECTRON_RUN_AS_NODE=1 makes the Electron binary behave as plain Node.js
-    // Without this, spawning process.execPath opens another Electron window
     serverProcess = spawn(process.execPath, [serverPath], {
       env: {
         ...process.env,
+        ...envVars,
         ELECTRON_RUN_AS_NODE: "1",
         PORT: String(PROD_PORT),
         HOSTNAME: "localhost",
@@ -111,24 +159,30 @@ function startProductionServer() {
     });
 
     serverProcess.stdout.on("data", (data) => {
-      const output = data.toString();
-      console.log("[server]", output);
+      const output = data.toString().trim();
+      logger.info("server", output);
       if (output.includes("Ready") || output.includes("started") || output.includes("listening")) {
+        logger.info("server", `Server is ready on port ${PROD_PORT}`);
         resolve(`http://localhost:${PROD_PORT}`);
       }
     });
 
     serverProcess.stderr.on("data", (data) => {
-      console.error("[server]", data.toString());
+      logger.error("server", data.toString().trim());
     });
 
     serverProcess.on("error", (err) => {
-      console.error("[electron] Failed to start server:", err);
+      logger.error("server", `Failed to start: ${err.message}`);
       reject(err);
+    });
+
+    serverProcess.on("exit", (code, signal) => {
+      logger.warn("server", `Process exited with code ${code}, signal ${signal}`);
     });
 
     // Fallback: if no "Ready" message, try after a delay
     setTimeout(() => {
+      logger.warn("server", "No ready signal received, proceeding after timeout.");
       resolve(`http://localhost:${PROD_PORT}`);
     }, 5000);
   });
@@ -136,19 +190,21 @@ function startProductionServer() {
 
 app.whenReady().then(async () => {
   if (isDev) {
+    logger.info("electron", "Dev mode — connecting to dev server.");
     createWindow(DEV_URL);
   } else {
     try {
       const url = await startProductionServer();
       createWindow(url);
     } catch (err) {
-      console.error("[electron] Fatal error starting server:", err);
+      logger.error("electron", `Fatal error starting server: ${err.message}`);
       app.quit();
     }
   }
 });
 
 app.on("window-all-closed", () => {
+  logger.info("electron", "All windows closed.");
   if (serverProcess) {
     serverProcess.kill();
   }
@@ -166,6 +222,7 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", () => {
+  logger.info("electron", "App quitting.");
   if (serverProcess) {
     serverProcess.kill();
   }
