@@ -10,8 +10,7 @@ export function useStudySets() {
 
   const refresh = useCallback(async () => {
     const result = await db.studySets
-      .where("deleted")
-      .equals(0)
+      .filter((set) => !set.deleted)
       .toArray();
     setStudySets(result.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
     setLoading(false);
