@@ -9,6 +9,7 @@ import {
   Plus,
   LayoutDashboard,
   FolderOpen,
+  BookOpen,
   MoreHorizontal,
   Pencil,
   Palette,
@@ -52,7 +53,7 @@ const navItems = [
   { label: "Notes", value: "note", icon: FileText },
   { label: "New", value: "new", icon: Plus },
   { label: "URLs", value: "url", icon: Link2 },
-  { label: "Folders", value: "folders", icon: FolderOpen },
+  { label: "Study", value: "study", icon: BookOpen },
 ];
 
 interface MobileNavProps {
@@ -66,6 +67,8 @@ interface MobileNavProps {
   onAddFolder: (folder: { name: string; color: string }) => Promise<void>;
   onEditFolder: (clientId: string, updates: Partial<LocalFolder>) => Promise<void>;
   onRemoveFolder: (clientId: string) => Promise<void>;
+  activeView?: string;
+  onViewChange?: (view: string) => void;
 }
 
 export function MobileNav({
@@ -79,6 +82,8 @@ export function MobileNav({
   onAddFolder,
   onEditFolder,
   onRemoveFolder,
+  activeView,
+  onViewChange,
 }: MobileNavProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -143,7 +148,7 @@ export function MobileNav({
         {navItems.map((item) => {
           const Icon = item.icon;
           const isNew = item.value === "new";
-          const isFolders = item.value === "folders";
+          const isStudy = item.value === "study";
 
           return (
             <button
@@ -151,20 +156,22 @@ export function MobileNav({
               onClick={() => {
                 if (isNew) {
                   onCreateNew();
-                } else if (isFolders) {
-                  setSheetOpen(true);
+                } else if (isStudy) {
+                  onFolderChange(null);
+                  onViewChange?.("study");
                 } else {
                   onFolderChange(null);
                   onFilterChange(item.value);
+                  onViewChange?.("list");
                 }
               }}
               className={cn(
                 "flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] transition-colors",
                 isNew
                   ? "text-primary"
-                  : isFolders && activeFolder
+                  : isStudy && activeView === "study"
                     ? "text-primary"
-                    : !isFolders && !activeFolder && activeFilter === item.value
+                    : !isNew && !isStudy && !activeFolder && activeFilter === item.value && activeView !== "study"
                       ? "text-primary"
                       : "text-muted-foreground"
               )}

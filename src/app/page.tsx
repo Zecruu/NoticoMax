@@ -12,6 +12,7 @@ import { ItemDialog } from "@/components/items/item-dialog";
 import { SearchCommand } from "@/components/items/search-bar";
 import { TrashView } from "@/components/items/trash-view";
 import { CalendarView } from "@/components/calendar/calendar-view";
+import { StudyView } from "@/components/study/study-view";
 import { useSubscription } from "@/hooks/use-subscription";
 import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
@@ -213,6 +214,8 @@ export default function Dashboard() {
               onToggleComplete={handleToggleComplete}
               onCreateReminder={() => handleCreateWithType("reminder")}
             />
+          ) : activeView === "study" ? (
+            <StudyView />
           ) : (
             <ItemList
               items={displayedItems}
@@ -242,6 +245,8 @@ export default function Dashboard() {
         onAddFolder={addFolder}
         onEditFolder={editFolder}
         onRemoveFolder={removeFolder}
+        activeView={activeView}
+        onViewChange={setActiveView}
       />
 
       <ItemDialog

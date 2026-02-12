@@ -33,6 +33,22 @@ export interface LocalFolder {
   updatedAt: string;
 }
 
+export interface StudyCard {
+  term: string;
+  definition: string;
+}
+
+export interface LocalStudySet {
+  id?: number;
+  clientId: string;
+  name: string;
+  cards: StudyCard[];
+  deleted: boolean;
+  deletedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SyncQueueEntry {
   id?: number;
   action: "create" | "update" | "delete";
@@ -45,6 +61,7 @@ export interface SyncQueueEntry {
 class NoticoDatabase extends Dexie {
   items!: EntityTable<LocalItem, "id">;
   folders!: EntityTable<LocalFolder, "id">;
+  studySets!: EntityTable<LocalStudySet, "id">;
   syncQueue!: EntityTable<SyncQueueEntry, "id">;
 
   constructor() {
@@ -58,6 +75,13 @@ class NoticoDatabase extends Dexie {
     this.version(2).stores({
       items: "++id, clientId, serverId, type, title, updatedAt, pinned, deleted, folderId",
       folders: "++id, clientId, serverId, name, deleted",
+      syncQueue: "++id, clientId, action, entityType, timestamp",
+    });
+
+    this.version(3).stores({
+      items: "++id, clientId, serverId, type, title, updatedAt, pinned, deleted, folderId",
+      folders: "++id, clientId, serverId, name, deleted",
+      studySets: "++id, clientId, name, deleted",
       syncQueue: "++id, clientId, action, entityType, timestamp",
     });
   }
