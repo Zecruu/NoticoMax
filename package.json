@@ -9,9 +9,9 @@
     "start": "next start",
     "lint": "eslint",
     "electron:dev": "concurrently \"next dev -p 5467\" \"wait-on http://localhost:5467 && NODE_ENV=development electron .\"",
-    "electron:build": "next build && node scripts/fix-standalone.js && electron-builder --win --publish never",
-    "electron:build:mac": "next build && electron-builder --mac --publish never",
-    "electron:build:linux": "next build && electron-builder --linux --publish never"
+    "electron:build": "node scripts/inject-env.js inject && next build && node scripts/fix-standalone.js && electron-builder --win --publish never && node scripts/inject-env.js restore",
+    "electron:build:mac": "node scripts/inject-env.js inject && next build && electron-builder --mac --publish never && node scripts/inject-env.js restore",
+    "electron:build:linux": "node scripts/inject-env.js inject && next build && electron-builder --linux --publish never && node scripts/inject-env.js restore"
   },
   "build": {
     "appId": "com.noticomax.app",
