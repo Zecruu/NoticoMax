@@ -8,6 +8,19 @@ const isDev = process.env.NODE_ENV === "development";
 const DEV_URL = "http://localhost:5467";
 const PROD_PORT = 3099;
 
+// Embedded app configuration (packed inside app.asar, not a plaintext file)
+// Replace placeholder values with real ones before building the installer
+const APP_ENV = {
+  MONGODB_URI: "REPLACE_WITH_YOUR_MONGODB_URI",
+  AUTH_SECRET: "REPLACE_WITH_YOUR_AUTH_SECRET",
+  AUTH_TRUST_HOST: "true",
+  AUTH_GOOGLE_ID: "placeholder",
+  AUTH_GOOGLE_SECRET: "placeholder",
+  STRIPE_SECRET_KEY: "sk_test_placeholder",
+  STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+  NEXT_PUBLIC_APP_URL: `http://localhost:${PROD_PORT}`,
+};
+
 let mainWindow;
 let serverProcess;
 
@@ -91,7 +104,7 @@ function createWindow(url) {
       nodeIntegration: false,
       contextIsolation: true,
     },
-    autoHideMenuBar: true,
+    autoHideMenuBar: false,
   });
 
   mainWindow.loadURL(url);
@@ -148,47 +161,18 @@ function findServerJs() {
   return { serverPath: directPath, cwd: standaloneDir };
 }
 
-function loadEnvFile(envPath) {
-  const env = {};
-  try {
-    if (fs.existsSync(envPath)) {
-      const content = fs.readFileSync(envPath, "utf-8");
-      for (const line of content.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) continue;
-        const eqIndex = trimmed.indexOf("=");
-        if (eqIndex > 0) {
-          const key = trimmed.slice(0, eqIndex).trim();
-          const value = trimmed.slice(eqIndex + 1).trim();
-          env[key] = value;
-        }
-      }
-      logger.info("electron", `Loaded .env file: ${envPath} (${Object.keys(env).length} vars)`);
-      // Log keys (not values) for debugging
-      logger.info("electron", `Env keys: ${Object.keys(env).join(", ")}`);
-    } else {
-      logger.warn("electron", `No .env file found at: ${envPath}`);
-    }
-  } catch (err) {
-    logger.error("electron", `Failed to load .env file: ${err.message}`);
-  }
-  return env;
-}
-
 function startProductionServer() {
   return new Promise((resolve, reject) => {
     const { serverPath, cwd } = findServerJs();
 
     logger.info("server", `Starting Next.js server: ${serverPath}`);
     logger.info("server", `Working directory: ${cwd}`);
-
-    // Load .env from the standalone resources
-    const envVars = loadEnvFile(path.join(cwd, ".env"));
+    logger.info("server", `Env keys: ${Object.keys(APP_ENV).join(", ")}`);
 
     serverProcess = spawn(process.execPath, [serverPath], {
       env: {
         ...process.env,
-        ...envVars,
+        ...APP_ENV,
         ELECTRON_RUN_AS_NODE: "1",
         PORT: String(PROD_PORT),
         HOSTNAME: "localhost",
