@@ -78,6 +78,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             token.id = dbUser._id.toString();
             token.tier = dbUser.tier;
             token.stripeCustomerId = dbUser.stripeCustomerId;
+            token.tierCheckedAt = Date.now();
           }
         } catch (err) {
           console.error("[auth] JWT callback error:", err);
@@ -85,6 +86,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       if (trigger === "update" && session?.tier) {
         token.tier = session.tier;
+      }
+      // Re-check tier from database every 5 minutes so admin changes propagate
+      const fiveMinutes = 5 * 60 * 1000;
+      const lastCheck = (token.tierCheckedAt as number) || 0;
+      if (mongoUri && token.id && Date.now() - lastCheck > fiveMinutes) {
+        try {
+          await dbConnect();
+          const dbUser = await User.findById(token.id);
+          if (dbUser) {
+            token.tier = dbUser.tier;
+            token.stripeCustomerId = dbUser.stripeCustomerId;
+          }
+          token.tierCheckedAt = Date.now();
+        } catch (err) {
+          console.error("[auth] Tier re-check error:", err);
+        }
       }
       return token;
     },
