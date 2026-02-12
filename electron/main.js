@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, shell, Menu } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
 const fs = require("fs");
@@ -28,6 +28,43 @@ if (!gotTheLock) {
     }
   });
 }
+
+// Build app menu with Help > Open Logs Folder
+const menuTemplate = [
+  {
+    label: "File",
+    submenu: [
+      { role: "quit" },
+    ],
+  },
+  {
+    label: "Edit",
+    submenu: [
+      { role: "undo" },
+      { role: "redo" },
+      { type: "separator" },
+      { role: "cut" },
+      { role: "copy" },
+      { role: "paste" },
+      { role: "selectAll" },
+    ],
+  },
+  {
+    label: "Help",
+    submenu: [
+      {
+        label: "Open Logs Folder",
+        click: () => {
+          const logDir = logger.getLogDir();
+          if (logDir) {
+            shell.openPath(logDir);
+          }
+        },
+      },
+    ],
+  },
+];
+Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
 
 logger.info("electron", "=== NOTICO MAX STARTING ===");
 logger.info("electron", `Version: ${require("../package.json").version}`);
