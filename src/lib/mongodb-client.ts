@@ -1,18 +1,16 @@
 import { MongoClient } from "mongodb";
-import dns from "node:dns";
 
-// Ensure DNS resolvers support SRV record lookups (required for mongodb+srv://)
-// Electron production builds may use system DNS that refuses SRV queries
-try {
-  const servers = dns.getServers();
-  const hasPublicDns = servers.some(
-    (s) => s === "8.8.8.8" || s === "8.8.4.4" || s === "1.1.1.1" || s === "1.0.0.1"
-  );
-  if (!hasPublicDns) {
-    dns.setServers([...servers, "8.8.8.8", "1.1.1.1"]);
+// Add public DNS fallbacks so mongodb+srv:// SRV lookups work in Electron
+function ensureDns() {
+  try {
+    const dns = require("node:dns");
+    const servers: string[] = dns.getServers();
+    if (!servers.some((s: string) => s === "8.8.8.8" || s === "1.1.1.1")) {
+      dns.setServers([...servers, "8.8.8.8", "1.1.1.1"]);
+    }
+  } catch {
+    // Not available in Edge Runtime — ignored
   }
-} catch {
-  // Ignore — non-critical if this fails
 }
 
 declare global {
@@ -26,6 +24,7 @@ const MONGO_OPTIONS = {
 };
 
 function connectWithRetry(uri: string): Promise<MongoClient> {
+  ensureDns();
   const client = new MongoClient(uri, MONGO_OPTIONS);
   return client.connect().catch(async (err) => {
     console.warn("[mongodb-client] First connection attempt failed, retrying...", err.message);
