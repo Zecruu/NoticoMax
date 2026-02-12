@@ -32,9 +32,11 @@ interface ItemDialogProps {
   editingItem?: LocalItem | null;
   folders: LocalFolder[];
   defaultFolderId?: string | null;
+  defaultType?: ItemType;
+  allTags?: string[];
 }
 
-export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folders, defaultFolderId }: ItemDialogProps) {
+export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folders, defaultFolderId, defaultType = "note", allTags = [] }: ItemDialogProps) {
   const [type, setType] = useState<ItemType>("note");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -61,7 +63,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
       setPinned(editingItem.pinned);
       setFolderId(editingItem.folderId || undefined);
     } else {
-      setType("note");
+      setType(defaultType);
       setTitle("");
       setContent("");
       setUrl("");
@@ -71,7 +73,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
       setFolderId(defaultFolderId || undefined);
     }
     setPreviewing(false);
-  }, [editingItem, open, defaultFolderId]);
+  }, [editingItem, open, defaultFolderId, defaultType]);
 
   const handleAddTag = () => {
     const tag = tagInput.trim();
@@ -293,6 +295,29 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
                     </button>
                   </Badge>
                 ))}
+              </div>
+            )}
+            {allTags.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[10px] text-muted-foreground">Suggestions</p>
+                <div className="flex flex-wrap gap-1">
+                  {allTags
+                    .filter((t) => !tags.includes(t) && (!tagInput || t.toLowerCase().includes(tagInput.toLowerCase())))
+                    .slice(0, 8)
+                    .map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => {
+                          if (!tags.includes(tag)) setTags([...tags, tag]);
+                          setTagInput("");
+                        }}
+                        className="rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                      >
+                        + {tag}
+                      </button>
+                    ))}
+                </div>
               </div>
             )}
           </div>

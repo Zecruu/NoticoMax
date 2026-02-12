@@ -25,6 +25,7 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<LocalItem | null>(null);
+  const [defaultType, setDefaultType] = useState<"note" | "url" | "reminder">("note");
 
   const { tier, session, isAuthenticated, isLoading } = useSubscription();
 
@@ -87,6 +88,13 @@ export default function Dashboard() {
 
   const handleCreateNew = useCallback(() => {
     setEditingItem(null);
+    setDefaultType("note");
+    setDialogOpen(true);
+  }, []);
+
+  const handleCreateWithType = useCallback((type: "note" | "url" | "reminder") => {
+    setEditingItem(null);
+    setDefaultType(type);
     setDialogOpen(true);
   }, []);
 
@@ -201,7 +209,9 @@ export default function Dashboard() {
             <CalendarView
               items={reminderItems}
               onEdit={handleEdit}
+              onDelete={handleDelete}
               onToggleComplete={handleToggleComplete}
+              onCreateReminder={() => handleCreateWithType("reminder")}
             />
           ) : (
             <ItemList
@@ -214,6 +224,8 @@ export default function Dashboard() {
               onToggleComplete={handleToggleComplete}
               activeFilter={activeFilter}
               activeFolder={activeFolder}
+              onCreateWithType={handleCreateWithType}
+              onCreateNew={handleCreateNew}
             />
           )}
         </main>
@@ -243,6 +255,8 @@ export default function Dashboard() {
         editingItem={editingItem}
         folders={folders}
         defaultFolderId={activeFolder}
+        defaultType={defaultType}
+        allTags={allTags}
       />
 
       <SearchCommand onSelect={handleSearchSelect} />

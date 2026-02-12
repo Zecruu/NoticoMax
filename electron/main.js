@@ -11,8 +11,8 @@ const PROD_PORT = 3099;
 // Embedded app configuration (packed inside app.asar, not a plaintext file)
 // Replace placeholder values with real ones before building the installer
 const APP_ENV = {
-  MONGODB_URI: "REPLACE_WITH_YOUR_MONGODB_URI",
-  AUTH_SECRET: "REPLACE_WITH_YOUR_AUTH_SECRET",
+  MONGODB_URI: "placeholder",
+  AUTH_SECRET: "placeholder",
   AUTH_TRUST_HOST: "true",
   AUTH_GOOGLE_ID: "placeholder",
   AUTH_GOOGLE_SECRET: "placeholder",

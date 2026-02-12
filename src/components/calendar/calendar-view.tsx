@@ -4,13 +4,15 @@ import { useState, useMemo } from "react";
 import { type LocalItem } from "@/lib/db/indexed-db";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ChevronLeft, ChevronRight, CheckCircle2, Circle, Calendar } from "lucide-react";
+import { ChevronLeft, ChevronRight, CheckCircle2, Circle, Calendar, Plus, Pencil, Trash2, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface CalendarViewProps {
   items: LocalItem[];
   onEdit: (item: LocalItem) => void;
+  onDelete?: (clientId: string) => void;
   onToggleComplete: (clientId: string, completed: boolean) => void;
+  onCreateReminder?: () => void;
 }
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -27,7 +29,12 @@ function isSameDay(d1: Date, d2: Date) {
   );
 }
 
-export function CalendarView({ items, onEdit, onToggleComplete }: CalendarViewProps) {
+function formatTime(dateStr: string) {
+  const d = new Date(dateStr);
+  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+export function CalendarView({ items, onEdit, onDelete, onToggleComplete, onCreateReminder }: CalendarViewProps) {
   const today = new Date();
   const [currentMonth, setCurrentMonth] = useState(today.getMonth());
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
@@ -180,13 +187,21 @@ export function CalendarView({ items, onEdit, onToggleComplete }: CalendarViewPr
       {/* Selected date reminders */}
       {selectedDate && (
         <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">
-            {selectedDate.toLocaleDateString("en-US", {
-              weekday: "long",
-              month: "long",
-              day: "numeric",
-            })}
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-muted-foreground">
+              {selectedDate.toLocaleDateString("en-US", {
+                weekday: "long",
+                month: "long",
+                day: "numeric",
+              })}
+            </h3>
+            {onCreateReminder && (
+              <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={onCreateReminder}>
+                <Plus className="h-3 w-3" />
+                Add Reminder
+              </Button>
+            )}
+          </div>
 
           {selectedItems.length === 0 ? (
             <p className="text-xs text-muted-foreground/60 py-4 text-center">
@@ -197,14 +212,10 @@ export function CalendarView({ items, onEdit, onToggleComplete }: CalendarViewPr
               {selectedItems.map((item) => (
                 <div
                   key={item.clientId}
-                  className="flex items-center gap-3 rounded-lg border p-3 cursor-pointer hover:bg-muted/50 transition-colors"
-                  onClick={() => onEdit(item)}
+                  className="flex items-center gap-3 rounded-lg border p-3 hover:bg-muted/50 transition-colors"
                 >
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleComplete(item.clientId, !!item.reminderCompleted);
-                    }}
+                    onClick={() => onToggleComplete(item.clientId, !!item.reminderCompleted)}
                     className="shrink-0"
                   >
                     {item.reminderCompleted ? (
@@ -222,17 +233,43 @@ export function CalendarView({ items, onEdit, onToggleComplete }: CalendarViewPr
                     >
                       {item.title}
                     </p>
-                    {item.content && (
-                      <p className="text-xs text-muted-foreground truncate">
-                        {item.content}
-                      </p>
-                    )}
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {item.reminderDate && (
+                        <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <Clock className="h-3 w-3" />
+                          {formatTime(item.reminderDate)}
+                        </span>
+                      )}
+                      {item.content && (
+                        <p className="text-xs text-muted-foreground truncate">
+                          {item.content}
+                        </p>
+                      )}
+                    </div>
                   </div>
                   {item.tags.length > 0 && (
                     <Badge variant="secondary" className="text-[10px] shrink-0">
                       {item.tags[0]}
                     </Badge>
                   )}
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <button
+                      onClick={() => onEdit(item)}
+                      className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                      title="Edit"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    {onDelete && (
+                      <button
+                        onClick={() => onDelete(item.clientId)}
+                        className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-muted transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -248,6 +285,12 @@ export function CalendarView({ items, onEdit, onToggleComplete }: CalendarViewPr
           <p className="text-xs text-muted-foreground/60 mt-1">
             Create a reminder to see it on the calendar
           </p>
+          {onCreateReminder && (
+            <Button size="sm" className="mt-4 gap-1.5" onClick={onCreateReminder}>
+              <Plus className="h-3.5 w-3.5" />
+              Add Reminder
+            </Button>
+          )}
         </div>
       )}
     </div>
