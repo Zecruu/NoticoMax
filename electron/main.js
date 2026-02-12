@@ -177,11 +177,20 @@ function startProductionServer() {
   return new Promise((resolve, reject) => {
     const { serverPath, cwd } = findServerJs();
 
+    // Write a DNS fix script that runs before the server starts.
+    // mongodb+srv:// needs DNS SRV lookups which can fail with the default
+    // system DNS in Electron. Public DNS servers (Google/Cloudflare) support SRV.
+    const dnsFixPath = path.join(cwd, "_dns-fix.js");
+    fs.writeFileSync(
+      dnsFixPath,
+      'try{const d=require("dns");const s=d.getServers();if(!s.some(x=>x==="8.8.8.8"||x==="1.1.1.1")){d.setServers(s.concat(["8.8.8.8","8.8.4.4","1.1.1.1"]))}}catch(e){}'
+    );
+
     logger.info("server", `Starting Next.js server: ${serverPath}`);
     logger.info("server", `Working directory: ${cwd}`);
     logger.info("server", `Env keys: ${Object.keys(APP_ENV).join(", ")}`);
 
-    serverProcess = spawn(process.execPath, [serverPath], {
+    serverProcess = spawn(process.execPath, ["--require", dnsFixPath, serverPath], {
       env: {
         ...process.env,
         ...APP_ENV,
