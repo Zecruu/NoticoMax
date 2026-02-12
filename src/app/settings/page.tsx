@@ -5,7 +5,7 @@ import { signOut } from "next-auth/react";
 import { useSubscription } from "@/hooks/use-subscription";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Crown, LogIn, Download, Upload, Key, Copy, RefreshCw } from "lucide-react";
+import { ArrowLeft, Crown, LogIn, Download, Upload, Key, Copy, RefreshCw, Monitor, RotateCw } from "lucide-react";
 import { exportData, importData } from "@/lib/import-export";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -17,6 +17,18 @@ export default function SettingsPage() {
   const [apiToken, setApiToken] = useState<string | null>(null);
   const [tokenLoading, setTokenLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isDesktop = typeof window !== "undefined" && window.electronAPI?.isElectron;
+  const [appVersion, setAppVersion] = useState<string>("");
+  const [updateInfo, setUpdateInfo] = useState<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string; error?: string } | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [openAtLogin, setOpenAtLogin] = useState(false);
+
+  useEffect(() => {
+    if (window.electronAPI?.isElectron) {
+      window.electronAPI.getAppVersion().then(setAppVersion);
+      window.electronAPI.getOpenAtLogin().then(setOpenAtLogin);
+    }
+  }, []);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -78,6 +90,101 @@ export default function SettingsPage() {
       </header>
 
       <main className="mx-auto max-w-2xl p-4 md:p-6 space-y-6">
+        {/* App (Desktop only) */}
+        {isDesktop && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">App</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Version</p>
+                  <p className="text-xs text-muted-foreground">{appVersion || "..."}</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={checkingUpdate}
+                  onClick={async () => {
+                    setCheckingUpdate(true);
+                    setUpdateInfo(null);
+                    try {
+                      const info = await window.electronAPI!.checkForUpdate();
+                      setUpdateInfo(info);
+                      if (!info.hasUpdate && !info.error) {
+                        toast.success("You're on the latest version");
+                      }
+                    } catch {
+                      toast.error("Failed to check for updates");
+                    }
+                    setCheckingUpdate(false);
+                  }}
+                >
+                  <RotateCw className={`h-3.5 w-3.5 ${checkingUpdate ? "animate-spin" : ""}`} />
+                  {checkingUpdate ? "Checking..." : "Check for Update"}
+                </Button>
+              </div>
+
+              {updateInfo?.hasUpdate && (
+                <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
+                  <p className="text-sm font-medium">
+                    Update available: v{updateInfo.latestVersion}
+                  </p>
+                  <Button
+                    size="sm"
+                    className="mt-2 gap-1.5"
+                    onClick={() => {
+                      if (updateInfo.downloadUrl) {
+                        window.electronAPI!.openDownloadUrl(updateInfo.downloadUrl);
+                      }
+                    }}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Download Update
+                  </Button>
+                </div>
+              )}
+
+              {updateInfo?.error && (
+                <p className="text-sm text-destructive">
+                  Could not check for updates: {updateInfo.error}
+                </p>
+              )}
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Open on Startup</p>
+                  <p className="text-xs text-muted-foreground">
+                    Launch NOTICO MAX when you start your computer
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={openAtLogin}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                    openAtLogin ? "bg-primary" : "bg-muted"
+                  }`}
+                  onClick={async () => {
+                    const newValue = !openAtLogin;
+                    setOpenAtLogin(newValue);
+                    await window.electronAPI!.setOpenAtLogin(newValue);
+                    toast.success(newValue ? "Will open on startup" : "Won't open on startup");
+                  }}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                      openAtLogin ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Account */}
         <Card>
           <CardHeader>

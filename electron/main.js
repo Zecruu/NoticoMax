@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, Menu } = require("electron");
+const { app, BrowserWindow, shell, Menu, ipcMain } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
 const fs = require("fs");
@@ -211,6 +211,64 @@ function startProductionServer() {
     }, 5000);
   });
 }
+
+// --- IPC Handlers ---
+
+ipcMain.handle("get-app-version", () => {
+  return app.getVersion();
+});
+
+ipcMain.handle("check-for-update", async () => {
+  try {
+    const https = require("https");
+    const data = await new Promise((resolve, reject) => {
+      const req = https.get(
+        "https://api.github.com/repos/Zecruu/NoticoMax/releases/latest",
+        { headers: { "User-Agent": "NoticoMax" } },
+        (res) => {
+          let body = "";
+          res.on("data", (chunk) => (body += chunk));
+          res.on("end", () => resolve(JSON.parse(body)));
+        }
+      );
+      req.on("error", reject);
+      req.setTimeout(10000, () => req.destroy());
+    });
+
+    const currentVersion = app.getVersion();
+    const latestVersion = (data.tag_name || "").replace(/^v/, "");
+    const hasUpdate = latestVersion && latestVersion !== currentVersion;
+
+    // Find the .exe asset download URL
+    const exeAsset = (data.assets || []).find((a) => a.name.endsWith(".exe"));
+    const downloadUrl = exeAsset
+      ? exeAsset.browser_download_url
+      : data.html_url;
+
+    return { hasUpdate, currentVersion, latestVersion, downloadUrl };
+  } catch (err) {
+    logger.error("electron", `Update check failed: ${err.message}`);
+    return { hasUpdate: false, error: err.message };
+  }
+});
+
+ipcMain.handle("open-download-url", (event, url) => {
+  if (url && url.startsWith("https://")) {
+    shell.openExternal(url);
+  }
+});
+
+ipcMain.handle("get-open-at-login", () => {
+  return app.getLoginItemSettings().openAtLogin;
+});
+
+ipcMain.handle("set-open-at-login", (event, enabled) => {
+  app.setLoginItemSettings({ openAtLogin: enabled });
+  logger.info("electron", `Open at login set to: ${enabled}`);
+  return enabled;
+});
+
+// --- App Startup ---
 
 app.whenReady().then(async () => {
   if (isDev) {
