@@ -37,7 +37,7 @@
     ],
     "win": {
       "target": ["nsis"],
-      "icon": "public/logo.png"
+      "icon": "public/logo.ico"
     },
     "mac": {
       "target": ["dmg"],
@@ -53,8 +53,8 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "installerIcon": "public/logo.png",
-      "uninstallerIcon": "public/logo.png"
+      "installerIcon": "public/logo.ico",
+      "uninstallerIcon": "public/logo.ico"
     }
   },
   "dependencies": {
