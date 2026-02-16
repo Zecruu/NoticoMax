@@ -47,6 +47,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
   const [pinned, setPinned] = useState(false);
   const [folderId, setFolderId] = useState<string | undefined>(undefined);
   const [previewing, setPreviewing] = useState(false);
+  const [activeListMode, setActiveListMode] = useState<"bullet" | "numbered" | "lettered" | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleContentKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -89,6 +90,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
       // Empty list item — remove the prefix and exit list mode
       const newContent = text.slice(0, lineStart) + text.slice(start);
       setContent(newContent);
+      setActiveListMode(null);
       requestAnimationFrame(() => {
         ta.focus();
         ta.setSelectionRange(lineStart, lineStart);
@@ -122,26 +124,27 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
     const selectedBlock = text.slice(lineStart, blockEnd);
     const lines = selectedBlock.split("\n");
 
-    // Check if all lines already have this prefix (for toggling off)
+    // Check if non-empty lines already have this prefix (for toggling off)
     const prefixPatterns = {
       bullet: /^- /,
       numbered: /^\d+\. /,
       lettered: /^[a-z]\. /,
     };
-    const allHavePrefix = lines.every(
-      (line) => line.trim() === "" || prefixPatterns[mode].test(line)
+    const nonEmptyLines = lines.filter((line) => line.trim() !== "");
+    const allHavePrefix = nonEmptyLines.length > 0 && nonEmptyLines.every(
+      (line) => prefixPatterns[mode].test(line)
     );
 
     let newLines: string[];
     if (allHavePrefix) {
       // Toggle off: remove prefixes
       newLines = lines.map((line) => line.replace(prefixPatterns[mode], ""));
+      setActiveListMode(null);
     } else {
       // Strip any existing list prefix first, then add new one
       const stripAll = /^(?:- |\d+\. |[a-z]\. )/;
       newLines = lines.map((line, i) => {
         const stripped = line.replace(stripAll, "");
-        if (stripped.trim() === "" && line.trim() === "") return line;
         switch (mode) {
           case "bullet":
             return `- ${stripped}`;
@@ -151,6 +154,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
             return `${String.fromCharCode(97 + i)}. ${stripped}`;
         }
       });
+      setActiveListMode(mode);
     }
 
     const newBlock = newLines.join("\n");
@@ -190,6 +194,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
       setFolderId(defaultFolderId || undefined);
     }
     setPreviewing(false);
+    setActiveListMode(null);
   }, [editingItem, open, defaultFolderId, defaultType]);
 
   const handleAddTag = () => {
@@ -366,24 +371,33 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
               <div className="flex items-center gap-0.5 rounded-md border p-0.5 w-fit">
                 <button
                   type="button"
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => insertListPrefix("bullet")}
-                  className="flex items-center gap-1 rounded-sm px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  className={`flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors ${
+                    activeListMode === "bullet" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
                   title="Bullet list"
                 >
                   <List className="h-3.5 w-3.5" />
                 </button>
                 <button
                   type="button"
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => insertListPrefix("numbered")}
-                  className="flex items-center gap-1 rounded-sm px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  className={`flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors ${
+                    activeListMode === "numbered" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
                   title="Numbered list"
                 >
                   <ListOrdered className="h-3.5 w-3.5" />
                 </button>
                 <button
                   type="button"
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => insertListPrefix("lettered")}
-                  className="flex items-center gap-1 rounded-sm px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  className={`flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors ${
+                    activeListMode === "lettered" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
                   title="Lettered list (a, b, c)"
                 >
                   <ALargeSmall className="h-3.5 w-3.5" />
