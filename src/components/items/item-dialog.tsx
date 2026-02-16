@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { type LocalItem, type ItemType, type LocalFolder } from "@/lib/db/indexed-db";
 import {
   Dialog,
@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Link2, Bell, X, Eye, Pencil } from "lucide-react";
+import { FileText, Link2, Bell, X, Eye, Pencil, List, ListOrdered, ALargeSmall } from "lucide-react";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 
 interface ItemDialogProps {
@@ -47,6 +47,66 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
   const [pinned, setPinned] = useState(false);
   const [folderId, setFolderId] = useState<string | undefined>(undefined);
   const [previewing, setPreviewing] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const insertListPrefix = useCallback((mode: "bullet" | "numbered" | "lettered") => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const text = ta.value;
+
+    // Find the start of the first selected line and end of the last
+    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+    const lineEnd = text.indexOf("\n", end);
+    const blockEnd = lineEnd === -1 ? text.length : lineEnd;
+
+    const selectedBlock = text.slice(lineStart, blockEnd);
+    const lines = selectedBlock.split("\n");
+
+    // Check if all lines already have this prefix (for toggling off)
+    const prefixPatterns = {
+      bullet: /^- /,
+      numbered: /^\d+\. /,
+      lettered: /^[a-z]\. /,
+    };
+    const allHavePrefix = lines.every(
+      (line) => line.trim() === "" || prefixPatterns[mode].test(line)
+    );
+
+    let newLines: string[];
+    if (allHavePrefix) {
+      // Toggle off: remove prefixes
+      newLines = lines.map((line) => line.replace(prefixPatterns[mode], ""));
+    } else {
+      // Strip any existing list prefix first, then add new one
+      const stripAll = /^(?:- |\d+\. |[a-z]\. )/;
+      newLines = lines.map((line, i) => {
+        const stripped = line.replace(stripAll, "");
+        if (stripped.trim() === "" && line.trim() === "") return line;
+        switch (mode) {
+          case "bullet":
+            return `- ${stripped}`;
+          case "numbered":
+            return `${i + 1}. ${stripped}`;
+          case "lettered":
+            return `${String.fromCharCode(97 + i)}. ${stripped}`;
+        }
+      });
+    }
+
+    const newBlock = newLines.join("\n");
+    const newContent = text.slice(0, lineStart) + newBlock + text.slice(blockEnd);
+    setContent(newContent);
+
+    // Restore focus and cursor after React re-render
+    requestAnimationFrame(() => {
+      ta.focus();
+      const newEnd = lineStart + newBlock.length;
+      ta.setSelectionRange(newEnd, newEnd);
+    });
+  }, []);
 
   useEffect(() => {
     if (editingItem) {
@@ -245,12 +305,41 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
                 </div>
               )}
             </div>
+            {type === "note" && !previewing && (
+              <div className="flex items-center gap-0.5 rounded-md border p-0.5 w-fit">
+                <button
+                  type="button"
+                  onClick={() => insertListPrefix("bullet")}
+                  className="flex items-center gap-1 rounded-sm px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  title="Bullet list"
+                >
+                  <List className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertListPrefix("numbered")}
+                  className="flex items-center gap-1 rounded-sm px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  title="Numbered list"
+                >
+                  <ListOrdered className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertListPrefix("lettered")}
+                  className="flex items-center gap-1 rounded-sm px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  title="Lettered list (a, b, c)"
+                >
+                  <ALargeSmall className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
             {previewing && type === "note" ? (
               <div className="min-h-[150px] max-h-[300px] overflow-auto rounded-md border bg-background p-3">
                 <MarkdownRenderer content={content} />
               </div>
             ) : (
               <Textarea
+                ref={type === "note" ? textareaRef : undefined}
                 id="content"
                 placeholder={
                   type === "note"
