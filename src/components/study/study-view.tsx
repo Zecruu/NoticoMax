@@ -14,7 +14,7 @@ import { QuizSummary } from "./quiz-summary";
 import { QuizShareButton } from "./quiz-share-button";
 import { Button } from "@/components/ui/button";
 import { BookOpen, Plus, Pencil, Trash2, Layers, ClipboardCheck } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/native-toast";
 
 type ViewState =
   | { screen: "list" }

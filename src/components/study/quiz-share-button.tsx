@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { type LocalQuiz } from "@/lib/db/indexed-db";
 import { Share2, Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/native-toast";
 
 interface QuizShareButtonProps {
   quiz: LocalQuiz;

@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check, Crown, ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { isCapacitorNative } from "@/lib/platform";
+import { openInBrowser } from "@/lib/capacitor/auth-helpers";
 
 export default function PricingPage() {
   const { isAuthenticated, isProUser } = useSubscription();
@@ -23,13 +25,17 @@ export default function PricingPage() {
     setLoading(false);
 
     if (data.url) {
-      window.location.href = data.url;
+      if (isCapacitorNative()) {
+        await openInBrowser(data.url);
+      } else {
+        window.location.href = data.url;
+      }
     }
   };
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
+      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur pt-[env(safe-area-inset-top)]">
         <div className="flex h-14 items-center gap-4 px-4 md:px-6">
           <Link href="/">
             <Button variant="ghost" size="icon">

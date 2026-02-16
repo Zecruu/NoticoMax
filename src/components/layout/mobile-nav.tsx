@@ -40,7 +40,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { toast } from "sonner";
+import { toast } from "@/lib/native-toast";
 
 const PRESET_COLORS = [
   "#ef4444", "#f97316", "#eab308", "#22c55e",
@@ -144,7 +144,7 @@ export function MobileNav({
 
   return (
     <>
-      <nav className="fixed bottom-0 left-0 right-0 z-50 flex md:hidden border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 flex md:hidden border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 pb-[env(safe-area-inset-bottom)]">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isNew = item.value === "new";

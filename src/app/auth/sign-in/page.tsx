@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import Link from "next/link";
+import { isCapacitorNative } from "@/lib/platform";
+import { openOAuthInBrowser } from "@/lib/capacitor/auth-helpers";
 
 export default function SignInPage() {
   const router = useRouter();
@@ -37,7 +39,11 @@ export default function SignInPage() {
     }
   };
 
-  const handleGoogle = () => {
+  const handleGoogle = async () => {
+    if (isCapacitorNative()) {
+      await openOAuthInBrowser("google");
+      return;
+    }
     signIn("google", { callbackUrl: "/" });
   };
 

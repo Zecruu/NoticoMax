@@ -5,10 +5,12 @@ import { signOut } from "next-auth/react";
 import { useSubscription } from "@/hooks/use-subscription";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Crown, LogIn, Download, Upload, Key, Copy, RefreshCw, RotateCw } from "lucide-react";
+import { ArrowLeft, Crown, LogIn, Download, Upload, Key, Copy, RefreshCw, RotateCw, Fingerprint, BellRing } from "lucide-react";
 import { exportData, importData } from "@/lib/import-export";
-import { toast } from "sonner";
+import { toast } from "@/lib/native-toast";
 import Link from "next/link";
+import { isCapacitorNative } from "@/lib/platform";
+import { checkBiometricAvailability } from "@/lib/capacitor/biometric-auth";
 
 export default function SettingsPage() {
   const { session, isAuthenticated, isProUser, tier } = useSubscription();
@@ -18,6 +20,7 @@ export default function SettingsPage() {
   const [tokenLoading, setTokenLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isDesktop = typeof window !== "undefined" && window.electronAPI?.isElectron;
+  const isMobile = typeof window !== "undefined" && isCapacitorNative();
   const [appVersion, setAppVersion] = useState<string>("");
   const [updateInfo, setUpdateInfo] = useState<{ hasUpdate: boolean; latestVersion?: string; error?: string } | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -25,6 +28,9 @@ export default function SettingsPage() {
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
   const [updateDownloaded, setUpdateDownloaded] = useState(false);
   const [openAtLogin, setOpenAtLogin] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(false);
 
   useEffect(() => {
     if (window.electronAPI?.isElectron) {
@@ -32,6 +38,15 @@ export default function SettingsPage() {
       window.electronAPI.getOpenAtLogin().then(setOpenAtLogin);
     }
   }, []);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    checkBiometricAvailability().then(setBiometricAvailable);
+    const stored = localStorage.getItem("noticomax_biometric_lock");
+    setBiometricEnabled(stored === "true");
+    const pushStored = localStorage.getItem("noticomax_push_enabled");
+    setPushEnabled(pushStored !== "false");
+  }, [isMobile]);
 
   useEffect(() => {
     if (!window.electronAPI?.isElectron) return;
@@ -106,7 +121,7 @@ export default function SettingsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
+      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur pt-[env(safe-area-inset-top)]">
         <div className="flex h-14 items-center gap-4 px-4 md:px-6">
           <Link href="/">
             <Button variant="ghost" size="icon">
@@ -245,6 +260,86 @@ export default function SettingsPage() {
                   <span
                     className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform ${
                       openAtLogin ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Mobile App */}
+        {isMobile && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Mobile App</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {biometricAvailable && (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium flex items-center gap-1.5">
+                      <Fingerprint className="h-3.5 w-3.5" />
+                      Biometric Lock
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Require Face ID / fingerprint to open the app
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={biometricEnabled}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                      biometricEnabled ? "bg-primary" : "bg-muted"
+                    }`}
+                    onClick={() => {
+                      const newValue = !biometricEnabled;
+                      setBiometricEnabled(newValue);
+                      localStorage.setItem("noticomax_biometric_lock", String(newValue));
+                      toast.success(newValue ? "Biometric lock enabled" : "Biometric lock disabled");
+                    }}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                        biometricEnabled ? "translate-x-4" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium flex items-center gap-1.5">
+                    <BellRing className="h-3.5 w-3.5" />
+                    Push Notifications
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Receive reminders and updates
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={pushEnabled}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                    pushEnabled ? "bg-primary" : "bg-muted"
+                  }`}
+                  onClick={async () => {
+                    const newValue = !pushEnabled;
+                    setPushEnabled(newValue);
+                    localStorage.setItem("noticomax_push_enabled", String(newValue));
+                    if (newValue) {
+                      const { initPushNotifications } = await import("@/lib/capacitor/push-notifications");
+                      await initPushNotifications();
+                    }
+                    toast.success(newValue ? "Push notifications enabled" : "Push notifications disabled");
+                  }}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                      pushEnabled ? "translate-x-4" : "translate-x-0"
                     }`}
                   />
                 </button>

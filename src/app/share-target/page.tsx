@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { toast } from "sonner";
+import { toast } from "@/lib/native-toast";
 import { type ItemType } from "@/lib/db/indexed-db";
 
 function ShareTargetContent() {

@@ -41,7 +41,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import Link from "next/link";
-import { toast } from "sonner";
+import { toast } from "@/lib/native-toast";
 import { type UserTier } from "@/hooks/use-subscription";
 import { type Session } from "next-auth";
 

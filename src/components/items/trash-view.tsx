@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Trash2, RotateCcw, FileText, Link2, Bell, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { toast } from "@/lib/native-toast";
 
 interface TrashViewProps {
   items: LocalItem[];

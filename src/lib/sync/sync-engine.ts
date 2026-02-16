@@ -1,5 +1,9 @@
 import db, { type LocalItem, type LocalFolder } from "@/lib/db/indexed-db";
 import { v4 as uuidv4 } from "uuid";
+import {
+  scheduleReminderNotification,
+  cancelReminderNotification,
+} from "@/lib/capacitor/local-notifications";
 
 const SYNC_KEY = "notico_last_sync";
 
@@ -49,6 +53,16 @@ export async function createItem(
     timestamp: now,
   });
 
+  // Schedule native notification for reminders
+  if (localItem.type === "reminder" && localItem.reminderDate) {
+    scheduleReminderNotification(
+      clientId,
+      localItem.title,
+      localItem.content.substring(0, 100),
+      new Date(localItem.reminderDate)
+    );
+  }
+
   triggerSync();
   return localItem;
 }
@@ -93,6 +107,9 @@ export async function deleteItem(clientId: string): Promise<void> {
     clientId,
     timestamp: now,
   });
+
+  // Cancel any scheduled native notification
+  cancelReminderNotification(clientId);
 
   triggerSync();
 }

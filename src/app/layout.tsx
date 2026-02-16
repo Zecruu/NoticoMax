@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "@/components/providers/session-provider";
+import { CapacitorProvider } from "@/components/providers/capacitor-provider";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
@@ -40,6 +41,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -53,18 +55,20 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >
         <AuthProvider>
-          <ThemeProvider
-            attribute="class"
-            defaultTheme="system"
-            enableSystem
-            disableTransitionOnChange
-          >
-            <TooltipProvider>
-              {children}
-              <Toaster />
-              <UpdatePrompt />
-            </TooltipProvider>
-          </ThemeProvider>
+          <CapacitorProvider>
+            <ThemeProvider
+              attribute="class"
+              defaultTheme="system"
+              enableSystem
+              disableTransitionOnChange
+            >
+              <TooltipProvider>
+                {children}
+                <Toaster />
+                <UpdatePrompt />
+              </TooltipProvider>
+            </ThemeProvider>
+          </CapacitorProvider>
         </AuthProvider>
       </body>
     </html>

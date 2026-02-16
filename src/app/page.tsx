@@ -16,7 +16,7 @@ import { StudyView } from "@/components/study/study-view";
 import { useSubscription } from "@/hooks/use-subscription";
 import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/native-toast";
 
 export default function Dashboard() {
   const [activeFilter, setActiveFilter] = useState("all");
@@ -199,7 +199,7 @@ export default function Dashboard() {
           onTagChange={setActiveTag}
         />
 
-        <main className="flex-1 overflow-auto pb-16 md:pb-0">
+        <main className="flex-1 overflow-auto pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
           {activeView === "trash" ? (
             <TrashView
               items={trashedItems}

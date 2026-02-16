@@ -48,6 +48,11 @@
 }
 
 :root {
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --keyboard-height: 0px;
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -123,6 +128,17 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Capacitor native app overrides */
+html.capacitor-ios {
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+html.capacitor-native {
+  /* Prevent text selection on long press for native feel */
+  -webkit-touch-callout: none;
 }
 
 /* Markdown compact (card preview) */
