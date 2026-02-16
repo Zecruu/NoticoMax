@@ -97,7 +97,8 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "installerIcon": "public/logo.ico",
-      "uninstallerIcon": "public/logo.ico"
+      "uninstallerIcon": "public/logo.ico",
+      "artifactName": "Notico-Max-Setup-${version}.${ext}"
     }
   },
   "dependencies": {
