@@ -13,6 +13,7 @@ import {
   purgeOldTrash,
   initialSync,
   setupSyncListeners,
+  setOnSyncComplete,
   performSync,
   setSyncTier,
   type SyncTier,
@@ -57,16 +58,24 @@ export function useItems(
       if (mounted && tier === "pro") {
         setSyncing(true);
         await initialSync();
-        await refresh();
+        if (mounted) await refresh();
         setSyncing(false);
       }
     }
 
-    setupSyncListeners();
+    // Register callback so background syncs (polling, online, visibility)
+    // automatically refresh the UI
+    setOnSyncComplete(() => {
+      if (mounted) refresh();
+    });
+
+    const cleanupListeners = setupSyncListeners();
     init();
 
     return () => {
       mounted = false;
+      setOnSyncComplete(null);
+      cleanupListeners();
     };
   }, [refresh, tier]);
 

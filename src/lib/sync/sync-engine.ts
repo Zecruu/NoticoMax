@@ -506,10 +506,44 @@ export async function initialSync(): Promise<void> {
   }
 }
 
-export function setupSyncListeners() {
-  if (typeof window === "undefined") return;
+const POLL_INTERVAL_MS = 30_000; // Poll every 30 seconds for cross-device sync
 
-  window.addEventListener("online", () => {
-    performSync();
-  });
+let onSyncComplete: (() => void) | null = null;
+
+export function setOnSyncComplete(callback: (() => void) | null) {
+  onSyncComplete = callback;
+}
+
+export function setupSyncListeners(): () => void {
+  if (typeof window === "undefined") return () => {};
+
+  const onOnline = async () => {
+    const didSync = await performSync();
+    if (didSync && onSyncComplete) onSyncComplete();
+  };
+
+  window.addEventListener("online", onOnline);
+
+  // Periodic polling for cross-device sync
+  const intervalId = setInterval(async () => {
+    if (currentTier !== "pro" || !navigator.onLine) return;
+    const didSync = await performSync();
+    if (didSync && onSyncComplete) onSyncComplete();
+  }, POLL_INTERVAL_MS);
+
+  // Pull server changes when tab regains focus (user switching devices)
+  const onVisibilityChange = async () => {
+    if (document.visibilityState === "visible" && currentTier === "pro" && navigator.onLine) {
+      const didSync = await performSync();
+      if (didSync && onSyncComplete) onSyncComplete();
+    }
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange);
+
+  // Return cleanup function
+  return () => {
+    window.removeEventListener("online", onOnline);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
+    clearInterval(intervalId);
+  };
 }

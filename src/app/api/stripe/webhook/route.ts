@@ -38,6 +38,16 @@ export async function POST(request: Request) {
         if (user) {
           user.tier = "pro";
           user.stripeSubscriptionId = subscriptionId;
+
+          // Retrieve full subscription to get period end and price
+          if (subscriptionId) {
+            const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+            user.stripeCurrentPeriodEnd = new Date(subscription.current_period_end * 1000);
+            if (subscription.items.data[0]?.price?.id) {
+              user.stripePriceId = subscription.items.data[0].price.id;
+            }
+          }
+
           await user.save();
         }
         break;
@@ -53,9 +63,18 @@ export async function POST(request: Request) {
           const user = await User.findOne({ stripeCustomerId: customerId });
           if (user) {
             user.tier = "pro";
-            user.stripeSubscriptionId = typeof subscriptionId === "string"
+            const subId = typeof subscriptionId === "string"
               ? subscriptionId
               : subscriptionId.id;
+            user.stripeSubscriptionId = subId;
+
+            // Retrieve subscription to update period end
+            const subscription = await stripe.subscriptions.retrieve(subId);
+            user.stripeCurrentPeriodEnd = new Date(subscription.current_period_end * 1000);
+            if (subscription.items.data[0]?.price?.id) {
+              user.stripePriceId = subscription.items.data[0].price.id;
+            }
+
             await user.save();
           }
         }
@@ -70,6 +89,10 @@ export async function POST(request: Request) {
         if (user) {
           user.tier = subscription.status === "active" ? "pro" : "free";
           user.stripeSubscriptionId = subscription.id;
+          user.stripeCurrentPeriodEnd = new Date(subscription.current_period_end * 1000);
+          if (subscription.items.data[0]?.price?.id) {
+            user.stripePriceId = subscription.items.data[0].price.id;
+          }
           await user.save();
         }
         break;
