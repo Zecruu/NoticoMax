@@ -49,6 +49,63 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
   const [previewing, setPreviewing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const handleContentKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== "Enter") return;
+
+    const ta = textareaRef.current;
+    if (!ta) return;
+
+    const start = ta.selectionStart;
+    const text = ta.value;
+
+    // Find the current line
+    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+    const line = text.slice(lineStart, start);
+
+    // Detect list prefix on current line
+    const bulletMatch = line.match(/^(- )(.*)/);
+    const numberedMatch = line.match(/^(\d+)\. (.*)/);
+    const letteredMatch = line.match(/^([a-z])\. (.*)/);
+
+    let nextPrefix = "";
+    let isEmpty = false;
+
+    if (numberedMatch) {
+      isEmpty = numberedMatch[2].trim() === "";
+      nextPrefix = `${parseInt(numberedMatch[1]) + 1}. `;
+    } else if (letteredMatch) {
+      isEmpty = letteredMatch[2].trim() === "";
+      nextPrefix = `${String.fromCharCode(letteredMatch[1].charCodeAt(0) + 1)}. `;
+    } else if (bulletMatch) {
+      isEmpty = bulletMatch[2].trim() === "";
+      nextPrefix = "- ";
+    }
+
+    if (!nextPrefix) return;
+
+    e.preventDefault();
+
+    if (isEmpty) {
+      // Empty list item — remove the prefix and exit list mode
+      const newContent = text.slice(0, lineStart) + text.slice(start);
+      setContent(newContent);
+      requestAnimationFrame(() => {
+        ta.focus();
+        ta.setSelectionRange(lineStart, lineStart);
+      });
+    } else {
+      // Continue the list with next prefix
+      const insert = "\n" + nextPrefix;
+      const newContent = text.slice(0, start) + insert + text.slice(start);
+      setContent(newContent);
+      requestAnimationFrame(() => {
+        ta.focus();
+        const newPos = start + insert.length;
+        ta.setSelectionRange(newPos, newPos);
+      });
+    }
+  }, []);
+
   const insertListPrefix = useCallback((mode: "bullet" | "numbered" | "lettered") => {
     const ta = textareaRef.current;
     if (!ta) return;
@@ -348,6 +405,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
                 }
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
+                onKeyDown={type === "note" ? handleContentKeyDown : undefined}
                 rows={type === "note" ? 6 : 3}
               />
             )}
