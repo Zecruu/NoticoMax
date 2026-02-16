@@ -42,9 +42,12 @@ export async function POST(request: Request) {
           // Retrieve full subscription to get period end and price
           if (subscriptionId) {
             const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-            user.stripeCurrentPeriodEnd = new Date(subscription.current_period_end * 1000);
-            if (subscription.items.data[0]?.price?.id) {
-              user.stripePriceId = subscription.items.data[0].price.id;
+            const firstItem = subscription.items.data[0];
+            if (firstItem) {
+              user.stripeCurrentPeriodEnd = new Date(firstItem.current_period_end * 1000);
+              if (firstItem.price?.id) {
+                user.stripePriceId = firstItem.price.id;
+              }
             }
           }
 
@@ -70,9 +73,12 @@ export async function POST(request: Request) {
 
             // Retrieve subscription to update period end
             const subscription = await stripe.subscriptions.retrieve(subId);
-            user.stripeCurrentPeriodEnd = new Date(subscription.current_period_end * 1000);
-            if (subscription.items.data[0]?.price?.id) {
-              user.stripePriceId = subscription.items.data[0].price.id;
+            const firstItem = subscription.items.data[0];
+            if (firstItem) {
+              user.stripeCurrentPeriodEnd = new Date(firstItem.current_period_end * 1000);
+              if (firstItem.price?.id) {
+                user.stripePriceId = firstItem.price.id;
+              }
             }
 
             await user.save();
@@ -89,9 +95,12 @@ export async function POST(request: Request) {
         if (user) {
           user.tier = subscription.status === "active" ? "pro" : "free";
           user.stripeSubscriptionId = subscription.id;
-          user.stripeCurrentPeriodEnd = new Date(subscription.current_period_end * 1000);
-          if (subscription.items.data[0]?.price?.id) {
-            user.stripePriceId = subscription.items.data[0].price.id;
+          const subItem = subscription.items.data[0];
+          if (subItem) {
+            user.stripeCurrentPeriodEnd = new Date(subItem.current_period_end * 1000);
+            if (subItem.price?.id) {
+              user.stripePriceId = subItem.price.id;
+            }
           }
           await user.save();
         }
