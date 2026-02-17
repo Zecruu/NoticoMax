@@ -352,7 +352,8 @@ export async function performSync(): Promise<boolean> {
     });
 
     if (!response.ok) {
-      throw new Error(`Sync failed: ${response.status}`);
+      const errorBody = await response.text().catch(() => "");
+      throw new Error(`Sync failed: ${response.status} ${errorBody}`);
     }
 
     const { serverItems, serverFolders, syncedAt } = await response.json();
@@ -414,7 +415,9 @@ export async function performSync(): Promise<boolean> {
     setLastSync(syncedAt);
     return true;
   } catch (error) {
-    console.error("Sync error:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Sync error:", message);
+    if (onSyncError) onSyncError(message);
     return false;
   } finally {
     syncInProgress = false;
@@ -509,9 +512,16 @@ export async function initialSync(): Promise<void> {
 const POLL_INTERVAL_MS = 30_000; // Poll every 30 seconds for cross-device sync
 
 let onSyncComplete: (() => void) | null = null;
+let onSyncError: ((error: string) => void) | null = null;
 
-export function setOnSyncComplete(callback: (() => void) | null) {
+export function setOnSyncComplete(callback: (() => void) | null): (() => void) | null {
+  const prev = onSyncComplete;
   onSyncComplete = callback;
+  return prev;
+}
+
+export function setOnSyncError(callback: ((error: string) => void) | null) {
+  onSyncError = callback;
 }
 
 export function setupSyncListeners(): () => void {

@@ -14,10 +14,12 @@ import {
   initialSync,
   setupSyncListeners,
   setOnSyncComplete,
+  setOnSyncError,
   performSync,
   setSyncTier,
   type SyncTier,
 } from "@/lib/sync/sync-engine";
+import { toast } from "@/lib/native-toast";
 
 export function useItems(
   typeFilter?: string,
@@ -69,12 +71,19 @@ export function useItems(
       if (mounted) refresh();
     });
 
+    // Surface sync errors to the user
+    setOnSyncError((error) => {
+      console.error("[sync]", error);
+      toast.error(`Sync failed: ${error}`);
+    });
+
     const cleanupListeners = setupSyncListeners();
     init();
 
     return () => {
       mounted = false;
       setOnSyncComplete(null);
+      setOnSyncError(null);
       cleanupListeners();
     };
   }, [refresh, tier]);

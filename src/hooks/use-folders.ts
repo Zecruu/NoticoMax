@@ -7,8 +7,7 @@ import {
   updateFolder,
   deleteFolder,
   getFolders,
-  initialSync,
-  setupSyncListeners,
+  setOnSyncComplete,
   type SyncTier,
 } from "@/lib/sync/sync-engine";
 
@@ -22,24 +21,24 @@ export function useFolders(tier: SyncTier = "anonymous") {
     setLoading(false);
   }, []);
 
+  // Refresh folders when background sync completes (handled by useItems)
   useEffect(() => {
     let mounted = true;
 
-    async function init() {
-      await refresh();
-      if (mounted && tier === "pro") {
-        await initialSync();
-        await refresh();
-      }
-    }
+    // Load local folders immediately
+    refresh();
 
-    setupSyncListeners();
-    init();
+    // Register to refresh when sync brings in new server data
+    const prevCallback = setOnSyncComplete(() => {
+      if (mounted) refresh();
+    });
 
     return () => {
       mounted = false;
+      // Restore previous callback (from useItems)
+      setOnSyncComplete(prevCallback);
     };
-  }, [refresh, tier]);
+  }, [refresh]);
 
   const addFolder = useCallback(
     async (folder: Omit<LocalFolder, "id" | "clientId" | "createdAt" | "updatedAt" | "deleted">) => {
