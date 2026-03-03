@@ -32,7 +32,11 @@ function getClientPromise(): Promise<MongoClient> {
 
   if (process.env.NODE_ENV === "development") {
     if (!global._mongoClientPromise) {
-      global._mongoClientPromise = connectWithRetry(uri);
+      global._mongoClientPromise = connectWithRetry(uri).catch((err) => {
+        // Clear so the next call retries instead of returning a rejected promise
+        global._mongoClientPromise = undefined;
+        throw err;
+      });
     }
     return global._mongoClientPromise;
   }

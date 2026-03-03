@@ -45,8 +45,16 @@ async function dbConnect(): Promise<typeof mongoose> {
       });
   }
 
-  cached.conn = await cached.promise;
-  return cached.conn;
+  try {
+    cached.conn = await cached.promise;
+    return cached.conn;
+  } catch (err) {
+    // Clear the cached promise so the next call retries instead of
+    // returning the same rejected promise forever
+    cached.promise = null;
+    cached.conn = null;
+    throw err;
+  }
 }
 
 export default dbConnect;
