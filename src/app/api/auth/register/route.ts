@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
 
     const user = new User({ email: email.toLowerCase().trim() });
     user.setPassword(password);
-    const sessionToken = user.generateSessionToken();
+    const sessionToken = user.addSessionToken();
     await user.save();
 
     return NextResponse.json({

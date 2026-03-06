@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
 
     await dbConnect();
 
-    const user = await User.findOne({ sessionToken });
+    const user = await User.findOne({ sessionTokens: sessionToken });
     if (!user) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }

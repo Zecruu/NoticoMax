@@ -6,7 +6,7 @@ export interface IUser {
   passwordHash: string;
   salt: string;
   licenseKey?: string;
-  sessionToken?: string;
+  sessionTokens: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -14,7 +14,7 @@ export interface IUser {
 export interface IUserDocument extends IUser, Document {
   verifyPassword(password: string): boolean;
   setPassword(password: string): void;
-  generateSessionToken(): string;
+  addSessionToken(): string;
 }
 
 const UserSchema = new Schema<IUserDocument>(
@@ -39,8 +39,9 @@ const UserSchema = new Schema<IUserDocument>(
       type: String,
       default: undefined,
     },
-    sessionToken: {
-      type: String,
+    sessionTokens: {
+      type: [String],
+      default: [],
       index: true,
     },
   },
@@ -63,9 +64,11 @@ UserSchema.methods.verifyPassword = function (password: string): boolean {
   return hash === this.passwordHash;
 };
 
-UserSchema.methods.generateSessionToken = function (): string {
-  this.sessionToken = crypto.randomBytes(32).toString("hex");
-  return this.sessionToken;
+UserSchema.methods.addSessionToken = function (): string {
+  const token = crypto.randomBytes(32).toString("hex");
+  // Keep last 10 sessions, discard oldest
+  this.sessionTokens = [...this.sessionTokens.slice(-9), token];
+  return token;
 };
 
 const User: Model<IUserDocument> =
