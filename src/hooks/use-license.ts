@@ -2,46 +2,148 @@
 
 import { useState, useEffect, useCallback } from "react";
 
-const LICENSE_STORAGE_KEY = "noticomax_license_key";
+const SESSION_KEY = "noticomax_session";
+const LICENSE_KEY = "noticomax_license_key";
+const EMAIL_KEY = "noticomax_email";
 
 export function useLicense() {
   const [licenseKey, setLicenseKeyState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [email, setEmail] = useState<string | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  // Load from localStorage on mount
+  // On mount, verify stored session
   useEffect(() => {
-    const stored = localStorage.getItem(LICENSE_STORAGE_KEY);
-    if (stored) {
-      setLicenseKeyState(stored);
+    const sessionToken = localStorage.getItem(SESSION_KEY);
+    const storedEmail = localStorage.getItem(EMAIL_KEY);
+    const storedLicense = localStorage.getItem(LICENSE_KEY);
+
+    if (!sessionToken) {
+      setIsLoading(false);
+      return;
     }
-    setIsLoading(false);
+
+    // Set cached values immediately for fast UI
+    if (storedEmail) setEmail(storedEmail);
+    if (storedLicense) setLicenseKeyState(storedLicense);
+    if (storedEmail) setIsLoggedIn(true);
+
+    // Verify session with server and get latest license key
+    fetch("/api/auth/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionToken }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.success) {
+          setEmail(data.email);
+          setIsLoggedIn(true);
+          localStorage.setItem(EMAIL_KEY, data.email);
+          if (data.licenseKey) {
+            setLicenseKeyState(data.licenseKey);
+            localStorage.setItem(LICENSE_KEY, data.licenseKey);
+          } else {
+            // Server says no license, clear local
+            setLicenseKeyState(null);
+            localStorage.removeItem(LICENSE_KEY);
+          }
+        } else {
+          // Session expired, clear everything
+          localStorage.removeItem(SESSION_KEY);
+          localStorage.removeItem(EMAIL_KEY);
+          localStorage.removeItem(LICENSE_KEY);
+          setIsLoggedIn(false);
+          setEmail(null);
+          setLicenseKeyState(null);
+        }
+      })
+      .catch(() => {
+        // Network error - keep cached values
+      })
+      .finally(() => setIsLoading(false));
   }, []);
 
-  const activate = useCallback(async (key: string): Promise<{ success: boolean; error?: string }> => {
+  const login = useCallback(async (loginEmail: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const res = await fetch("/api/license/activate", {
+      const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ licenseKey: key.trim() }),
+        body: JSON.stringify({ email: loginEmail, password }),
       });
       const data = await res.json();
       if (!res.ok) {
-        return { success: false, error: data.error || "Activation failed" };
+        return { success: false, error: data.error || "Login failed" };
       }
-      localStorage.setItem(LICENSE_STORAGE_KEY, key.trim());
-      setLicenseKeyState(key.trim());
-      setEmail(data.email || null);
+      localStorage.setItem(SESSION_KEY, data.sessionToken);
+      localStorage.setItem(EMAIL_KEY, data.email);
+      setEmail(data.email);
+      setIsLoggedIn(true);
+      if (data.licenseKey) {
+        localStorage.setItem(LICENSE_KEY, data.licenseKey);
+        setLicenseKeyState(data.licenseKey);
+      }
       return { success: true };
     } catch {
       return { success: false, error: "Failed to connect to server" };
     }
   }, []);
 
-  const deactivate = useCallback(() => {
-    localStorage.removeItem(LICENSE_STORAGE_KEY);
+  const register = useCallback(async (regEmail: string, password: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: regEmail, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || "Registration failed" };
+      }
+      localStorage.setItem(SESSION_KEY, data.sessionToken);
+      localStorage.setItem(EMAIL_KEY, data.email);
+      setEmail(data.email);
+      setIsLoggedIn(true);
+      if (data.licenseKey) {
+        localStorage.setItem(LICENSE_KEY, data.licenseKey);
+        setLicenseKeyState(data.licenseKey);
+      }
+      return { success: true };
+    } catch {
+      return { success: false, error: "Failed to connect to server" };
+    }
+  }, []);
+
+  const activate = useCallback(async (key: string): Promise<{ success: boolean; error?: string }> => {
+    const sessionToken = localStorage.getItem(SESSION_KEY);
+    if (!sessionToken) {
+      return { success: false, error: "You must be logged in to activate a license" };
+    }
+    try {
+      const res = await fetch("/api/auth/link-license", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionToken, licenseKey: key.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || "Activation failed" };
+      }
+      localStorage.setItem(LICENSE_KEY, key.trim());
+      setLicenseKeyState(key.trim());
+      return { success: true };
+    } catch {
+      return { success: false, error: "Failed to connect to server" };
+    }
+  }, []);
+
+  const logout = useCallback(() => {
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(LICENSE_KEY);
+    localStorage.removeItem(EMAIL_KEY);
     setLicenseKeyState(null);
     setEmail(null);
+    setIsLoggedIn(false);
   }, []);
 
   const isActivated = !!licenseKey;
@@ -50,8 +152,11 @@ export function useLicense() {
     licenseKey,
     isActivated,
     isLoading,
+    isLoggedIn,
     email,
+    login,
+    register,
     activate,
-    deactivate,
+    logout,
   };
 }

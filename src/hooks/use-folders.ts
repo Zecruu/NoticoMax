@@ -28,8 +28,10 @@ export function useFolders(licenseKey: string | null = null) {
     refresh();
 
     // Register to refresh when sync brings in new server data
+    // Chain with the previous callback (from useItems) so both refresh
     const prevCallback = setOnSyncComplete(() => {
       if (mounted) refresh();
+      if (prevCallback) prevCallback();
     });
 
     return () => {

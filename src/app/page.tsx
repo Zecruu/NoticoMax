@@ -14,7 +14,7 @@ import { TrashView } from "@/components/items/trash-view";
 import { CalendarView } from "@/components/calendar/calendar-view";
 import { StudyView } from "@/components/study/study-view";
 import { useLicense } from "@/hooks/use-license";
-import { LicenseGate } from "@/components/license-gate";
+import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
 import { toast } from "@/lib/native-toast";
 
@@ -29,7 +29,7 @@ export default function Dashboard() {
   const [defaultType, setDefaultType] = useState<"note" | "url" | "reminder">("note");
   const [skippedActivation, setSkippedActivation] = useState(false);
 
-  const { licenseKey, isActivated, isLoading, activate } = useLicense();
+  const { licenseKey, isActivated, isLoading, isLoggedIn, login, register } = useLicense();
 
   const { folders, addFolder, editFolder, removeFolder } = useFolders(licenseKey);
   const {
@@ -162,8 +162,8 @@ export default function Dashboard() {
     );
   }
 
-  if (!isActivated && !skippedActivation) {
-    return <LicenseGate onActivate={activate} onSkip={() => setSkippedActivation(true)} />;
+  if (!isLoggedIn && !skippedActivation) {
+    return <AuthGate onLogin={login} onRegister={register} onSkip={() => setSkippedActivation(true)} />;
   }
 
   return (

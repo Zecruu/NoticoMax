@@ -5,7 +5,7 @@ import { useLicense } from "@/hooks/use-license";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle } from "lucide-react";
+import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle, LogOut, User } from "lucide-react";
 import { exportData, importData } from "@/lib/import-export";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
@@ -13,7 +13,7 @@ import { isCapacitorNative } from "@/lib/platform";
 import { checkBiometricAvailability } from "@/lib/capacitor/biometric-auth";
 
 export default function SettingsPage() {
-  const { licenseKey, isActivated, email, activate, deactivate } = useLicense();
+  const { licenseKey, isActivated, isLoggedIn, email, activate, logout } = useLicense();
   const [licenseInput, setLicenseInput] = useState("");
   const [activating, setActivating] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -77,9 +77,13 @@ export default function SettingsPage() {
     if (!key) return;
     setActivating(true);
     try {
-      await activate(key);
-      setLicenseInput("");
-      toast.success("License activated! Cloud sync is now enabled.");
+      const result = await activate(key);
+      if (result.success) {
+        setLicenseInput("");
+        toast.success("License activated! Cloud sync is now enabled.");
+      } else {
+        toast.error(result.error || "Activation failed");
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Activation failed";
       toast.error(message);
@@ -88,9 +92,9 @@ export default function SettingsPage() {
     }
   };
 
-  const handleDeactivate = () => {
-    deactivate();
-    toast.success("License deactivated. Data remains stored locally.");
+  const handleLogout = () => {
+    logout();
+    toast.success("Signed out. Data remains stored locally.");
   };
 
   const handleExport = async () => {
@@ -349,84 +353,97 @@ export default function SettingsPage() {
           </Card>
         )}
 
-        {/* License */}
+        {/* Account */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">License</CardTitle>
+            <CardTitle className="text-base">Account</CardTitle>
           </CardHeader>
           <CardContent>
-            {isActivated ? (
+            {isLoggedIn ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                  <span className="text-sm font-medium">Activated</span>
-                  <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                    Cloud Sync
-                  </span>
+                  <User className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">{email}</span>
                 </div>
-                {email && (
-                  <p className="text-xs text-muted-foreground">
-                    Purchase email: {email}
-                  </p>
+
+                {isActivated ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                      <span className="text-sm font-medium">License Active</span>
+                      <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                        Cloud Sync
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono truncate">
+                        {licenseKey}
+                      </code>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        onClick={() => {
+                          if (licenseKey) {
+                            navigator.clipboard.writeText(licenseKey);
+                            toast.success("License key copied");
+                          }
+                        }}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Cloud sync is enabled. Your data syncs across all your devices.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <XCircle className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">No License</span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Enter your Gumroad license key to enable cloud sync across all your devices.
+                    </p>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Enter license key..."
+                        value={licenseInput}
+                        onChange={(e) => setLicenseInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleActivate();
+                        }}
+                        className="flex-1"
+                      />
+                      <Button
+                        size="sm"
+                        className="gap-1.5"
+                        disabled={activating || !licenseInput.trim()}
+                        onClick={handleActivate}
+                      >
+                        <Key className="h-3.5 w-3.5" />
+                        {activating ? "Activating..." : "Activate"}
+                      </Button>
+                    </div>
+                  </div>
                 )}
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono truncate">
-                    {licenseKey}
-                  </code>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => {
-                      if (licenseKey) {
-                        navigator.clipboard.writeText(licenseKey);
-                        toast.success("License key copied");
-                      }
-                    }}
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Cloud sync is enabled. Your data syncs across all your devices.
-                </p>
+
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handleDeactivate}
+                  className="gap-1.5"
+                  onClick={handleLogout}
                 >
-                  Deactivate License
+                  <LogOut className="h-3.5 w-3.5" />
+                  Sign Out
                 </Button>
               </div>
             ) : (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <XCircle className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">Not Activated</span>
-                </div>
+              <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">
-                  Enter your Gumroad license key to enable cloud sync across all your devices.
+                  You are not signed in. Sign in from the home screen to enable cloud sync.
                 </p>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Enter license key..."
-                    value={licenseInput}
-                    onChange={(e) => setLicenseInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleActivate();
-                    }}
-                    className="flex-1"
-                  />
-                  <Button
-                    size="sm"
-                    className="gap-1.5"
-                    disabled={activating || !licenseInput.trim()}
-                    onClick={handleActivate}
-                  >
-                    <Key className="h-3.5 w-3.5" />
-                    {activating ? "Activating..." : "Activate"}
-                  </Button>
-                </div>
               </div>
             )}
           </CardContent>
