@@ -16,8 +16,7 @@ import {
   setOnSyncComplete,
   setOnSyncError,
   performSync,
-  setSyncTier,
-  type SyncTier,
+  setSyncLicenseKey,
 } from "@/lib/sync/sync-engine";
 import { toast } from "@/lib/native-toast";
 
@@ -25,17 +24,17 @@ export function useItems(
   typeFilter?: string,
   searchQuery?: string,
   folderFilter?: string | null,
-  tier: SyncTier = "anonymous"
+  licenseKey: string | null = null
 ) {
   const [items, setItems] = useState<LocalItem[]>([]);
   const [trashedItems, setTrashedItems] = useState<LocalItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  // Keep sync engine tier in sync
+  // Keep sync engine license key in sync
   useEffect(() => {
-    setSyncTier(tier);
-  }, [tier]);
+    setSyncLicenseKey(licenseKey);
+  }, [licenseKey]);
 
   const refresh = useCallback(async () => {
     const result = await getItems(typeFilter, searchQuery, folderFilter);
@@ -56,8 +55,8 @@ export function useItems(
       // Load from IndexedDB first (instant)
       await refresh();
 
-      // Then sync with server (only for pro users)
-      if (mounted && tier === "pro") {
+      // Then sync with server (only for activated users)
+      if (mounted && licenseKey) {
         setSyncing(true);
         await initialSync();
         if (mounted) await refresh();
@@ -86,7 +85,7 @@ export function useItems(
       setOnSyncError(null);
       cleanupListeners();
     };
-  }, [refresh, tier]);
+  }, [refresh, licenseKey]);
 
   const addItem = useCallback(
     async (item: Omit<LocalItem, "id" | "clientId" | "createdAt" | "updatedAt" | "deleted">) => {
@@ -137,12 +136,12 @@ export function useItems(
   );
 
   const syncNow = useCallback(async () => {
-    if (tier !== "pro") return;
+    if (!licenseKey) return;
     setSyncing(true);
     await performSync();
     await refresh();
     setSyncing(false);
-  }, [refresh, tier]);
+  }, [refresh, licenseKey]);
 
   return {
     items,

@@ -3,28 +3,23 @@
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { Wifi, WifiOff, RefreshCw, HardDrive } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { type UserTier } from "@/hooks/use-subscription";
-import Link from "next/link";
 
 interface SyncStatusProps {
   syncing: boolean;
   onSync: () => void;
-  tier: UserTier;
+  isActivated: boolean;
 }
 
-export function SyncStatus({ syncing, onSync, tier }: SyncStatusProps) {
+export function SyncStatus({ syncing, onSync, isActivated }: SyncStatusProps) {
   const isOnline = useOnlineStatus();
 
-  // Free/anonymous: show "Local only"
-  if (tier !== "pro") {
+  // Not activated: show "Local only"
+  if (!isActivated) {
     return (
-      <Link
-        href="/pricing"
-        className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 transition-colors hover:bg-blue-500/20"
-      >
+      <span className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400">
         <HardDrive className="h-3 w-3" />
         Local only
-      </Link>
+      </span>
     );
   }
 

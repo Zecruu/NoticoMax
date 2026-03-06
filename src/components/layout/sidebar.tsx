@@ -14,8 +14,6 @@ import {
   Pencil,
   Palette,
   Trash2,
-  LogIn,
-  Crown,
   Tag,
   Calendar,
   BookOpen,
@@ -42,8 +40,6 @@ import {
 } from "@/components/ui/dialog";
 import Link from "next/link";
 import { toast } from "@/lib/native-toast";
-import { type UserTier } from "@/hooks/use-subscription";
-import { type Session } from "next-auth";
 
 const PRESET_COLORS = [
   "#ef4444", "#f97316", "#eab308", "#22c55e",
@@ -70,8 +66,6 @@ interface SidebarProps {
   onAddFolder: (folder: { name: string; color: string }) => Promise<void>;
   onEditFolder: (clientId: string, updates: Partial<LocalFolder>) => Promise<void>;
   onRemoveFolder: (clientId: string) => Promise<void>;
-  tier: UserTier;
-  session: Session | null | undefined;
   activeView?: string;
   onViewChange?: (view: string) => void;
   trashCount?: number;
@@ -92,8 +86,6 @@ export function Sidebar({
   onAddFolder,
   onEditFolder,
   onRemoveFolder,
-  tier,
-  session,
   activeView,
   onViewChange,
   trashCount = 0,
@@ -464,35 +456,6 @@ export function Sidebar({
       </div>
 
       <div className="border-t p-3 space-y-1">
-        {session ? (
-          <Link
-            href="/settings"
-            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          >
-            {session.user.image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={session.user.image}
-                alt=""
-                className="h-5 w-5 rounded-full"
-              />
-            ) : (
-              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
-                {(session.user.name || "U")[0].toUpperCase()}
-              </div>
-            )}
-            <span className="flex-1 truncate">{session.user.name || session.user.email}</span>
-            {tier === "pro" && <Crown className="h-3 w-3 text-primary" />}
-          </Link>
-        ) : (
-          <Link
-            href="/auth/sign-in"
-            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          >
-            <LogIn className="h-4 w-4" />
-            Sign in
-          </Link>
-        )}
         <Link
           href="/settings"
           className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"

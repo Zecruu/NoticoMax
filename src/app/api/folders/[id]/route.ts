@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import Folder from "@/models/Folder";
 import Item from "@/models/Item";
-import { requirePro } from "@/lib/auth-utils";
+import { requireLicense } from "@/lib/license-auth";
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error, user } = await requirePro();
+  const { error, userId } = await requireLicense(request);
   if (error) return error;
 
   try {
@@ -17,7 +17,7 @@ export async function PUT(
     const body = await request.json();
 
     const folder = await Folder.findOneAndUpdate(
-      { _id: id, userId: user!.id },
+      { _id: id, userId },
       body,
       { new: true, runValidators: true }
     ).lean();
@@ -37,9 +37,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error, user } = await requirePro();
+  const { error, userId } = await requireLicense(request);
   if (error) return error;
-  const userId = user!.id;
 
   try {
     await dbConnect();

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-utils";
+import { requireLicense } from "@/lib/license-auth";
 import dbConnect from "@/lib/mongodb";
 import PushToken from "@/models/PushToken";
 
 export async function POST(request: NextRequest) {
-  const { error, user } = await requireAuth();
+  const { error, userId } = await requireLicense(request);
   if (error) return error;
 
   const { token, platform } = await request.json();
@@ -17,8 +17,8 @@ export async function POST(request: NextRequest) {
 
   await dbConnect();
   await PushToken.findOneAndUpdate(
-    { userId: user!.id, token },
-    { userId: user!.id, token, platform, updatedAt: new Date() },
+    { userId, token },
+    { userId, token, platform, updatedAt: new Date() },
     { upsert: true }
   );
 

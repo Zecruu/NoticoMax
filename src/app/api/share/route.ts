@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { nanoid } from "nanoid";
-import { requireAuth } from "@/lib/auth-utils";
+import { requireLicense } from "@/lib/license-auth";
 import dbConnect from "@/lib/mongodb";
 import Item from "@/models/Item";
 import SharedNote from "@/models/SharedNote";
 
 export async function POST(request: NextRequest) {
-  const { error, user } = await requireAuth();
+  const { error, userId } = await requireLicense(request);
   if (error) return error;
 
   const { clientId } = await request.json();
@@ -17,13 +17,13 @@ export async function POST(request: NextRequest) {
   await dbConnect();
 
   // Check if already shared
-  const existing = await SharedNote.findOne({ itemClientId: clientId, userId: user!.id });
+  const existing = await SharedNote.findOne({ itemClientId: clientId, userId });
   if (existing) {
     return NextResponse.json({ shareId: existing.shareId });
   }
 
   // Look up the item from MongoDB
-  const item = await Item.findOne({ clientId, userId: user!.id });
+  const item = await Item.findOne({ clientId, userId });
   if (!item) {
     return NextResponse.json({ error: "Item not found" }, { status: 404 });
   }
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
   await SharedNote.create({
     shareId,
     itemClientId: clientId,
-    userId: user!.id,
+    userId,
     title: item.title,
     content: item.content,
     type: item.type,
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const { error, user } = await requireAuth();
+  const { error, userId } = await requireLicense(request);
   if (error) return error;
 
   const { shareId } = await request.json();
@@ -53,7 +53,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   await dbConnect();
-  await SharedNote.deleteOne({ shareId, userId: user!.id });
+  await SharedNote.deleteOne({ shareId, userId });
 
   return NextResponse.json({ success: true });
 }

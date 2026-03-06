@@ -14,11 +14,7 @@ const ENV_FILE = path.join(__dirname, "..", ".env");
 
 const DEFAULTS = {
   MONGODB_URI: "placeholder",
-  AUTH_SECRET: "placeholder",
-  AUTH_GOOGLE_ID: "placeholder",
-  AUTH_GOOGLE_SECRET: "placeholder",
-  STRIPE_SECRET_KEY: "sk_test_placeholder",
-  STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+  GUMROAD_PRODUCT_ID: "placeholder",
 };
 
 function parseEnv(filePath) {

@@ -2,31 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import dbConnect from "@/lib/mongodb";
 import Item from "@/models/Item";
-import User from "@/models/User";
+import { requireLicense } from "@/lib/license-auth";
 
 export async function POST(request: NextRequest) {
-  // Bearer token auth for extension
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const token = authHeader.slice(7);
-
-  await dbConnect();
-
-  // Find user by API token (stored in user profile)
-  const user = await User.findOne({ apiToken: token });
-  if (!user) {
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-  }
+  const { error, userId } = await requireLicense(request);
+  if (error) return error;
 
   try {
+    await dbConnect();
+
     const { title, content, url, type } = await request.json();
 
     const item = await Item.create({
       clientId: uuidv4(),
-      userId: user._id.toString(),
+      userId,
       type: type || (url ? "url" : "note"),
       title: title || "Untitled",
       content: content || "",

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { nanoid } from "nanoid";
-import { requireAuth } from "@/lib/auth-utils";
+import { requireLicense } from "@/lib/license-auth";
 import dbConnect from "@/lib/mongodb";
 import SharedQuiz from "@/models/SharedQuiz";
 
 export async function POST(request: NextRequest) {
-  const { error, user } = await requireAuth();
+  const { error, userId } = await requireLicense(request);
   if (error) return error;
 
   const { clientId, name, questions } = await request.json();
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   await dbConnect();
 
   // Check if already shared
-  const existing = await SharedQuiz.findOne({ quizClientId: clientId, userId: user!.id });
+  const existing = await SharedQuiz.findOne({ quizClientId: clientId, userId });
   if (existing) {
     return NextResponse.json({ shareId: existing.shareId });
   }
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   await SharedQuiz.create({
     shareId,
     quizClientId: clientId,
-    userId: user!.id,
+    userId,
     name,
     questions,
   });
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const { error, user } = await requireAuth();
+  const { error, userId } = await requireLicense(request);
   if (error) return error;
 
   const { shareId } = await request.json();
@@ -43,7 +43,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   await dbConnect();
-  await SharedQuiz.deleteOne({ shareId, userId: user!.id });
+  await SharedQuiz.deleteOne({ shareId, userId });
 
   return NextResponse.json({ success: true });
 }

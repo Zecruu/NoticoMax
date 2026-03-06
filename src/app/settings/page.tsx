@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { signOut } from "next-auth/react";
-import { useSubscription } from "@/hooks/use-subscription";
+import { useLicense } from "@/hooks/use-license";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Crown, LogIn, Download, Upload, Key, Copy, RefreshCw, RotateCw, Fingerprint, BellRing } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle } from "lucide-react";
 import { exportData, importData } from "@/lib/import-export";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
@@ -13,11 +13,10 @@ import { isCapacitorNative } from "@/lib/platform";
 import { checkBiometricAvailability } from "@/lib/capacitor/biometric-auth";
 
 export default function SettingsPage() {
-  const { session, isAuthenticated, isProUser, tier } = useSubscription();
-  const [portalLoading, setPortalLoading] = useState(false);
+  const { licenseKey, isActivated, email, activate, deactivate } = useLicense();
+  const [licenseInput, setLicenseInput] = useState("");
+  const [activating, setActivating] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [apiToken, setApiToken] = useState<string | null>(null);
-  const [tokenLoading, setTokenLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isDesktop = typeof window !== "undefined" && window.electronAPI?.isElectron;
   const isMobile = typeof window !== "undefined" && isCapacitorNative();
@@ -73,23 +72,25 @@ export default function SettingsPage() {
     };
   }, []);
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetch("/api/user/token")
-        .then((r) => r.json())
-        .then((d) => setApiToken(d.token))
-        .catch(() => {});
+  const handleActivate = async () => {
+    const key = licenseInput.trim();
+    if (!key) return;
+    setActivating(true);
+    try {
+      await activate(key);
+      setLicenseInput("");
+      toast.success("License activated! Cloud sync is now enabled.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Activation failed";
+      toast.error(message);
+    } finally {
+      setActivating(false);
     }
-  }, [isAuthenticated]);
+  };
 
-  const handleManageSubscription = async () => {
-    setPortalLoading(true);
-    const res = await fetch("/api/stripe/portal", { method: "POST" });
-    const data = await res.json();
-    setPortalLoading(false);
-    if (data.url) {
-      window.location.href = data.url;
-    }
+  const handleDeactivate = () => {
+    deactivate();
+    toast.success("License deactivated. Data remains stored locally.");
   };
 
   const handleExport = async () => {
@@ -348,70 +349,43 @@ export default function SettingsPage() {
           </Card>
         )}
 
-        {/* Account */}
+        {/* License */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Account</CardTitle>
+            <CardTitle className="text-base">License</CardTitle>
           </CardHeader>
           <CardContent>
-            {isAuthenticated && session ? (
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  {session.user.image ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={session.user.image}
-                      alt=""
-                      className="h-10 w-10 rounded-full"
-                    />
-                  ) : (
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-medium">
-                      {(session.user.name || "U")[0].toUpperCase()}
-                    </div>
-                  )}
-                  <div>
-                    <p className="text-sm font-medium">{session.user.name}</p>
-                    <p className="text-xs text-muted-foreground">{session.user.email}</p>
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => signOut({ callbackUrl: "/" })}
-                >
-                  Sign out
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Sign in to sync your data across devices.
-                </p>
-                <Link href="/auth/sign-in">
-                  <Button size="sm" className="gap-1.5">
-                    <LogIn className="h-3.5 w-3.5" />
-                    Sign in
-                  </Button>
-                </Link>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Subscription */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Subscription</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isProUser ? (
+            {isActivated ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
-                  <Crown className="h-4 w-4 text-primary" />
-                  <span className="text-sm font-medium">Pro Plan</span>
-                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-                    Active
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  <span className="text-sm font-medium">Activated</span>
+                  <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                    Cloud Sync
                   </span>
+                </div>
+                {email && (
+                  <p className="text-xs text-muted-foreground">
+                    Purchase email: {email}
+                  </p>
+                )}
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono truncate">
+                    {licenseKey}
+                  </code>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => {
+                      if (licenseKey) {
+                        navigator.clipboard.writeText(licenseKey);
+                        toast.success("License key copied");
+                      }
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
                 <p className="text-sm text-muted-foreground">
                   Cloud sync is enabled. Your data syncs across all your devices.
@@ -419,32 +393,76 @@ export default function SettingsPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handleManageSubscription}
-                  disabled={portalLoading}
+                  onClick={handleDeactivate}
                 >
-                  {portalLoading ? "Loading..." : "Manage Subscription"}
+                  Deactivate License
                 </Button>
               </div>
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">Free Plan</span>
+                  <XCircle className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Not Activated</span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  {tier === "anonymous"
-                    ? "Sign in and upgrade to Pro to sync your data across devices."
-                    : "Your data is stored locally on this device. Upgrade to sync across devices."}
+                  Enter your Gumroad license key to enable cloud sync across all your devices.
                 </p>
-                <Link href="/pricing">
-                  <Button size="sm" className="gap-1.5">
-                    <Crown className="h-3.5 w-3.5" />
-                    Upgrade to Pro
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Enter license key..."
+                    value={licenseInput}
+                    onChange={(e) => setLicenseInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleActivate();
+                    }}
+                    className="flex-1"
+                  />
+                  <Button
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={activating || !licenseInput.trim()}
+                    onClick={handleActivate}
+                  >
+                    <Key className="h-3.5 w-3.5" />
+                    {activating ? "Activating..." : "Activate"}
                   </Button>
-                </Link>
+                </div>
               </div>
             )}
           </CardContent>
         </Card>
+
+        {/* Web Clipper */}
+        {isActivated && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Web Clipper</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Use your license key with the NOTICO MAX browser extension to save clips from any webpage.
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono truncate">
+                  {licenseKey}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() => {
+                    if (licenseKey) {
+                      navigator.clipboard.writeText(licenseKey);
+                      toast.success("License key copied");
+                    }
+                  }}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Data */}
         <Card>
@@ -453,7 +471,7 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              {isProUser
+              {isActivated
                 ? "Your data is stored locally and synced to the cloud."
                 : "Your data is stored locally on this device."}
             </p>
@@ -482,74 +500,6 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
-        {/* API Token for Web Clipper */}
-        {isAuthenticated && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Web Clipper</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Use this API token with the NOTICO MAX browser extension to save clips from any webpage.
-              </p>
-              {apiToken ? (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono truncate">
-                      {apiToken}
-                    </code>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0"
-                      onClick={() => {
-                        navigator.clipboard.writeText(apiToken);
-                        toast.success("Token copied");
-                      }}
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5"
-                    disabled={tokenLoading}
-                    onClick={async () => {
-                      setTokenLoading(true);
-                      const res = await fetch("/api/user/token", { method: "POST" });
-                      const data = await res.json();
-                      setApiToken(data.token);
-                      setTokenLoading(false);
-                      toast.success("Token regenerated");
-                    }}
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    Regenerate
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  disabled={tokenLoading}
-                  onClick={async () => {
-                    setTokenLoading(true);
-                    const res = await fetch("/api/user/token", { method: "POST" });
-                    const data = await res.json();
-                    setApiToken(data.token);
-                    setTokenLoading(false);
-                    toast.success("Token generated");
-                  }}
-                >
-                  <Key className="h-3.5 w-3.5" />
-                  Generate API Token
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-        )}
       </main>
     </div>
   );

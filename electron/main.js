@@ -24,12 +24,7 @@ const PROD_PORT = 3099;
 // Replace placeholder values with real ones before building the installer
 const APP_ENV = {
   MONGODB_URI: "placeholder",
-  AUTH_SECRET: "placeholder",
-  AUTH_TRUST_HOST: "true",
-  AUTH_GOOGLE_ID: "placeholder",
-  AUTH_GOOGLE_SECRET: "placeholder",
-  STRIPE_SECRET_KEY: "sk_test_placeholder",
-  STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+  GUMROAD_PRODUCT_ID: "placeholder",
   NEXT_PUBLIC_APP_URL: `http://localhost:${PROD_PORT}`,
 };
 

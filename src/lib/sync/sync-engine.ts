@@ -7,13 +7,12 @@ import {
 
 const SYNC_KEY = "notico_last_sync";
 
-// ─── TIER GATING ───
+// ─── LICENSE KEY ───
 
-export type SyncTier = "free" | "pro" | "anonymous";
-let currentTier: SyncTier = "anonymous";
+let currentLicenseKey: string | null = null;
 
-export function setSyncTier(tier: SyncTier) {
-  currentTier = tier;
+export function setSyncLicenseKey(key: string | null) {
+  currentLicenseKey = key;
 }
 
 function getLastSync(): string | null {
@@ -311,7 +310,7 @@ export async function getFolders(): Promise<LocalFolder[]> {
 let syncInProgress = false;
 
 export async function performSync(): Promise<boolean> {
-  if (currentTier !== "pro") return false;
+  if (!currentLicenseKey) return false;
   if (syncInProgress || !navigator.onLine) return false;
 
   syncInProgress = true;
@@ -347,7 +346,10 @@ export async function performSync(): Promise<boolean> {
 
     const response = await fetch("/api/items/sync", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${currentLicenseKey}`,
+      },
       body: JSON.stringify({ operations, folderOperations, lastSyncAt }),
     });
 
@@ -427,7 +429,7 @@ export async function performSync(): Promise<boolean> {
 let syncTimeout: ReturnType<typeof setTimeout> | null = null;
 
 export function triggerSync() {
-  if (currentTier !== "pro") return;
+  if (!currentLicenseKey) return;
   if (syncTimeout) clearTimeout(syncTimeout);
   syncTimeout = setTimeout(() => {
     performSync();
@@ -435,12 +437,14 @@ export function triggerSync() {
 }
 
 export async function initialSync(): Promise<void> {
-  if (currentTier !== "pro") return;
+  if (!currentLicenseKey) return;
   if (!navigator.onLine) return;
 
   try {
+    const headers = { "Authorization": `Bearer ${currentLicenseKey}` };
+
     // Sync items
-    const itemsRes = await fetch("/api/items");
+    const itemsRes = await fetch("/api/items", { headers });
     if (itemsRes.ok) {
       const serverItems = await itemsRes.json();
       for (const serverItem of serverItems) {
@@ -476,7 +480,7 @@ export async function initialSync(): Promise<void> {
     }
 
     // Sync folders
-    const foldersRes = await fetch("/api/folders");
+    const foldersRes = await fetch("/api/folders", { headers });
     if (foldersRes.ok) {
       const serverFolders = await foldersRes.json();
       for (const serverFolder of serverFolders) {
@@ -536,14 +540,14 @@ export function setupSyncListeners(): () => void {
 
   // Periodic polling for cross-device sync
   const intervalId = setInterval(async () => {
-    if (currentTier !== "pro" || !navigator.onLine) return;
+    if (!currentLicenseKey || !navigator.onLine) return;
     const didSync = await performSync();
     if (didSync && onSyncComplete) onSyncComplete();
   }, POLL_INTERVAL_MS);
 
   // Pull server changes when tab regains focus (user switching devices)
   const onVisibilityChange = async () => {
-    if (document.visibilityState === "visible" && currentTier === "pro" && navigator.onLine) {
+    if (document.visibilityState === "visible" && currentLicenseKey && navigator.onLine) {
       const didSync = await performSync();
       if (didSync && onSyncComplete) onSyncComplete();
     }

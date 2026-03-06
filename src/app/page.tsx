@@ -13,8 +13,8 @@ import { SearchCommand } from "@/components/items/search-bar";
 import { TrashView } from "@/components/items/trash-view";
 import { CalendarView } from "@/components/calendar/calendar-view";
 import { StudyView } from "@/components/study/study-view";
-import { useSubscription } from "@/hooks/use-subscription";
-import { AuthGate } from "@/components/auth-gate";
+import { useLicense } from "@/hooks/use-license";
+import { LicenseGate } from "@/components/license-gate";
 import { Loader2 } from "lucide-react";
 import { toast } from "@/lib/native-toast";
 
@@ -27,10 +27,11 @@ export default function Dashboard() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<LocalItem | null>(null);
   const [defaultType, setDefaultType] = useState<"note" | "url" | "reminder">("note");
+  const [skippedActivation, setSkippedActivation] = useState(false);
 
-  const { tier, session, isAuthenticated, isLoading } = useSubscription();
+  const { licenseKey, isActivated, isLoading, activate } = useLicense();
 
-  const { folders, addFolder, editFolder, removeFolder } = useFolders(tier);
+  const { folders, addFolder, editFolder, removeFolder } = useFolders(licenseKey);
   const {
     items,
     trashedItems,
@@ -43,7 +44,7 @@ export default function Dashboard() {
     restoreItem,
     permanentlyDeleteItem,
     syncNow,
-  } = useItems(activeFilter, searchQuery, activeFolder, tier);
+  } = useItems(activeFilter, searchQuery, activeFolder, licenseKey);
 
   // Counts for sidebar (type-based, ignoring folder filter)
   const itemCounts = useMemo(() => {
@@ -161,8 +162,8 @@ export default function Dashboard() {
     );
   }
 
-  if (!isAuthenticated) {
-    return <AuthGate />;
+  if (!isActivated && !skippedActivation) {
+    return <LicenseGate onActivate={activate} onSkip={() => setSkippedActivation(true)} />;
   }
 
   return (
@@ -172,8 +173,7 @@ export default function Dashboard() {
         onSearchChange={setSearchQuery}
         syncing={syncing}
         onSync={syncNow}
-        tier={tier}
-        session={session}
+        isActivated={isActivated}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -189,8 +189,6 @@ export default function Dashboard() {
           onAddFolder={addFolder}
           onEditFolder={editFolder}
           onRemoveFolder={removeFolder}
-          tier={tier}
-          session={session}
           activeView={activeView}
           onViewChange={setActiveView}
           trashCount={trashedItems.length}

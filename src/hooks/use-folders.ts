@@ -8,10 +8,9 @@ import {
   deleteFolder,
   getFolders,
   setOnSyncComplete,
-  type SyncTier,
 } from "@/lib/sync/sync-engine";
 
-export function useFolders(tier: SyncTier = "anonymous") {
+export function useFolders(licenseKey: string | null = null) {
   const [folders, setFolders] = useState<LocalFolder[]>([]);
   const [loading, setLoading] = useState(true);
 

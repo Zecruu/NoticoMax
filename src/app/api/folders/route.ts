@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import Folder from "@/models/Folder";
-import { requirePro } from "@/lib/auth-utils";
+import { requireLicense } from "@/lib/license-auth";
 
-export async function GET() {
-  const { error, user } = await requirePro();
+export async function GET(request: NextRequest) {
+  const { error, userId } = await requireLicense(request);
   if (error) return error;
 
   try {
     await dbConnect();
-    const folders = await Folder.find({ userId: user!.id, deleted: { $ne: true } })
+    const folders = await Folder.find({ userId, deleted: { $ne: true } })
       .sort({ name: 1 })
       .lean();
     return NextResponse.json(folders);
@@ -20,9 +20,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const { error, user } = await requirePro();
+  const { error, userId } = await requireLicense(request);
   if (error) return error;
-  const userId = user!.id;
 
   try {
     await dbConnect();

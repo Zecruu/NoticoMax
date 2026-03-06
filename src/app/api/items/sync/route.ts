@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import Item from "@/models/Item";
 import Folder from "@/models/Folder";
-import { requirePro } from "@/lib/auth-utils";
+import { requireLicense } from "@/lib/license-auth";
 
 interface SyncOperation {
   action: "create" | "update" | "delete";
@@ -11,9 +11,8 @@ interface SyncOperation {
 }
 
 export async function POST(request: NextRequest) {
-  const { error, user } = await requirePro();
+  const { error, userId } = await requireLicense(request);
   if (error) return error;
-  const userId = user!.id;
 
   try {
     await dbConnect();
