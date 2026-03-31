@@ -126,8 +126,8 @@ export async function getItems(
     items = await db.items.toArray();
   }
 
-  // Filter out deleted items
-  items = items.filter((item) => !item.deleted);
+  // Filter out deleted items and env vars (env vars are only shown in settings)
+  items = items.filter((item) => !item.deleted && item.type !== "envvar");
 
   // Filter by folder
   if (folderId) {
@@ -157,7 +157,7 @@ export async function getItems(
 export async function getDeletedItems(): Promise<LocalItem[]> {
   const items = await db.items.toArray();
   return items
-    .filter((item) => item.deleted)
+    .filter((item) => item.deleted && item.type !== "envvar")
     .sort((a, b) => {
       const aTime = a.deletedAt ? new Date(a.deletedAt).getTime() : 0;
       const bTime = b.deletedAt ? new Date(b.deletedAt).getTime() : 0;
@@ -560,4 +560,94 @@ export function setupSyncListeners(): () => void {
     document.removeEventListener("visibilitychange", onVisibilityChange);
     clearInterval(intervalId);
   };
+}
+
+// ─── ENVIRONMENT VARIABLES ───
+
+export interface EnvVar {
+  clientId: string;
+  name: string;
+  value: string;
+}
+
+export async function getEnvVars(): Promise<EnvVar[]> {
+  const items = await db.items.where("type").equals("envvar").toArray();
+  return items
+    .filter((item) => !item.deleted)
+    .map((item) => ({ clientId: item.clientId, name: item.title, value: item.content }));
+}
+
+export async function addEnvVar(name: string, value: string, syncEnabled: boolean): Promise<void> {
+  const now = new Date().toISOString();
+  const clientId = uuidv4();
+
+  const localItem: LocalItem = {
+    clientId,
+    type: "envvar",
+    title: name,
+    content: value,
+    tags: [],
+    pinned: false,
+    deleted: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await db.items.add(localItem);
+
+  if (syncEnabled && currentLicenseKey) {
+    await db.syncQueue.add({
+      action: "create",
+      entityType: "item",
+      clientId,
+      data: localItem as unknown as Record<string, unknown>,
+      timestamp: now,
+    });
+    triggerSync();
+  }
+}
+
+export async function removeEnvVar(clientId: string, syncEnabled: boolean): Promise<void> {
+  const now = new Date().toISOString();
+
+  await db.items.where("clientId").equals(clientId).modify((i) => {
+    i.deleted = true;
+    i.deletedAt = now;
+    i.updatedAt = now;
+  });
+
+  if (syncEnabled && currentLicenseKey) {
+    await db.syncQueue.add({
+      action: "delete",
+      entityType: "item",
+      clientId,
+      data: { deleted: true, deletedAt: now, updatedAt: now },
+      timestamp: now,
+    });
+    triggerSync();
+  } else {
+    // If not syncing, just hard delete locally
+    await db.items.where("clientId").equals(clientId).delete();
+  }
+}
+
+export async function updateEnvVar(clientId: string, name: string, value: string, syncEnabled: boolean): Promise<void> {
+  const now = new Date().toISOString();
+
+  await db.items.where("clientId").equals(clientId).modify((i) => {
+    i.title = name;
+    i.content = value;
+    i.updatedAt = now;
+  });
+
+  if (syncEnabled && currentLicenseKey) {
+    await db.syncQueue.add({
+      action: "update",
+      entityType: "item",
+      clientId,
+      data: { title: name, content: value, updatedAt: now },
+      timestamp: now,
+    });
+    triggerSync();
+  }
 }

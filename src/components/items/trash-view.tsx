@@ -4,7 +4,7 @@ import { type LocalItem } from "@/lib/db/indexed-db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Trash2, RotateCcw, FileText, Link2, Bell, AlertTriangle } from "lucide-react";
+import { Trash2, RotateCcw, FileText, Link2, Bell, Key, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
 
@@ -14,10 +14,11 @@ interface TrashViewProps {
   onPermanentDelete: (clientId: string) => Promise<void>;
 }
 
-const typeIcons = {
+const typeIcons: Record<string, typeof FileText> = {
   note: FileText,
   url: Link2,
   reminder: Bell,
+  envvar: Key,
 };
 
 function timeAgo(dateStr: string): string {

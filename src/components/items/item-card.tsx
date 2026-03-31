@@ -23,6 +23,7 @@ import {
   Check,
   Copy,
   Share2,
+  Key,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
@@ -37,10 +38,11 @@ interface ItemCardProps {
   onToggleComplete?: (clientId: string, completed: boolean) => void;
 }
 
-const typeConfig = {
+const typeConfig: Record<string, { icon: typeof FileText; label: string; color: string }> = {
   note: { icon: FileText, label: "Note", color: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
   url: { icon: Link2, label: "URL", color: "bg-purple-500/10 text-purple-600 dark:text-purple-400" },
   reminder: { icon: Bell, label: "Reminder", color: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
+  envvar: { icon: Key, label: "Env Var", color: "bg-green-500/10 text-green-600 dark:text-green-400" },
 };
 
 export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggleComplete }: ItemCardProps) {

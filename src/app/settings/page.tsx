@@ -5,11 +5,12 @@ import { useLicense } from "@/hooks/use-license";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle, LogOut, User, Plus, Trash2, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle, LogOut, User, Plus, Trash2, Eye, EyeOff, Cloud, CloudOff } from "lucide-react";
 import { exportData, importData } from "@/lib/import-export";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
 import { isCapacitorNative } from "@/lib/platform";
+import { getEnvVars, addEnvVar, removeEnvVar, type EnvVar } from "@/lib/sync/sync-engine";
 import { checkBiometricAvailability } from "@/lib/capacitor/biometric-auth";
 
 export default function SettingsPage() {
@@ -30,10 +31,11 @@ export default function SettingsPage() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
-  const [envVars, setEnvVars] = useState<{ name: string; value: string }[]>([]);
+  const [envVars, setEnvVars] = useState<EnvVar[]>([]);
   const [newEnvName, setNewEnvName] = useState("");
   const [newEnvValue, setNewEnvValue] = useState("");
   const [visibleEnvKeys, setVisibleEnvKeys] = useState<Set<number>>(new Set());
+  const [envSyncEnabled, setEnvSyncEnabled] = useState(false);
 
   useEffect(() => {
     if (window.electronAPI?.isElectron) {
@@ -43,10 +45,9 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem("noticomax_env_vars");
-      if (stored) setEnvVars(JSON.parse(stored));
-    } catch { /* ignore */ }
+    getEnvVars().then(setEnvVars);
+    const stored = localStorage.getItem("noticomax_env_sync");
+    setEnvSyncEnabled(stored === "true");
   }, []);
 
   useEffect(() => {
@@ -108,12 +109,12 @@ export default function SettingsPage() {
     toast.success("Signed out. Data remains stored locally.");
   };
 
-  const saveEnvVars = (vars: { name: string; value: string }[]) => {
+  const refreshEnvVars = async () => {
+    const vars = await getEnvVars();
     setEnvVars(vars);
-    localStorage.setItem("noticomax_env_vars", JSON.stringify(vars));
   };
 
-  const handleAddEnvVar = () => {
+  const handleAddEnvVar = async () => {
     const name = newEnvName.trim();
     const value = newEnvValue.trim();
     if (!name || !value) return;
@@ -121,20 +122,22 @@ export default function SettingsPage() {
       toast.error("Variable already exists");
       return;
     }
-    saveEnvVars([...envVars, { name, value }]);
+    await addEnvVar(name, value, envSyncEnabled);
+    await refreshEnvVars();
     setNewEnvName("");
     setNewEnvValue("");
     toast.success(`Added ${name}`);
   };
 
-  const handleRemoveEnvVar = (index: number) => {
-    const removed = envVars[index];
-    saveEnvVars(envVars.filter((_, i) => i !== index));
+  const handleRemoveEnvVar = async (index: number) => {
+    const env = envVars[index];
+    await removeEnvVar(env.clientId, envSyncEnabled);
     setVisibleEnvKeys((prev) => { const next = new Set(prev); next.delete(index); return next; });
-    toast.success(`Removed ${removed.name}`);
+    await refreshEnvVars();
+    toast.success(`Removed ${env.name}`);
   };
 
-  const handleCopyEnvVar = (env: { name: string; value: string }) => {
+  const handleCopyEnvVar = (env: EnvVar) => {
     navigator.clipboard.writeText(`${env.name} = ${env.value}`);
     toast.success(`Copied ${env.name}`);
   };
@@ -153,6 +156,13 @@ export default function SettingsPage() {
       else next.add(index);
       return next;
     });
+  };
+
+  const toggleEnvSync = () => {
+    const newValue = !envSyncEnabled;
+    setEnvSyncEnabled(newValue);
+    localStorage.setItem("noticomax_env_sync", String(newValue));
+    toast.success(newValue ? "Env vars will sync to cloud" : "Env vars are local only");
   };
 
   const handleExport = async () => {
@@ -580,23 +590,48 @@ export default function SettingsPage() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">Environment Variables</CardTitle>
-              {envVars.length > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={handleCopyAllEnvVars}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  Copy All
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                {envVars.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={handleCopyAllEnvVars}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    Copy All
+                  </Button>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Store API keys and environment variables. Values are saved locally on this device.
-            </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium flex items-center gap-1.5">
+                  {envSyncEnabled ? <Cloud className="h-3.5 w-3.5 text-primary" /> : <CloudOff className="h-3.5 w-3.5" />}
+                  Cloud Sync
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {envSyncEnabled ? "Variables sync across your devices" : "Variables are stored locally only"}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={envSyncEnabled}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                  envSyncEnabled ? "bg-primary" : "bg-muted"
+                }`}
+                onClick={toggleEnvSync}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                    envSyncEnabled ? "translate-x-4" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
 
             {envVars.length > 0 && (
               <div className="space-y-2">

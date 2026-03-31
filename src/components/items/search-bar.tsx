@@ -9,7 +9,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { FileText, Link2, Bell } from "lucide-react";
+import { FileText, Link2, Bell, Key } from "lucide-react";
 import { type LocalItem } from "@/lib/db/indexed-db";
 import { getItems } from "@/lib/sync/sync-engine";
 
@@ -17,10 +17,11 @@ interface SearchBarProps {
   onSelect: (item: LocalItem) => void;
 }
 
-const typeIcons = {
+const typeIcons: Record<string, typeof FileText> = {
   note: FileText,
   url: Link2,
   reminder: Bell,
+  envvar: Key,
 };
 
 export function SearchCommand({ onSelect }: SearchBarProps) {
