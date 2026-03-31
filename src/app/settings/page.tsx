@@ -5,7 +5,7 @@ import { useLicense } from "@/hooks/use-license";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle, LogOut, User } from "lucide-react";
+import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle, LogOut, User, Plus, Trash2, Eye, EyeOff } from "lucide-react";
 import { exportData, importData } from "@/lib/import-export";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
@@ -30,12 +30,23 @@ export default function SettingsPage() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
+  const [envVars, setEnvVars] = useState<{ name: string; value: string }[]>([]);
+  const [newEnvName, setNewEnvName] = useState("");
+  const [newEnvValue, setNewEnvValue] = useState("");
+  const [visibleEnvKeys, setVisibleEnvKeys] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     if (window.electronAPI?.isElectron) {
       window.electronAPI.getAppVersion().then(setAppVersion);
       window.electronAPI.getOpenAtLogin().then(setOpenAtLogin);
     }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("noticomax_env_vars");
+      if (stored) setEnvVars(JSON.parse(stored));
+    } catch { /* ignore */ }
   }, []);
 
   useEffect(() => {
@@ -95,6 +106,53 @@ export default function SettingsPage() {
   const handleLogout = () => {
     logout();
     toast.success("Signed out. Data remains stored locally.");
+  };
+
+  const saveEnvVars = (vars: { name: string; value: string }[]) => {
+    setEnvVars(vars);
+    localStorage.setItem("noticomax_env_vars", JSON.stringify(vars));
+  };
+
+  const handleAddEnvVar = () => {
+    const name = newEnvName.trim();
+    const value = newEnvValue.trim();
+    if (!name || !value) return;
+    if (envVars.some((v) => v.name === name)) {
+      toast.error("Variable already exists");
+      return;
+    }
+    saveEnvVars([...envVars, { name, value }]);
+    setNewEnvName("");
+    setNewEnvValue("");
+    toast.success(`Added ${name}`);
+  };
+
+  const handleRemoveEnvVar = (index: number) => {
+    const removed = envVars[index];
+    saveEnvVars(envVars.filter((_, i) => i !== index));
+    setVisibleEnvKeys((prev) => { const next = new Set(prev); next.delete(index); return next; });
+    toast.success(`Removed ${removed.name}`);
+  };
+
+  const handleCopyEnvVar = (env: { name: string; value: string }) => {
+    navigator.clipboard.writeText(`${env.name} = ${env.value}`);
+    toast.success(`Copied ${env.name}`);
+  };
+
+  const handleCopyAllEnvVars = () => {
+    if (envVars.length === 0) return;
+    const text = envVars.map((v) => `${v.name} = ${v.value}`).join("\n");
+    navigator.clipboard.writeText(text);
+    toast.success("All variables copied");
+  };
+
+  const toggleEnvVisibility = (index: number) => {
+    setVisibleEnvKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
   };
 
   const handleExport = async () => {
@@ -514,6 +572,104 @@ export default function SettingsPage() {
                 className="hidden"
                 onChange={handleImport}
               />
+            </div>
+          </CardContent>
+        </Card>
+        {/* Environment Variables */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Environment Variables</CardTitle>
+              {envVars.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={handleCopyAllEnvVars}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy All
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Store API keys and environment variables. Values are saved locally on this device.
+            </p>
+
+            {envVars.length > 0 && (
+              <div className="space-y-2">
+                {envVars.map((env, index) => (
+                  <div key={index} className="flex items-center gap-2 rounded-md border p-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-muted-foreground">{env.name}</p>
+                      <p className="text-sm font-mono truncate">
+                        {visibleEnvKeys.has(index) ? env.value : "\u2022".repeat(Math.min(env.value.length, 32))}
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0"
+                      onClick={() => toggleEnvVisibility(index)}
+                      title={visibleEnvKeys.has(index) ? "Hide value" : "Show value"}
+                    >
+                      {visibleEnvKeys.has(index) ? (
+                        <EyeOff className="h-3.5 w-3.5" />
+                      ) : (
+                        <Eye className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0"
+                      onClick={() => handleCopyEnvVar(env)}
+                      title="Copy as NAME = value"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0 text-destructive hover:text-destructive"
+                      onClick={() => handleRemoveEnvVar(index)}
+                      title="Remove"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <Input
+                placeholder="Variable name..."
+                value={newEnvName}
+                onChange={(e) => setNewEnvName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ""))}
+                className="flex-1"
+              />
+              <Input
+                placeholder="Value..."
+                type="password"
+                value={newEnvValue}
+                onChange={(e) => setNewEnvValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleAddEnvVar();
+                }}
+                className="flex-1"
+              />
+              <Button
+                size="sm"
+                className="gap-1.5 shrink-0"
+                disabled={!newEnvName.trim() || !newEnvValue.trim()}
+                onClick={handleAddEnvVar}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add
+              </Button>
             </div>
           </CardContent>
         </Card>
