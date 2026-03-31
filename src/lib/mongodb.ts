@@ -24,7 +24,14 @@ async function dbConnect(): Promise<typeof mongoose> {
   }
 
   if (cached.conn) {
-    return cached.conn;
+    // Check if the connection is still alive (0 = disconnected, 3 = disconnecting)
+    const state = mongoose.connection.readyState;
+    if (state === 1 || state === 2) {
+      return cached.conn;
+    }
+    // Connection is dead — clear cache and reconnect
+    cached.conn = null;
+    cached.promise = null;
   }
 
   if (!cached.promise) {

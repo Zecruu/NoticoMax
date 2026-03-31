@@ -29,7 +29,19 @@ export async function requireLicense(request: NextRequest) {
     };
   }
 
-  await dbConnect();
+  try {
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("DB connection timed out")), 5000)
+    );
+    await Promise.race([dbConnect(), timeout]);
+  } catch (err) {
+    console.error("[license-auth] DB connect error:", (err as Error).message);
+    return {
+      error: NextResponse.json({ error: "Service temporarily unavailable" }, { status: 503 }),
+      userId: null as string | null,
+      licenseKey: null as string | null,
+    };
+  }
 
   let license = await License.findOne({ licenseKey });
 
