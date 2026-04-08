@@ -58,7 +58,7 @@ export function LicenseGate({ onActivate, onSkip }: LicenseGateProps) {
               <Label htmlFor="license-key">License Key</Label>
               <Input
                 id="license-key"
-                placeholder="XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX"
+                placeholder="NMAX-XXXX-XXXX-XXXX"
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
                 className="font-mono text-sm"

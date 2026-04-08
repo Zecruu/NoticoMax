@@ -472,7 +472,7 @@ export default function SettingsPage() {
                       <span className="text-sm font-medium">No License</span>
                     </div>
                     <p className="text-sm text-muted-foreground">
-                      Enter your Gumroad license key to enable cloud sync across all your devices.
+                      Enter your product key to enable cloud sync across all your devices.
                     </p>
                     <div className="flex gap-2">
                       <Input

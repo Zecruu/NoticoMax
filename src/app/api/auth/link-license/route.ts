@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import User from "@/models/User";
 import License from "@/models/License";
-import { verifyGumroadLicense } from "@/lib/gumroad";
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,39 +18,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
 
-    // Verify with Gumroad
-    const result = await verifyGumroadLicense(licenseKey.trim(), true);
-    if (!result.success || !result.purchase) {
-      return NextResponse.json({ error: result.message || "Invalid license key" }, { status: 403 });
+    const trimmedKey = licenseKey.trim();
+
+    // Check if the key exists in our database
+    const license = await License.findOne({ licenseKey: trimmedKey });
+    if (!license) {
+      return NextResponse.json({ error: "Invalid product key" }, { status: 403 });
     }
 
-    if (result.purchase.refunded || result.purchase.chargebacked) {
-      return NextResponse.json({ error: "This license has been revoked" }, { status: 403 });
+    if (!license.active) {
+      return NextResponse.json({ error: "This product key has been deactivated" }, { status: 403 });
     }
 
-    // Save license to License collection
-    await License.findOneAndUpdate(
-      { licenseKey: licenseKey.trim() },
-      {
-        licenseKey: licenseKey.trim(),
-        productId: result.purchase.product_id,
-        purchaseEmail: result.purchase.email,
-        gumroadPurchaseId: result.purchase.id,
-        active: true,
-        uses: result.purchase.uses,
-        validatedAt: new Date(),
-      },
-      { upsert: true, new: true }
-    );
+    // Link the email to the license
+    if (!license.email) {
+      license.email = user.email;
+      license.activatedAt = new Date();
+      await license.save();
+    }
 
     // Link license to user account
-    user.licenseKey = licenseKey.trim();
+    user.licenseKey = trimmedKey;
     await user.save();
 
     return NextResponse.json({
       success: true,
-      licenseKey: licenseKey.trim(),
-      email: result.purchase.email,
+      licenseKey: trimmedKey,
+      email: user.email,
     });
   } catch (error) {
     console.error("[auth/link-license] Error:", error);

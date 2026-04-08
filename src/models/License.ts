@@ -2,12 +2,9 @@ import mongoose, { Schema, Document, Model } from "mongoose";
 
 export interface ILicense {
   licenseKey: string;
-  productId: string;
-  purchaseEmail: string;
-  gumroadPurchaseId: string;
   active: boolean;
-  uses: number;
-  validatedAt: Date;
+  email?: string;
+  activatedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -22,29 +19,16 @@ const LicenseSchema = new Schema<ILicenseDocument>(
       unique: true,
       index: true,
     },
-    productId: {
-      type: String,
-      required: true,
-    },
-    purchaseEmail: {
-      type: String,
-      default: "",
-    },
-    gumroadPurchaseId: {
-      type: String,
-      default: "",
-    },
     active: {
       type: Boolean,
       default: true,
     },
-    uses: {
-      type: Number,
-      default: 0,
+    email: {
+      type: String,
+      default: "",
     },
-    validatedAt: {
+    activatedAt: {
       type: Date,
-      default: Date.now,
     },
   },
   {
