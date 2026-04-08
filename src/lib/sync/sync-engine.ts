@@ -126,8 +126,8 @@ export async function getItems(
     items = await db.items.toArray();
   }
 
-  // Filter out deleted items and env vars (env vars are only shown in settings)
-  items = items.filter((item) => !item.deleted && item.type !== "envvar");
+  // Filter out deleted items, env vars, and credentials (shown in settings only)
+  items = items.filter((item) => !item.deleted && item.type !== "envvar" && item.type !== "credential");
 
   // Filter by folder
   if (folderId) {
@@ -157,7 +157,7 @@ export async function getItems(
 export async function getDeletedItems(): Promise<LocalItem[]> {
   const items = await db.items.toArray();
   return items
-    .filter((item) => item.deleted && item.type !== "envvar")
+    .filter((item) => item.deleted && item.type !== "envvar" && item.type !== "credential")
     .sort((a, b) => {
       const aTime = a.deletedAt ? new Date(a.deletedAt).getTime() : 0;
       const bTime = b.deletedAt ? new Date(b.deletedAt).getTime() : 0;
@@ -649,5 +649,81 @@ export async function updateEnvVar(clientId: string, name: string, value: string
       timestamp: now,
     });
     triggerSync();
+  }
+}
+
+// ─── CREDENTIALS (PASSWORDS) ───
+
+export interface Credential {
+  clientId: string;
+  label: string;
+  username: string;
+  password: string;
+}
+
+export async function getCredentials(): Promise<Credential[]> {
+  const items = await db.items.where("type").equals("credential").toArray();
+  return items
+    .filter((item) => !item.deleted)
+    .map((item) => {
+      try {
+        const data = JSON.parse(item.content);
+        return { clientId: item.clientId, label: item.title, username: data.username || "", password: data.password || "" };
+      } catch {
+        return { clientId: item.clientId, label: item.title, username: "", password: item.content };
+      }
+    });
+}
+
+export async function addCredential(label: string, username: string, password: string, syncEnabled: boolean): Promise<void> {
+  const now = new Date().toISOString();
+  const clientId = uuidv4();
+
+  const localItem: LocalItem = {
+    clientId,
+    type: "credential",
+    title: label,
+    content: JSON.stringify({ username, password }),
+    tags: [],
+    pinned: false,
+    deleted: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await db.items.add(localItem);
+
+  if (syncEnabled && currentLicenseKey) {
+    await db.syncQueue.add({
+      action: "create",
+      entityType: "item",
+      clientId,
+      data: localItem as unknown as Record<string, unknown>,
+      timestamp: now,
+    });
+    triggerSync();
+  }
+}
+
+export async function removeCredential(clientId: string, syncEnabled: boolean): Promise<void> {
+  const now = new Date().toISOString();
+
+  await db.items.where("clientId").equals(clientId).modify((i) => {
+    i.deleted = true;
+    i.deletedAt = now;
+    i.updatedAt = now;
+  });
+
+  if (syncEnabled && currentLicenseKey) {
+    await db.syncQueue.add({
+      action: "delete",
+      entityType: "item",
+      clientId,
+      data: { deleted: true, deletedAt: now, updatedAt: now },
+      timestamp: now,
+    });
+    triggerSync();
+  } else {
+    await db.items.where("clientId").equals(clientId).delete();
   }
 }

@@ -19,6 +19,7 @@ const typeIcons: Record<string, typeof FileText> = {
   url: Link2,
   reminder: Bell,
   envvar: Key,
+  credential: Key,
 };
 
 function timeAgo(dateStr: string): string {

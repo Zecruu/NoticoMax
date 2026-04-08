@@ -22,6 +22,7 @@ const typeIcons: Record<string, typeof FileText> = {
   url: Link2,
   reminder: Bell,
   envvar: Key,
+  credential: Key,
 };
 
 export function SearchCommand({ onSelect }: SearchBarProps) {

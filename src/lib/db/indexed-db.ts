@@ -1,6 +1,6 @@
 import Dexie, { type EntityTable } from "dexie";
 
-export type ItemType = "note" | "url" | "reminder" | "envvar";
+export type ItemType = "note" | "url" | "reminder" | "envvar" | "credential";
 
 export interface LocalItem {
   id?: number;

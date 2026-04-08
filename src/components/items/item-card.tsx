@@ -43,6 +43,7 @@ const typeConfig: Record<string, { icon: typeof FileText; label: string; color: 
   url: { icon: Link2, label: "URL", color: "bg-purple-500/10 text-purple-600 dark:text-purple-400" },
   reminder: { icon: Bell, label: "Reminder", color: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
   envvar: { icon: Key, label: "Env Var", color: "bg-green-500/10 text-green-600 dark:text-green-400" },
+  credential: { icon: Key, label: "Login", color: "bg-orange-500/10 text-orange-600 dark:text-orange-400" },
 };
 
 export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggleComplete }: ItemCardProps) {
