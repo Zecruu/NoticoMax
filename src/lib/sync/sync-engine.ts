@@ -4,6 +4,7 @@ import {
   scheduleReminderNotification,
   cancelReminderNotification,
 } from "@/lib/capacitor/local-notifications";
+import { getDeviceId, saveDeviceNameMapping, getDeviceName } from "@/lib/device";
 
 const SYNC_KEY = "notico_last_sync";
 
@@ -34,13 +35,19 @@ export async function createItem(
   const now = new Date().toISOString();
   const clientId = uuidv4();
 
+  const deviceId = getDeviceId();
+
   const localItem: LocalItem = {
     ...item,
     clientId,
+    deviceId,
     deleted: false,
     createdAt: now,
     updatedAt: now,
   };
+
+  // Ensure current device name is in the mapping
+  saveDeviceNameMapping(deviceId, getDeviceName());
 
   await db.items.add(localItem);
 
@@ -379,6 +386,7 @@ export async function performSync(): Promise<boolean> {
         pinned: serverItem.pinned || false,
         color: serverItem.color,
         folderId: serverItem.folderId,
+        deviceId: serverItem.deviceId,
         deleted: serverItem.deleted || false,
         createdAt: serverItem.createdAt,
         updatedAt: serverItem.updatedAt,
@@ -463,6 +471,7 @@ export async function initialSync(): Promise<void> {
           pinned: serverItem.pinned || false,
           color: serverItem.color,
           folderId: serverItem.folderId,
+          deviceId: serverItem.deviceId,
           deleted: serverItem.deleted || false,
           createdAt: serverItem.createdAt,
           updatedAt: serverItem.updatedAt,
@@ -588,6 +597,7 @@ export async function addEnvVar(name: string, value: string, syncEnabled: boolea
     content: value,
     tags: [],
     pinned: false,
+    deviceId: getDeviceId(),
     deleted: false,
     createdAt: now,
     updatedAt: now,
@@ -686,6 +696,7 @@ export async function addCredential(label: string, username: string, password: s
     content: JSON.stringify({ username, password }),
     tags: [],
     pinned: false,
+    deviceId: getDeviceId(),
     deleted: false,
     createdAt: now,
     updatedAt: now,

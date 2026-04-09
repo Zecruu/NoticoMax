@@ -5,12 +5,13 @@ import { useLicense } from "@/hooks/use-license";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle, LogOut, User, Plus, Trash2, Eye, EyeOff, Cloud, CloudOff, Lock, Variable, UserCheck } from "lucide-react";
+import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle, LogOut, User, Plus, Trash2, Eye, EyeOff, Cloud, CloudOff, Lock, Variable, UserCheck, Monitor } from "lucide-react";
 import { exportData, importData } from "@/lib/import-export";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
 import { isCapacitorNative } from "@/lib/platform";
 import { getEnvVars, addEnvVar, removeEnvVar, type EnvVar, getCredentials, addCredential, removeCredential, type Credential } from "@/lib/sync/sync-engine";
+import { getDeviceName, setDeviceName } from "@/lib/device";
 import { checkBiometricAvailability } from "@/lib/capacitor/biometric-auth";
 
 export default function SettingsPage() {
@@ -42,6 +43,8 @@ export default function SettingsPage() {
   const [newCredUser, setNewCredUser] = useState("");
   const [newCredPass, setNewCredPass] = useState("");
   const [visibleCredKeys, setVisibleCredKeys] = useState<Set<number>>(new Set());
+  const [currentDeviceName, setCurrentDeviceName] = useState("");
+  const [deviceNameInput, setDeviceNameInput] = useState("");
 
   useEffect(() => {
     if (window.electronAPI?.isElectron) {
@@ -55,6 +58,9 @@ export default function SettingsPage() {
     getCredentials().then(setCredentials);
     const stored = localStorage.getItem("noticomax_env_sync");
     setEnvSyncEnabled(stored === "true");
+    const name = getDeviceName();
+    setCurrentDeviceName(name);
+    setDeviceNameInput(name);
   }, []);
 
   useEffect(() => {
@@ -467,6 +473,47 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Device */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Monitor className="h-4 w-4" />
+              Device
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Device Name</p>
+              <div className="flex gap-2">
+                <Input
+                  value={deviceNameInput}
+                  onChange={(e) => setDeviceNameInput(e.target.value)}
+                  placeholder="Enter device name"
+                  className="h-8 text-sm"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0"
+                  disabled={!deviceNameInput.trim() || deviceNameInput.trim() === currentDeviceName}
+                  onClick={() => {
+                    const name = deviceNameInput.trim();
+                    if (!name) return;
+                    setDeviceName(name);
+                    setCurrentDeviceName(name);
+                    toast.success("Device renamed");
+                  }}
+                >
+                  Save
+                </Button>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                This name identifies your device when syncing notes across multiple devices.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Account */}
         <Card>

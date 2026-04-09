@@ -16,6 +16,7 @@ export interface LocalItem {
   pinned: boolean;
   color?: string;
   folderId?: string;
+  deviceId?: string;
   deleted: boolean;
   deletedAt?: string;
   createdAt: string;
@@ -109,6 +110,14 @@ class NoticoDatabase extends Dexie {
 
     this.version(4).stores({
       items: "++id, clientId, serverId, type, title, updatedAt, pinned, deleted, folderId",
+      folders: "++id, clientId, serverId, name, deleted",
+      studySets: "++id, clientId, name, deleted",
+      quizzes: "++id, clientId, name, deleted",
+      syncQueue: "++id, clientId, action, entityType, timestamp",
+    });
+
+    this.version(5).stores({
+      items: "++id, clientId, serverId, type, title, updatedAt, pinned, deleted, folderId, deviceId",
       folders: "++id, clientId, serverId, name, deleted",
       studySets: "++id, clientId, name, deleted",
       quizzes: "++id, clientId, name, deleted",

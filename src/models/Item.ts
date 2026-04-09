@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
 
-export type ItemType = "note" | "url" | "reminder";
+export type ItemType = "note" | "url" | "reminder" | "envvar" | "credential";
 
 export interface IItem {
   clientId: string;
@@ -15,6 +15,7 @@ export interface IItem {
   pinned: boolean;
   color?: string;
   folderId?: string;
+  deviceId?: string;
   deleted: boolean;
   deletedAt?: Date;
   createdAt: Date;
@@ -38,7 +39,7 @@ const ItemSchema = new Schema<IItemDocument>(
     },
     type: {
       type: String,
-      enum: ["note", "url", "reminder"],
+      enum: ["note", "url", "reminder", "envvar", "credential"],
       required: true,
       index: true,
     },
@@ -72,6 +73,10 @@ const ItemSchema = new Schema<IItemDocument>(
       type: String,
     },
     folderId: {
+      type: String,
+      index: true,
+    },
+    deviceId: {
       type: String,
       index: true,
     },
