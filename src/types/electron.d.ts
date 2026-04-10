@@ -29,6 +29,7 @@ interface ElectronAPI {
   installUpdate: () => void;
   getOpenAtLogin: () => Promise<boolean>;
   setOpenAtLogin: (enabled: boolean) => Promise<boolean>;
+  wipeLocalData: () => Promise<{ success: boolean; error?: string }>;
 
   onUpdateDownloadProgress: (callback: (data: UpdateDownloadProgress) => void) => () => void;
   onUpdateDownloaded: (callback: (data: UpdateDownloadedInfo) => void) => () => void;

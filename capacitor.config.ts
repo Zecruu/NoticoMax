@@ -22,7 +22,6 @@ const config: CapacitorConfig = {
       launchAutoHide: true,
       backgroundColor: "#0a0a0a",
       showSpinner: false,
-      androidScaleType: "CENTER_CROP",
       splashFullScreen: true,
       splashImmersive: true,
     },
@@ -48,13 +47,6 @@ const config: CapacitorConfig = {
   ios: {
     scheme: "NoticoMax",
     contentInset: "automatic",
-  },
-
-  android: {
-    backgroundColor: "#0a0a0a",
-    allowMixedContent: false,
-    captureInput: true,
-    webContentsDebuggingEnabled: false,
   },
 };
 

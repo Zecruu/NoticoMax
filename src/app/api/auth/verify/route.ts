@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import User from "@/models/User";
+import License from "@/models/License";
+import { computeEntitlements } from "@/lib/entitlements";
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,10 +19,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
 
+    const license = user.licenseKey
+      ? await License.findOne({ licenseKey: user.licenseKey })
+      : null;
+
+    const entitlements = computeEntitlements(user, license);
+
     return NextResponse.json({
       success: true,
       email: user.email,
       licenseKey: user.licenseKey || null,
+      entitlements,
     });
   } catch (error) {
     console.error("[auth/verify] Error:", error);

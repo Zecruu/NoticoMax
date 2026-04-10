@@ -300,6 +300,40 @@ ipcMain.handle("set-open-at-login", (event, enabled) => {
   return enabled;
 });
 
+ipcMain.handle("wipe-local-data", async () => {
+  // Wipe IndexedDB, localStorage, cookies, cache — everything in the user's session.
+  // Used by the "Wipe Local Data" button on macOS where uninstall doesn't auto-clear.
+  try {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (!win) {
+      logger.warn("electron", "wipe-local-data: no window available");
+      return { success: false, error: "No window available" };
+    }
+    await win.webContents.session.clearStorageData({
+      storages: [
+        "appcache",
+        "cookies",
+        "filesystem",
+        "indexdb",
+        "localstorage",
+        "shadercache",
+        "websql",
+        "serviceworkers",
+        "cachestorage",
+      ],
+    });
+    await win.webContents.session.clearCache();
+    logger.info("electron", "Local data wiped");
+    // Schedule a relaunch so the renderer starts from a clean slate
+    app.relaunch();
+    setTimeout(() => app.exit(0), 500);
+    return { success: true };
+  } catch (err) {
+    logger.error("electron", `wipe-local-data failed: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+});
+
 // --- App Startup ---
 
 app.whenReady().then(async () => {

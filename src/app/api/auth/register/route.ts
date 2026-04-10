@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import User from "@/models/User";
+import { computeEntitlements } from "@/lib/entitlements";
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,11 +27,14 @@ export async function POST(request: NextRequest) {
     const sessionToken = user.addSessionToken();
     await user.save();
 
+    const entitlements = computeEntitlements(user, null);
+
     return NextResponse.json({
       success: true,
       email: user.email,
       licenseKey: user.licenseKey || null,
       sessionToken,
+      entitlements,
     });
   } catch (error) {
     console.error("[auth/register] Error:", error);

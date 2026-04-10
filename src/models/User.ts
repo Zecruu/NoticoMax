@@ -1,12 +1,22 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
 import crypto from "crypto";
 
+export type ProSource = "lifetime" | "license_key" | "apple_iap" | "stripe";
+
+export interface IUserEntitlements {
+  lifetimePro: boolean;
+  proExpiresAt?: Date;
+  proSource?: ProSource;
+}
+
 export interface IUser {
   email: string;
   passwordHash: string;
   salt: string;
   licenseKey?: string;
   sessionTokens: string[];
+  appleUserId?: string;
+  entitlements: IUserEntitlements;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -43,6 +53,17 @@ const UserSchema = new Schema<IUserDocument>(
       type: [String],
       default: [],
       index: true,
+    },
+    appleUserId: {
+      type: String,
+      default: undefined,
+      index: true,
+      sparse: true,
+    },
+    entitlements: {
+      lifetimePro: { type: Boolean, default: false },
+      proExpiresAt: { type: Date, default: undefined },
+      proSource: { type: String, default: undefined },
     },
   },
   {

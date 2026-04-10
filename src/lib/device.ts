@@ -93,8 +93,6 @@ function detectDeviceName(): string {
       return detectOSName();
     case "ios":
       return "iPhone";
-    case "android":
-      return "Android";
     case "web":
       return `${detectBrowserName()} (${detectOSName()})`;
     default:

@@ -1,6 +1,6 @@
 {
   "name": "notico-max",
-  "version": "2.2.4",
+  "version": "2.3.0",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -10,8 +10,7 @@
     "lint": "eslint",
     "electron:dev": "concurrently \"next dev -p 5467\" \"wait-on http://localhost:5467 && NODE_ENV=development electron .\"",
     "electron:build": "node scripts/inject-env.js inject && next build && node scripts/fix-standalone.js && electron-builder --win --publish never && node scripts/inject-env.js restore",
-    "electron:build:mac": "node scripts/inject-env.js inject && next build && electron-builder --mac --publish never && node scripts/inject-env.js restore",
-    "electron:build:linux": "node scripts/inject-env.js inject && next build && electron-builder --linux --publish never && node scripts/inject-env.js restore",
+    "electron:build:mac": "node scripts/inject-env.js inject && next build && node scripts/fix-standalone.js && electron-builder --mac --publish never && node scripts/inject-env.js restore",
     "cap:sync": "npx cap sync",
     "cap:ios": "npx cap open ios",
     "cap:android": "npx cap open android",
@@ -85,13 +84,6 @@
       "icon": "public/logo.png",
       "category": "public.app-category.productivity"
     },
-    "linux": {
-      "target": [
-        "AppImage"
-      ],
-      "icon": "public/logo.png",
-      "category": "Office"
-    },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
@@ -102,7 +94,6 @@
     }
   },
   "dependencies": {
-    "@capacitor/android": "^8.1.0",
     "@capacitor/app": "^8.0.1",
     "@capacitor/browser": "^8.0.1",
     "@capacitor/cli": "^8.1.0",

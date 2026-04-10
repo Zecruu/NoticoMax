@@ -5,7 +5,7 @@ import { useLicense } from "@/hooks/use-license";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle, LogOut, User, Monitor } from "lucide-react";
+import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle, LogOut, User, Monitor, Trash2 } from "lucide-react";
 import { exportData, importData } from "@/lib/import-export";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
@@ -277,6 +277,35 @@ export default function SettingsPage() {
                     }`}
                   />
                 </button>
+              </div>
+
+              <div className="border-t pt-4">
+                <p className="text-sm font-medium mb-1">Wipe Local Data</p>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Permanently delete all notes, passwords, and settings stored on this Mac.
+                  Uninstalling NOTICO MAX does <strong>not</strong> auto-delete your data on macOS,
+                  so use this button if you want a clean slate. The app will restart.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive border-destructive/40 hover:bg-destructive/10"
+                  onClick={async () => {
+                    const ok = window.confirm(
+                      "This will permanently delete ALL local data on this Mac (notes, passwords, settings, etc.) and restart the app. This cannot be undone.\n\nContinue?"
+                    );
+                    if (!ok) return;
+                    try {
+                      await window.electronAPI?.wipeLocalData();
+                    } catch (err) {
+                      const msg = err instanceof Error ? err.message : String(err);
+                      toast.error(`Wipe failed: ${msg}`);
+                    }
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                  Wipe All Local Data
+                </Button>
               </div>
             </CardContent>
           </Card>
