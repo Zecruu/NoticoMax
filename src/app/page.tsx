@@ -13,6 +13,7 @@ import { SearchCommand } from "@/components/items/search-bar";
 import { TrashView } from "@/components/items/trash-view";
 import { CalendarView } from "@/components/calendar/calendar-view";
 import { StudyView } from "@/components/study/study-view";
+import { PasswordsView } from "@/components/passwords/passwords-view";
 import { useLicense } from "@/hooks/use-license";
 import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
@@ -214,6 +215,8 @@ export default function Dashboard() {
             />
           ) : activeView === "study" ? (
             <StudyView />
+          ) : activeView === "passwords" ? (
+            <PasswordsView />
           ) : (
             <ItemList
               items={displayedItems}

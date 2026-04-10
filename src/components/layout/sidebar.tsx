@@ -17,6 +17,7 @@ import {
   Tag,
   Calendar,
   BookOpen,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -176,7 +177,7 @@ export function Sidebar({
                 }}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                  activeView !== "trash" && activeView !== "calendar" && activeView !== "study" && !activeFolder && !activeTag && activeFilter === item.value
+                  activeView !== "trash" && activeView !== "calendar" && activeView !== "study" && activeView !== "passwords" && !activeFolder && !activeTag && activeFilter === item.value
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
@@ -186,7 +187,7 @@ export function Sidebar({
                 <span
                   className={cn(
                     "text-xs tabular-nums",
-                    activeView !== "trash" && activeView !== "calendar" && activeView !== "study" && !activeFolder && !activeTag && activeFilter === item.value
+                    activeView !== "trash" && activeView !== "calendar" && activeView !== "study" && activeView !== "passwords" && !activeFolder && !activeTag && activeFilter === item.value
                       ? "text-primary-foreground/70"
                       : "text-muted-foreground"
                   )}
@@ -228,6 +229,23 @@ export function Sidebar({
           >
             <Calendar className="h-4 w-4" />
             <span className="flex-1 text-left">Calendar</span>
+          </button>
+
+          <button
+            onClick={() => {
+              onFolderChange(null);
+              onViewChange?.("passwords");
+              onTagChange?.(null);
+            }}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+              activeView === "passwords"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+          >
+            <Lock className="h-4 w-4" />
+            <span className="flex-1 text-left">Passwords</span>
           </button>
 
           <button
