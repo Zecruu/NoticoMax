@@ -16,12 +16,16 @@ import {
   Cloud,
   CloudOff,
   FolderOpen,
+  Pencil,
+  Check,
+  X,
 } from "lucide-react";
 import { toast } from "@/lib/native-toast";
 import {
   getEnvVars,
   addEnvVar,
   removeEnvVar,
+  updateEnvVar,
   type EnvVar,
   getCredentials,
   addCredential,
@@ -37,6 +41,10 @@ export function PasswordsView() {
   const [newEnvName, setNewEnvName] = useState("");
   const [newEnvValue, setNewEnvValue] = useState("");
   const [visibleEnvKeys, setVisibleEnvKeys] = useState<Set<string>>(new Set());
+  const [editingEnvId, setEditingEnvId] = useState<string | null>(null);
+  const [editEnvProject, setEditEnvProject] = useState("");
+  const [editEnvName, setEditEnvName] = useState("");
+  const [editEnvValue, setEditEnvValue] = useState("");
 
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [newCredLabel, setNewCredLabel] = useState("");
@@ -126,6 +134,43 @@ export function PasswordsView() {
       else next.add(clientId);
       return next;
     });
+  };
+
+  const startEditEnvVar = (env: EnvVar) => {
+    setEditingEnvId(env.clientId);
+    setEditEnvProject(env.project);
+    setEditEnvName(env.name);
+    setEditEnvValue(env.value);
+  };
+
+  const cancelEditEnvVar = () => {
+    setEditingEnvId(null);
+    setEditEnvProject("");
+    setEditEnvName("");
+    setEditEnvValue("");
+  };
+
+  const handleSaveEditEnvVar = async () => {
+    if (!editingEnvId) return;
+    const name = editEnvName.trim();
+    const value = editEnvValue.trim();
+    const project = editEnvProject.trim() || "Default";
+    if (!name || !value) return;
+    if (
+      envVars.some(
+        (v) =>
+          v.clientId !== editingEnvId &&
+          v.name === name &&
+          v.project === project
+      )
+    ) {
+      toast.error(`${name} already exists in ${project}`);
+      return;
+    }
+    await updateEnvVar(editingEnvId, name, value, project, syncEnabled);
+    await refreshEnvVars();
+    cancelEditEnvVar();
+    toast.success(`Updated ${name}`);
   };
 
   const handleAddCredential = async () => {
@@ -380,49 +425,115 @@ export function PasswordsView() {
                         </Button>
                       </div>
                       <div className="space-y-1.5 pl-1">
-                        {vars.map((env) => (
-                          <div
-                            key={env.clientId}
-                            className="flex items-center gap-2 rounded-md border p-2"
-                          >
+                        {vars.map((env) =>
+                          editingEnvId === env.clientId ? (
                             <div
-                              className="flex-1 min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
-                              onClick={() => handleCopyEnvVar(env)}
-                              title="Click to copy as NAME=VALUE"
+                              key={env.clientId}
+                              className="space-y-2 rounded-md border border-primary p-2"
                             >
-                              <p className="text-xs font-medium text-muted-foreground">
-                                {env.name}
-                              </p>
-                              <p className="text-sm font-mono truncate">
-                                {visibleEnvKeys.has(env.clientId)
-                                  ? env.value
-                                  : "\u2022".repeat(Math.min(env.value.length, 32))}
-                              </p>
+                              <Input
+                                placeholder="Project"
+                                value={editEnvProject}
+                                onChange={(e) => setEditEnvProject(e.target.value)}
+                                list="env-project-suggestions"
+                                className="h-8 text-sm"
+                              />
+                              <div className="flex gap-2">
+                                <Input
+                                  placeholder="VARIABLE_NAME"
+                                  value={editEnvName}
+                                  onChange={(e) =>
+                                    setEditEnvName(
+                                      e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "")
+                                    )
+                                  }
+                                  className="flex-1 h-8 text-sm font-mono"
+                                />
+                                <Input
+                                  placeholder="Value..."
+                                  value={editEnvValue}
+                                  onChange={(e) => setEditEnvValue(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") handleSaveEditEnvVar();
+                                    if (e.key === "Escape") cancelEditEnvVar();
+                                  }}
+                                  className="flex-1 h-8 text-sm"
+                                />
+                              </div>
+                              <div className="flex gap-2 justify-end">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 gap-1"
+                                  onClick={cancelEditEnvVar}
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                  Cancel
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  className="h-7 gap-1"
+                                  disabled={!editEnvName.trim() || !editEnvValue.trim()}
+                                  onClick={handleSaveEditEnvVar}
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                  Save
+                                </Button>
+                              </div>
                             </div>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 shrink-0"
-                              onClick={() => toggleEnvVisibility(env.clientId)}
-                              title={visibleEnvKeys.has(env.clientId) ? "Hide" : "Show"}
+                          ) : (
+                            <div
+                              key={env.clientId}
+                              className="flex items-center gap-2 rounded-md border p-2"
                             >
-                              {visibleEnvKeys.has(env.clientId) ? (
-                                <EyeOff className="h-3.5 w-3.5" />
-                              ) : (
-                                <Eye className="h-3.5 w-3.5" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 shrink-0 text-destructive hover:text-destructive"
-                              onClick={() => handleRemoveEnvVar(env)}
-                              title="Remove"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        ))}
+                              <div
+                                className="flex-1 min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
+                                onClick={() => handleCopyEnvVar(env)}
+                                title="Click to copy as NAME=VALUE"
+                              >
+                                <p className="text-xs font-medium text-muted-foreground">
+                                  {env.name}
+                                </p>
+                                <p className="text-sm font-mono truncate">
+                                  {visibleEnvKeys.has(env.clientId)
+                                    ? env.value
+                                    : "\u2022".repeat(Math.min(env.value.length, 32))}
+                                </p>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 shrink-0"
+                                onClick={() => toggleEnvVisibility(env.clientId)}
+                                title={visibleEnvKeys.has(env.clientId) ? "Hide" : "Show"}
+                              >
+                                {visibleEnvKeys.has(env.clientId) ? (
+                                  <EyeOff className="h-3.5 w-3.5" />
+                                ) : (
+                                  <Eye className="h-3.5 w-3.5" />
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 shrink-0"
+                                onClick={() => startEditEnvVar(env)}
+                                title="Edit"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 shrink-0 text-destructive hover:text-destructive"
+                                onClick={() => handleRemoveEnvVar(env)}
+                                title="Remove"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          )
+                        )}
                       </div>
                     </div>
                   ))}

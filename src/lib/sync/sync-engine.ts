@@ -650,12 +650,20 @@ export async function removeEnvVar(clientId: string, syncEnabled: boolean): Prom
   }
 }
 
-export async function updateEnvVar(clientId: string, name: string, value: string, syncEnabled: boolean): Promise<void> {
+export async function updateEnvVar(
+  clientId: string,
+  name: string,
+  value: string,
+  project: string,
+  syncEnabled: boolean
+): Promise<void> {
   const now = new Date().toISOString();
+  const projectName = project.trim() || DEFAULT_ENV_PROJECT;
 
   await db.items.where("clientId").equals(clientId).modify((i) => {
     i.title = name;
     i.content = value;
+    i.tags = [projectName];
     i.updatedAt = now;
   });
 
@@ -664,7 +672,7 @@ export async function updateEnvVar(clientId: string, name: string, value: string
       action: "update",
       entityType: "item",
       clientId,
-      data: { title: name, content: value, updatedAt: now },
+      data: { title: name, content: value, tags: [projectName], updatedAt: now },
       timestamp: now,
     });
     triggerSync();
