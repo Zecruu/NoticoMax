@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +15,7 @@ import {
   Copy,
   Cloud,
   CloudOff,
+  FolderOpen,
 } from "lucide-react";
 import { toast } from "@/lib/native-toast";
 import {
@@ -32,9 +33,10 @@ export function PasswordsView() {
   const [tab, setTab] = useState<"logins" | "envvars">("logins");
 
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
+  const [newEnvProject, setNewEnvProject] = useState("");
   const [newEnvName, setNewEnvName] = useState("");
   const [newEnvValue, setNewEnvValue] = useState("");
-  const [visibleEnvKeys, setVisibleEnvKeys] = useState<Set<number>>(new Set());
+  const [visibleEnvKeys, setVisibleEnvKeys] = useState<Set<string>>(new Set());
 
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [newCredLabel, setNewCredLabel] = useState("");
@@ -61,27 +63,44 @@ export function PasswordsView() {
     toast.success(next ? "Secrets will sync to cloud" : "Secrets are local only");
   };
 
+  const envVarsByProject = useMemo(() => {
+    const groups = new Map<string, EnvVar[]>();
+    for (const env of envVars) {
+      const key = env.project || "Default";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(env);
+    }
+    return Array.from(groups.entries())
+      .map(([project, vars]) => ({ project, vars }))
+      .sort((a, b) => a.project.localeCompare(b.project));
+  }, [envVars]);
+
+  const projectNames = useMemo(
+    () => Array.from(new Set(envVars.map((v) => v.project))).sort(),
+    [envVars]
+  );
+
   const handleAddEnvVar = async () => {
     const name = newEnvName.trim();
     const value = newEnvValue.trim();
+    const project = newEnvProject.trim() || "Default";
     if (!name || !value) return;
-    if (envVars.some((v) => v.name === name)) {
-      toast.error("Variable already exists");
+    if (envVars.some((v) => v.name === name && v.project === project)) {
+      toast.error(`${name} already exists in ${project}`);
       return;
     }
-    await addEnvVar(name, value, syncEnabled);
+    await addEnvVar(name, value, project, syncEnabled);
     await refreshEnvVars();
     setNewEnvName("");
     setNewEnvValue("");
-    toast.success(`Added ${name}`);
+    toast.success(`Added ${name} to ${project}`);
   };
 
-  const handleRemoveEnvVar = async (index: number) => {
-    const env = envVars[index];
+  const handleRemoveEnvVar = async (env: EnvVar) => {
     await removeEnvVar(env.clientId, syncEnabled);
     setVisibleEnvKeys((prev) => {
       const next = new Set(prev);
-      next.delete(index);
+      next.delete(env.clientId);
       return next;
     });
     await refreshEnvVars();
@@ -93,18 +112,18 @@ export function PasswordsView() {
     toast.success(`Copied ${env.name}`);
   };
 
-  const handleCopyAllEnvVars = () => {
-    if (envVars.length === 0) return;
-    const text = envVars.map((v) => `${v.name}=${v.value}`).join("\n");
+  const handleCopyProjectEnvVars = (project: string, vars: EnvVar[]) => {
+    if (vars.length === 0) return;
+    const text = vars.map((v) => `${v.name}=${v.value}`).join("\n");
     navigator.clipboard.writeText(text);
-    toast.success("All variables copied");
+    toast.success(`Copied ${project} (${vars.length} vars)`);
   };
 
-  const toggleEnvVisibility = (index: number) => {
+  const toggleEnvVisibility = (clientId: string) => {
     setVisibleEnvKeys((prev) => {
       const next = new Set(prev);
-      if (next.has(index)) next.delete(index);
-      else next.add(index);
+      if (next.has(clientId)) next.delete(clientId);
+      else next.add(clientId);
       return next;
     });
   };
@@ -337,89 +356,120 @@ export function PasswordsView() {
 
           {/* Env Variables */}
           {tab === "envvars" && (
-            <div className="space-y-3">
-              {envVars.length > 0 && (
-                <div className="space-y-2">
-                  {envVars.map((env, index) => (
-                    <div key={index} className="flex items-center gap-2 rounded-md border p-2">
-                      <div
-                        className="flex-1 min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
-                        onClick={() => handleCopyEnvVar(env)}
-                        title="Click to copy as NAME=VALUE"
-                      >
-                        <p className="text-xs font-medium text-muted-foreground">{env.name}</p>
-                        <p className="text-sm font-mono truncate">
-                          {visibleEnvKeys.has(index)
-                            ? env.value
-                            : "\u2022".repeat(Math.min(env.value.length, 32))}
-                        </p>
+            <div className="space-y-4">
+              {envVarsByProject.length > 0 && (
+                <div className="space-y-4">
+                  {envVarsByProject.map(({ project, vars }) => (
+                    <div key={project} className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <FolderOpen className="h-3.5 w-3.5 text-muted-foreground" />
+                        <h3 className="text-sm font-semibold">{project}</h3>
+                        <span className="text-xs text-muted-foreground">
+                          ({vars.length} {vars.length === 1 ? "var" : "vars"})
+                        </span>
+                        <div className="flex-1 h-px bg-border" />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 gap-1 text-xs"
+                          onClick={() => handleCopyProjectEnvVars(project, vars)}
+                          title="Copy all in this project"
+                        >
+                          <Copy className="h-3 w-3" />
+                          Copy all
+                        </Button>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 shrink-0"
-                        onClick={() => toggleEnvVisibility(index)}
-                        title={visibleEnvKeys.has(index) ? "Hide" : "Show"}
-                      >
-                        {visibleEnvKeys.has(index) ? (
-                          <EyeOff className="h-3.5 w-3.5" />
-                        ) : (
-                          <Eye className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 shrink-0 text-destructive hover:text-destructive"
-                        onClick={() => handleRemoveEnvVar(index)}
-                        title="Remove"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      <div className="space-y-1.5 pl-1">
+                        {vars.map((env) => (
+                          <div
+                            key={env.clientId}
+                            className="flex items-center gap-2 rounded-md border p-2"
+                          >
+                            <div
+                              className="flex-1 min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
+                              onClick={() => handleCopyEnvVar(env)}
+                              title="Click to copy as NAME=VALUE"
+                            >
+                              <p className="text-xs font-medium text-muted-foreground">
+                                {env.name}
+                              </p>
+                              <p className="text-sm font-mono truncate">
+                                {visibleEnvKeys.has(env.clientId)
+                                  ? env.value
+                                  : "\u2022".repeat(Math.min(env.value.length, 32))}
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 shrink-0"
+                              onClick={() => toggleEnvVisibility(env.clientId)}
+                              title={visibleEnvKeys.has(env.clientId) ? "Hide" : "Show"}
+                            >
+                              {visibleEnvKeys.has(env.clientId) ? (
+                                <EyeOff className="h-3.5 w-3.5" />
+                              ) : (
+                                <Eye className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 shrink-0 text-destructive hover:text-destructive"
+                              onClick={() => handleRemoveEnvVar(env)}
+                              title="Remove"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
 
-              {envVars.length > 0 && (
+              <div className="space-y-2 rounded-md border border-dashed p-3">
+                <Input
+                  placeholder="Project name (e.g., Project 1, my-app)..."
+                  value={newEnvProject}
+                  onChange={(e) => setNewEnvProject(e.target.value)}
+                  list="env-project-suggestions"
+                  className="h-8 text-sm"
+                />
+                <datalist id="env-project-suggestions">
+                  {projectNames.map((p) => (
+                    <option key={p} value={p} />
+                  ))}
+                </datalist>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="VARIABLE_NAME"
+                    value={newEnvName}
+                    onChange={(e) =>
+                      setNewEnvName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ""))
+                    }
+                    className="flex-1 h-8 text-sm font-mono"
+                  />
+                  <Input
+                    placeholder="Value..."
+                    type="password"
+                    value={newEnvValue}
+                    onChange={(e) => setNewEnvValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleAddEnvVar();
+                    }}
+                    className="flex-1 h-8 text-sm"
+                  />
+                </div>
                 <Button
-                  variant="outline"
                   size="sm"
                   className="w-full gap-1.5"
-                  onClick={handleCopyAllEnvVars}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  Copy All as NAME=VALUE
-                </Button>
-              )}
-
-              <div className="flex gap-2">
-                <Input
-                  placeholder="VARIABLE_NAME"
-                  value={newEnvName}
-                  onChange={(e) =>
-                    setNewEnvName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ""))
-                  }
-                  className="flex-1 h-8 text-sm font-mono"
-                />
-                <Input
-                  placeholder="Value..."
-                  type="password"
-                  value={newEnvValue}
-                  onChange={(e) => setNewEnvValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleAddEnvVar();
-                  }}
-                  className="flex-1 h-8 text-sm"
-                />
-                <Button
-                  size="sm"
-                  className="gap-1.5 shrink-0"
                   disabled={!newEnvName.trim() || !newEnvValue.trim()}
                   onClick={handleAddEnvVar}
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  Add
+                  Add to {newEnvProject.trim() || "Default"}
                 </Button>
               </div>
             </div>

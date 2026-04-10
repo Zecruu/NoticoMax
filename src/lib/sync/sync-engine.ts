@@ -577,25 +577,34 @@ export interface EnvVar {
   clientId: string;
   name: string;
   value: string;
+  project: string;
 }
+
+const DEFAULT_ENV_PROJECT = "Default";
 
 export async function getEnvVars(): Promise<EnvVar[]> {
   const items = await db.items.where("type").equals("envvar").toArray();
   return items
     .filter((item) => !item.deleted)
-    .map((item) => ({ clientId: item.clientId, name: item.title, value: item.content }));
+    .map((item) => ({
+      clientId: item.clientId,
+      name: item.title,
+      value: item.content,
+      project: item.tags[0] || DEFAULT_ENV_PROJECT,
+    }));
 }
 
-export async function addEnvVar(name: string, value: string, syncEnabled: boolean): Promise<void> {
+export async function addEnvVar(name: string, value: string, project: string, syncEnabled: boolean): Promise<void> {
   const now = new Date().toISOString();
   const clientId = uuidv4();
+  const projectName = project.trim() || DEFAULT_ENV_PROJECT;
 
   const localItem: LocalItem = {
     clientId,
     type: "envvar",
     title: name,
     content: value,
-    tags: [],
+    tags: [projectName],
     pinned: false,
     deviceId: getDeviceId(),
     deleted: false,
