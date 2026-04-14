@@ -38,6 +38,24 @@ A cross-platform note-taking and organization app with cloud sync.
 ## Custom Skills
 
 - `/build-electron [patch|minor|major]` - Full build, version bump, and GitHub release pipeline
+- `/sync-skills [push|pull|list] [skill-name]` - Sync Claude Code skills to/from NoticoMax cloud
+
+## Claude Skills Sync (cross-computer setup)
+
+On a new computer, run this one-liner in your terminal to bootstrap the NoticoMax skill:
+
+```bash
+curl -s https://www.noticomax.com/api/skills/bootstrap | mkdir -p ~/.claude/skills/noticomax && cat > ~/.claude/skills/noticomax/SKILL.md
+```
+
+Then in Claude Code, run `/noticomax pull` to download all your skills from the cloud.
+
+### Skills API endpoints
+
+- `GET /api/skills/bootstrap` - Public, no auth. Returns the bootstrap SKILL.md
+- `GET /api/skills` - List skills (session auth via Bearer token)
+- `POST /api/skills` - Create/upsert skill
+- `GET/PUT/DELETE /api/skills/:skillId` - Single skill CRUD
 
 ## Common Gotchas
 

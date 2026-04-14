@@ -122,6 +122,15 @@ function createWindow(url) {
 
   mainWindow.webContents.on("did-fail-load", (event, errorCode, errorDescription) => {
     logger.error("electron", `Window failed to load: ${errorCode} ${errorDescription}`);
+    // Retry loading after a short delay — the server may still be warming up
+    if (!isDev) {
+      logger.info("electron", "Retrying page load in 2 seconds...");
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.loadURL(url);
+        }
+      }, 2000);
+    }
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -168,6 +177,38 @@ function findServerJs() {
   return { serverPath: directPath, cwd: standaloneDir };
 }
 
+function waitForServer(url, maxAttempts = 30, interval = 500) {
+  const http = require("http");
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    const check = () => {
+      attempts++;
+      const req = http.get(url, (res) => {
+        logger.info("server", `Server responded with status ${res.statusCode} on attempt ${attempts}`);
+        res.resume();
+        resolve();
+      });
+      req.on("error", () => {
+        if (attempts >= maxAttempts) {
+          logger.error("server", `Server not reachable after ${attempts} attempts`);
+          reject(new Error("Server failed to start in time"));
+        } else {
+          setTimeout(check, interval);
+        }
+      });
+      req.setTimeout(1000, () => {
+        req.destroy();
+        if (attempts >= maxAttempts) {
+          reject(new Error("Server failed to start in time"));
+        } else {
+          setTimeout(check, interval);
+        }
+      });
+    };
+    check();
+  });
+}
+
 function startProductionServer() {
   return new Promise((resolve, reject) => {
     const { serverPath, cwd } = findServerJs();
@@ -201,10 +242,6 @@ function startProductionServer() {
     serverProcess.stdout.on("data", (data) => {
       const output = data.toString().trim();
       if (output) logger.info("server", output);
-      if (output.includes("Ready") || output.includes("started") || output.includes("listening")) {
-        logger.info("server", `Server is ready on port ${PROD_PORT}`);
-        resolve(`http://localhost:${PROD_PORT}`);
-      }
     });
 
     serverProcess.stderr.on("data", (data) => {
@@ -221,10 +258,14 @@ function startProductionServer() {
       logger.warn("server", `Process exited with code ${code}, signal ${signal}`);
     });
 
-    setTimeout(() => {
-      logger.warn("server", "No ready signal received, proceeding after timeout.");
-      resolve(`http://localhost:${PROD_PORT}`);
-    }, 5000);
+    const url = `http://localhost:${PROD_PORT}`;
+    // Poll the server with HTTP requests until it actually responds
+    waitForServer(url)
+      .then(() => {
+        logger.info("server", `Server confirmed ready on port ${PROD_PORT}`);
+        resolve(url);
+      })
+      .catch(reject);
   });
 }
 

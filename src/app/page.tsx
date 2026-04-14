@@ -14,6 +14,7 @@ import { TrashView } from "@/components/items/trash-view";
 import { CalendarView } from "@/components/calendar/calendar-view";
 import { StudyView } from "@/components/study/study-view";
 import { PasswordsView } from "@/components/passwords/passwords-view";
+import { SkillsView } from "@/components/skills/skills-view";
 import { useLicense } from "@/hooks/use-license";
 import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
@@ -217,6 +218,8 @@ export default function Dashboard() {
             <StudyView />
           ) : activeView === "passwords" ? (
             <PasswordsView />
+          ) : activeView === "skills" ? (
+            <SkillsView />
           ) : (
             <ItemList
               items={displayedItems}
