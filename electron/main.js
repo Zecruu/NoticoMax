@@ -25,6 +25,12 @@ const PROD_PORT = 3099;
 const APP_ENV = {
   MONGODB_URI: "placeholder",
   ADMIN_SECRET: "placeholder",
+  APPLE_TEAM_ID: "placeholder",
+  APPLE_KEY_ID: "placeholder",
+  APPLE_CLIENT_ID: "placeholder",
+  APPLE_BUNDLE_ID: "placeholder",
+  APPLE_REDIRECT_URI: "placeholder",
+  APPLE_PRIVATE_KEY_BASE64: "placeholder",
   NEXT_PUBLIC_APP_URL: `http://localhost:${PROD_PORT}`,
 };
 
@@ -339,6 +345,84 @@ ipcMain.handle("set-open-at-login", (event, enabled) => {
   app.setLoginItemSettings({ openAtLogin: enabled });
   logger.info("electron", `Open at login set to: ${enabled}`);
   return enabled;
+});
+
+// Apple Sign-In config for Electron (Mac) flow.
+// Client ID is the Services ID (not the bundle ID).
+const APPLE_CLIENT_ID = "com.noticomax.signin";
+const APPLE_REDIRECT_URI = "https://www.noticomax.com/api/auth/apple/callback";
+
+ipcMain.handle("open-apple-signin", async () => {
+  const crypto = require("crypto");
+  const state = crypto.randomBytes(16).toString("hex");
+  const params = new URLSearchParams({
+    client_id: APPLE_CLIENT_ID,
+    redirect_uri: APPLE_REDIRECT_URI,
+    response_type: "code",
+    scope: "name email",
+    state,
+    response_mode: "query",
+  });
+  const authUrl = `https://appleid.apple.com/auth/authorize?${params.toString()}`;
+
+  return new Promise((resolve) => {
+    const authWindow = new BrowserWindow({
+      width: 600,
+      height: 700,
+      parent: mainWindow ?? undefined,
+      modal: true,
+      show: true,
+      title: "Sign in with Apple",
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    });
+
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (!authWindow.isDestroyed()) authWindow.close();
+      resolve(result);
+    };
+
+    const handleUrl = (url) => {
+      if (!url.startsWith(APPLE_REDIRECT_URI)) return;
+      try {
+        const parsed = new URL(url);
+        const code = parsed.searchParams.get("code");
+        const error = parsed.searchParams.get("error");
+        const returnedState = parsed.searchParams.get("state");
+        if (returnedState && returnedState !== state) {
+          finish({ success: false, error: "State mismatch" });
+          return;
+        }
+        if (error) {
+          finish({ success: false, error });
+          return;
+        }
+        if (code) {
+          finish({ success: true, code });
+          return;
+        }
+      } catch (err) {
+        finish({ success: false, error: err.message });
+      }
+    };
+
+    authWindow.webContents.on("will-redirect", (_event, url) => handleUrl(url));
+    authWindow.webContents.on("will-navigate", (_event, url) => handleUrl(url));
+
+    authWindow.on("closed", () => {
+      if (!settled) {
+        settled = true;
+        resolve({ success: false, error: "Window closed" });
+      }
+    });
+
+    authWindow.loadURL(authUrl);
+  });
 });
 
 ipcMain.handle("wipe-local-data", async () => {

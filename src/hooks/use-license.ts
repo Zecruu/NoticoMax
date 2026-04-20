@@ -114,6 +114,38 @@ export function useLicense() {
     }
   }, []);
 
+  const loginWithApple = useCallback(async (payload: {
+    identityToken?: string;
+    code?: string;
+    email?: string;
+  }): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch("/api/auth/apple", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || "Apple sign-in failed" };
+      }
+      localStorage.setItem(SESSION_KEY, data.sessionToken);
+      localStorage.setItem(EMAIL_KEY, data.email);
+      setEmail(data.email);
+      setIsLoggedIn(true);
+      if (data.licenseKey) {
+        localStorage.setItem(LICENSE_KEY, data.licenseKey);
+        setLicenseKeyState(data.licenseKey);
+      }
+      const ent: ComputedEntitlements = data.entitlements ?? FREE_ENTITLEMENTS;
+      setEntitlements(ent);
+      localStorage.setItem(ENTITLEMENTS_KEY, JSON.stringify(ent));
+      return { success: true };
+    } catch {
+      return { success: false, error: "Failed to connect to server" };
+    }
+  }, []);
+
   const register = useCallback(async (regEmail: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
       const res = await fetch("/api/auth/register", {
@@ -191,6 +223,7 @@ export function useLicense() {
     isLoggedIn,
     email,
     login,
+    loginWithApple,
     register,
     activate,
     logout,

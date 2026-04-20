@@ -31,7 +31,7 @@ export default function Dashboard() {
   const [defaultType, setDefaultType] = useState<"note" | "url" | "reminder">("note");
   const [skippedActivation, setSkippedActivation] = useState(false);
 
-  const { licenseKey, isActivated, isLoading, isLoggedIn, login, register } = useLicense();
+  const { licenseKey, isActivated, isLoading, isLoggedIn, login, loginWithApple, register } = useLicense();
 
   const { folders, addFolder, editFolder, removeFolder } = useFolders(licenseKey);
   const {
@@ -165,7 +165,7 @@ export default function Dashboard() {
   }
 
   if (!isLoggedIn && !skippedActivation) {
-    return <AuthGate onLogin={login} onRegister={register} onSkip={() => setSkippedActivation(true)} />;
+    return <AuthGate onLogin={login} onLoginWithApple={loginWithApple} onRegister={register} onSkip={() => setSkippedActivation(true)} />;
   }
 
   return (

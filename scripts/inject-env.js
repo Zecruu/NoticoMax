@@ -15,6 +15,12 @@ const ENV_FILE = path.join(__dirname, "..", ".env");
 const DEFAULTS = {
   MONGODB_URI: "placeholder",
   ADMIN_SECRET: "placeholder",
+  APPLE_TEAM_ID: "placeholder",
+  APPLE_KEY_ID: "placeholder",
+  APPLE_CLIENT_ID: "placeholder",
+  APPLE_BUNDLE_ID: "placeholder",
+  APPLE_REDIRECT_URI: "placeholder",
+  APPLE_PRIVATE_KEY_BASE64: "placeholder",
 };
 
 function parseEnv(filePath) {

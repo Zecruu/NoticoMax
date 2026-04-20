@@ -5,21 +5,42 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { LogIn, UserPlus } from "lucide-react";
+import { LogIn, UserPlus, Apple } from "lucide-react";
+import { triggerAppleSignIn, type AppleSignInPayload } from "@/lib/auth/apple-signin-client";
 
 interface AuthGateProps {
   onLogin: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  onLoginWithApple: (payload: AppleSignInPayload & { email?: string }) => Promise<{ success: boolean; error?: string }>;
   onRegister: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   onSkip: () => void;
 }
 
-export function AuthGate({ onLogin, onRegister, onSkip }: AuthGateProps) {
+export function AuthGate({ onLogin, onLoginWithApple, onRegister, onSkip }: AuthGateProps) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
+
+  const handleAppleSignIn = async () => {
+    setError("");
+    setAppleLoading(true);
+    const result = await triggerAppleSignIn();
+    if (!result.success || !result.payload) {
+      setAppleLoading(false);
+      if (result.error && result.error !== "Sign-in cancelled") {
+        setError(result.error);
+      }
+      return;
+    }
+    const authResult = await onLoginWithApple(result.payload);
+    setAppleLoading(false);
+    if (!authResult.success) {
+      setError(authResult.error || "Apple sign-in failed");
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,6 +93,25 @@ export function AuthGate({ onLogin, onRegister, onSkip }: AuthGateProps) {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <Button
+            type="button"
+            onClick={handleAppleSignIn}
+            disabled={appleLoading || loading}
+            className="w-full bg-black text-white hover:bg-neutral-800 dark:bg-white dark:text-black dark:hover:bg-neutral-200"
+          >
+            <Apple className="h-4 w-4 mr-2" />
+            {appleLoading ? "Opening Apple…" : "Sign in with Apple"}
+          </Button>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">or</span>
+            </div>
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>

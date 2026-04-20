@@ -20,6 +20,8 @@
 # misc
 .DS_Store
 *.pem
+*.p8
+AuthKey_*.p8
 
 # debug
 npm-debug.log*

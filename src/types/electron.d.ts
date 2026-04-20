@@ -30,6 +30,7 @@ interface ElectronAPI {
   getOpenAtLogin: () => Promise<boolean>;
   setOpenAtLogin: (enabled: boolean) => Promise<boolean>;
   wipeLocalData: () => Promise<{ success: boolean; error?: string }>;
+  openAppleSignIn: () => Promise<{ success: boolean; code?: string; error?: string }>;
 
   onUpdateDownloadProgress: (callback: (data: UpdateDownloadProgress) => void) => () => void;
   onUpdateDownloaded: (callback: (data: UpdateDownloadedInfo) => void) => () => void;

@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getOpenAtLogin: () => ipcRenderer.invoke("get-open-at-login"),
   setOpenAtLogin: (enabled) => ipcRenderer.invoke("set-open-at-login", enabled),
   wipeLocalData: () => ipcRenderer.invoke("wipe-local-data"),
+  openAppleSignIn: () => ipcRenderer.invoke("open-apple-signin"),
 
   // Event listeners for main-to-renderer communication
   onUpdateDownloadProgress: (callback) => {

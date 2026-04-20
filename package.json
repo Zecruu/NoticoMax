@@ -1,6 +1,6 @@
 {
   "name": "notico-max",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -94,6 +94,7 @@
     }
   },
   "dependencies": {
+    "@capacitor-community/apple-sign-in": "^7.1.0",
     "@capacitor/app": "^8.0.1",
     "@capacitor/browser": "^8.0.1",
     "@capacitor/cli": "^8.1.0",
@@ -114,6 +115,7 @@
     "dexie": "^4.3.0",
     "electron-updater": "^6.7.3",
     "highlight.js": "^11.11.1",
+    "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.563.0",
     "mongoose": "^9.2.0",
     "nanoid": "^5.1.6",
@@ -132,6 +134,7 @@
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
     "@tailwindcss/postcss": "^4",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
