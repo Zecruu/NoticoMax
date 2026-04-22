@@ -19,6 +19,7 @@ import {
   BookOpen,
   Lock,
   Wand2,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -100,6 +101,14 @@ export function Sidebar({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deletingFolder, setDeletingFolder] = useState<LocalFolder | null>(null);
+  const [sectionsOpen, setSectionsOpen] = useState({
+    general: true,
+    developer: true,
+    folders: true,
+  });
+
+  const toggleSection = (key: keyof typeof sectionsOpen) =>
+    setSectionsOpen((s) => ({ ...s, [key]: !s[key] }));
 
   const createInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -159,153 +168,201 @@ export function Sidebar({
           New Item
         </Button>
 
-        <nav className="space-y-1">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const count =
-              item.value === "all"
-                ? Object.values(itemCounts).reduce((a, b) => a + b, 0)
-                : itemCounts[item.value] || 0;
+        {/* General */}
+        <button
+          onClick={() => toggleSection("general")}
+          className="flex w-full items-center gap-1 px-3 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+        >
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 transition-transform",
+              !sectionsOpen.general && "-rotate-90"
+            )}
+          />
+          General
+        </button>
 
-            return (
-              <button
-                key={item.value}
-                onClick={() => {
-                  onFolderChange(null);
-                  onFilterChange(item.value);
-                  onViewChange?.("list");
-                  onTagChange?.(null);
-                }}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                  activeView !== "trash" && activeView !== "calendar" && activeView !== "study" && activeView !== "passwords" && activeView !== "skills" && !activeFolder && !activeTag && activeFilter === item.value
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                <span className="flex-1 text-left">{item.label}</span>
-                <span
+        {sectionsOpen.general && (
+          <nav className="space-y-1">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const count =
+                item.value === "all"
+                  ? Object.values(itemCounts).reduce((a, b) => a + b, 0)
+                  : itemCounts[item.value] || 0;
+
+              return (
+                <button
+                  key={item.value}
+                  onClick={() => {
+                    onFolderChange(null);
+                    onFilterChange(item.value);
+                    onViewChange?.("list");
+                    onTagChange?.(null);
+                  }}
                   className={cn(
-                    "text-xs tabular-nums",
+                    "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
                     activeView !== "trash" && activeView !== "calendar" && activeView !== "study" && activeView !== "passwords" && activeView !== "skills" && !activeFolder && !activeTag && activeFilter === item.value
-                      ? "text-primary-foreground/70"
-                      : "text-muted-foreground"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
                   )}
                 >
-                  {count}
+                  <Icon className="h-4 w-4" />
+                  <span className="flex-1 text-left">{item.label}</span>
+                  <span
+                    className={cn(
+                      "text-xs tabular-nums",
+                      activeView !== "trash" && activeView !== "calendar" && activeView !== "study" && activeView !== "passwords" && activeView !== "skills" && !activeFolder && !activeTag && activeFilter === item.value
+                        ? "text-primary-foreground/70"
+                        : "text-muted-foreground"
+                    )}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+            <button
+              onClick={() => {
+                onFolderChange(null);
+                onViewChange?.("study");
+                onTagChange?.(null);
+              }}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                activeView === "study"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <BookOpen className="h-4 w-4" />
+              <span className="flex-1 text-left">Study</span>
+            </button>
+
+            <button
+              onClick={() => {
+                onFolderChange(null);
+                onViewChange?.("calendar");
+                onTagChange?.(null);
+              }}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                activeView === "calendar"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <Calendar className="h-4 w-4" />
+              <span className="flex-1 text-left">Calendar</span>
+            </button>
+
+            <button
+              onClick={() => {
+                onFolderChange(null);
+                onViewChange?.("passwords");
+                onTagChange?.(null);
+              }}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                activeView === "passwords"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <Lock className="h-4 w-4" />
+              <span className="flex-1 text-left">Passwords</span>
+            </button>
+
+            <button
+              onClick={() => {
+                onFolderChange(null);
+                onViewChange?.("trash");
+                onTagChange?.(null);
+              }}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                activeView === "trash"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <Trash2 className="h-4 w-4" />
+              <span className="flex-1 text-left">Trash</span>
+              {trashCount > 0 && (
+                <span className={cn(
+                  "text-xs tabular-nums",
+                  activeView === "trash" ? "text-primary-foreground/70" : "text-muted-foreground"
+                )}>
+                  {trashCount}
                 </span>
-              </button>
-            );
-          })}
-          <button
-            onClick={() => {
-              onFolderChange(null);
-              onViewChange?.("study");
-              onTagChange?.(null);
-            }}
+              )}
+            </button>
+          </nav>
+        )}
+
+        {/* Developer */}
+        <button
+          onClick={() => toggleSection("developer")}
+          className="flex w-full items-center gap-1 px-3 mt-4 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+        >
+          <ChevronDown
             className={cn(
-              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-              activeView === "study"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              "h-3 w-3 transition-transform",
+              !sectionsOpen.developer && "-rotate-90"
             )}
-          >
-            <BookOpen className="h-4 w-4" />
-            <span className="flex-1 text-left">Study</span>
-          </button>
+          />
+          Developer
+        </button>
 
+        {sectionsOpen.developer && (
+          <nav className="space-y-1">
+            <button
+              onClick={() => {
+                onFolderChange(null);
+                onViewChange?.("skills");
+                onTagChange?.(null);
+              }}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                activeView === "skills"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <Wand2 className="h-4 w-4" />
+              <span className="flex-1 text-left">Claude Skills</span>
+            </button>
+          </nav>
+        )}
+
+        {/* Folders */}
+        <div className="flex items-center justify-between px-3 mt-4 mb-2">
           <button
-            onClick={() => {
-              onFolderChange(null);
-              onViewChange?.("calendar");
-              onTagChange?.(null);
-            }}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-              activeView === "calendar"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            )}
+            onClick={() => toggleSection("folders")}
+            className="flex items-center gap-1 text-xs font-medium text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
           >
-            <Calendar className="h-4 w-4" />
-            <span className="flex-1 text-left">Calendar</span>
-          </button>
-
-          <button
-            onClick={() => {
-              onFolderChange(null);
-              onViewChange?.("passwords");
-              onTagChange?.(null);
-            }}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-              activeView === "passwords"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            )}
-          >
-            <Lock className="h-4 w-4" />
-            <span className="flex-1 text-left">Passwords</span>
-          </button>
-
-          <button
-            onClick={() => {
-              onFolderChange(null);
-              onViewChange?.("skills");
-              onTagChange?.(null);
-            }}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-              activeView === "skills"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            )}
-          >
-            <Wand2 className="h-4 w-4" />
-            <span className="flex-1 text-left">Claude Skills</span>
-          </button>
-
-          <button
-            onClick={() => {
-              onFolderChange(null);
-              onViewChange?.("trash");
-              onTagChange?.(null);
-            }}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-              activeView === "trash"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            )}
-          >
-            <Trash2 className="h-4 w-4" />
-            <span className="flex-1 text-left">Trash</span>
-            {trashCount > 0 && (
-              <span className={cn(
-                "text-xs tabular-nums",
-                activeView === "trash" ? "text-primary-foreground/70" : "text-muted-foreground"
-              )}>
-                {trashCount}
-              </span>
-            )}
-          </button>
-        </nav>
-
-        <Separator className="my-4" />
-
-        <div className="flex items-center justify-between px-3 mb-2">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <ChevronDown
+              className={cn(
+                "h-3 w-3 transition-transform",
+                !sectionsOpen.folders && "-rotate-90"
+              )}
+            />
             Folders
-          </p>
+          </button>
           <button
-            onClick={() => setCreating(true)}
+            onClick={() => {
+              if (!sectionsOpen.folders) {
+                setSectionsOpen((s) => ({ ...s, folders: true }));
+              }
+              setCreating(true);
+            }}
             className="text-muted-foreground hover:text-foreground transition-colors"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
         </div>
 
+        {sectionsOpen.folders && (
         <nav className="space-y-1">
           {creating && (
             <div className="px-3 py-1">
@@ -460,6 +517,7 @@ export function Sidebar({
             </p>
           )}
         </nav>
+        )}
 
         {allTags.length > 0 && (
           <>
