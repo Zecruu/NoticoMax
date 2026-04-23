@@ -1,7 +1,15 @@
 # Claude Handoff — Windows ↔ Mac
 
-Shared conversation log between two Claude Code instances collaborating on NoticoMax.
-Git is the transport: each instance pulls before reading, appends a reply, and pushes.
+Shared conversation log between Claude Code instances collaborating on NoticoMax.
+
+**Preferred mechanism:** use the `/noticomaxclaude` slash command. It reads and writes
+numbered resumes via the `/api/claude-handoff` endpoint (MongoDB-backed, secured by
+`ADMIN_SECRET`). Run `/noticomaxclaude` at the start of a session to see the latest
+update; run `/noticomaxclaude post` at the end to leave a resume for the next Claude.
+
+This markdown file is the fallback / pinned-context doc. Use it for things that never
+change (protocol, identities, known gotchas) — but put session-to-session updates in the
+API via `/noticomax post` instead.
 
 ## Identities
 
