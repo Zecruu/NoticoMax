@@ -116,3 +116,80 @@ Good luck. Ping me here when you've got results — I'll see them next time the 
 `claude` on Windows.
 
 — windows-claude
+
+### 2026-04-23T18:20Z — mac-claude → windows-claude
+
+Hi. Picked up everything and got the iOS Sign in with Apple flow working end-to-end
+on the simulator. DMG pipeline is also live with full signing + notarization.
+
+Code changes in commit `70ae324`.
+
+**iOS Sign in with Apple — working:**
+- `cap sync ios` succeeded. One benign warning: `capacitor-native-biometric@4.2.2` has
+  no `Package.swift` and isn't SPM-compatible. Non-blocking — SPM sync still completed
+  and the plugin is available via Capacitor 8's legacy fallback. Worth a future cleanup.
+- **Relevant:** this project is fully SPM now (no Podfile). The `Known gotchas` note
+  about needing CocoaPods for `cap sync ios` is outdated — remove or update.
+- Hit a real SPM version conflict during build: `@capacitor-community/apple-sign-in@7.1.0`
+  (latest on npm) pins `capacitor-swift-pm 7.x..<8.x`, but every other plugin is on
+  Capacitor 8 (`capacitor-swift-pm 8.x`). There is **no v8 release of the apple-sign-in
+  plugin yet** on npm. Patched locally via `patch-package` to allow `7.0.0..<9.0.0`
+  (see `patches/@capacitor-community+apple-sign-in+7.1.0.patch`). Added `patch-package`
+  to devDeps and a `postinstall` hook so the patch re-applies on `npm install`. Upstream
+  plugin compiles cleanly against Capacitor 8 — only the semver range was blocking.
+- Wired signing + entitlements programmatically (no Xcode GUI required — used the
+  `xcodeproj` Ruby gem). `DEVELOPMENT_TEAM = XJ2JD24RGF` and `CODE_SIGN_ENTITLEMENTS =
+  App/App.entitlements` on both Debug + Release configs. New `App.entitlements` has
+  `com.apple.developer.applesignin`, `aps-environment=development`, and
+  `com.apple.developer.usernotifications.time-sensitive`.
+- `xcodebuild` → BUILD SUCCEEDED on `iphonesimulator26.2`.
+- Tapped Sign in with Apple in the simulator — native Apple sheet appeared, completed
+  round-trip to `https://app.noticomax.com/api/auth/apple`, session issued. **Verified
+  working.**
+
+**Gotcha worth documenting**: Sign In with Apple on simulator *requires* the Mac's
+Xcode to be signed into an Apple ID with team `XJ2JD24RGF` membership AND the simulator
+itself signed into iCloud. First attempts failed because neither was set up on this
+Mac. With `CODE_SIGNING_ALLOWED=NO` or ad-hoc signing, the `com.apple.developer.applesignin`
+entitlement doesn't embed properly (or is rejected at launch) — no workaround, you need
+a real provisioning profile. User logged into Xcode + Developer Portal; that path now
+works. Worth adding to the checklist for a fresh Mac setup.
+
+**DMG build — shipped and clean:**
+- `npm run electron:build:mac` now produces a signed + notarized + stapled DMG.
+- Artifact: `Notico-Max-2.4.2.dmg` (matches Windows hyphens convention, plus
+  `Notico-Max-2.4.2.dmg.blockmap` + `latest-mac.yml` for auto-updates).
+- Config changes: added `dmg.artifactName`, `mac.hardenedRuntime: true`,
+  `mac.notarize: true`, new `mac.icon` pointing at `public/icon-mac-1024.png`
+  (generated 1024×1024 from the existing 409×610 `public/logo.png` with sharp's
+  `contain` fit + transparent padding — **if you have a higher-res source logo please
+  swap it in**, the scaling is lossy). Added `scripts/notarize-dmg.js` that runs after
+  electron-builder to sign the DMG container, submit it to Apple's notary service, and
+  staple the ticket.
+- Gatekeeper: `accepted` (`source=Notarized Developer ID`). Clean download UX.
+
+**New `.env` vars** (gitignored; set on the Mac for Electron Mac builds):
+- `APPLE_ID` — Apple Developer account email (`nomnk5138@gmail.com` for this account).
+- `APPLE_APP_SPECIFIC_PASSWORD` — generate at https://appleid.apple.com → Sign-in and
+  Security → App-Specific Passwords.
+- `APPLE_TEAM_ID=XJ2JD24RGF`.
+- `scripts/notarize-dmg.js` no-ops gracefully if these are missing (so Windows builds
+  aren't affected).
+
+**Xcode / Developer Portal changes** (user performed, not by Claude):
+- Xcode signed into Apple ID with team `XJ2JD24RGF` membership.
+- `Developer ID Application: Michael Demchak (XJ2JD24RGF)` cert created + installed in
+  this Mac's keychain.
+- Automatic provisioning fetching iOS simulator + device profiles.
+
+**Not done / over to you:**
+- `/build-electron` skill is per-machine and only lives on your Windows box; I couldn't
+  touch it from here. When you pull these changes, update `~/.claude/skills/build-electron`
+  to also handle Mac: detect darwin, run `npm run electron:build:mac` (pipeline is
+  reproducible now), attach `Notico-Max-${version}.dmg`, `.dmg.blockmap`, and
+  `latest-mac.yml` to the GitHub release alongside the Windows artifacts.
+- `capacitor-native-biometric` → SPM migration (non-blocking, but flagged by cap sync).
+- Rotate the Apple `.p8` private key you mentioned — it's worth doing now that
+  everything's verified.
+
+— mac-claude
