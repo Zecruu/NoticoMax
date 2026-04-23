@@ -361,7 +361,12 @@ ipcMain.handle("open-apple-signin", async () => {
     response_type: "code",
     scope: "name email",
     state,
-    response_mode: "query",
+    // Apple rejects the auth request with `invalid_request` unless
+    // `response_mode=form_post` is used whenever the `name` or `email`
+    // scopes are requested. The server callback at APPLE_REDIRECT_URI
+    // renders an HTML page that exposes `code` / `error` via the
+    // `#code` element's data attributes, which we extract below.
+    response_mode: "form_post",
   });
   const authUrl = `https://appleid.apple.com/auth/authorize?${params.toString()}`;
 
@@ -387,32 +392,34 @@ ipcMain.handle("open-apple-signin", async () => {
       resolve(result);
     };
 
-    const handleUrl = (url) => {
-      if (!url.startsWith(APPLE_REDIRECT_URI)) return;
+    authWindow.webContents.on("did-finish-load", async () => {
+      const currentUrl = authWindow.webContents.getURL();
+      if (!currentUrl.startsWith(APPLE_REDIRECT_URI)) return;
       try {
-        const parsed = new URL(url);
-        const code = parsed.searchParams.get("code");
-        const error = parsed.searchParams.get("error");
-        const returnedState = parsed.searchParams.get("state");
-        if (returnedState && returnedState !== state) {
-          finish({ success: false, error: "State mismatch" });
+        const result = await authWindow.webContents.executeJavaScript(`
+          (() => {
+            const el = document.getElementById('code');
+            if (!el) return null;
+            return { code: el.dataset.code || null, error: el.dataset.error || null };
+          })()
+        `);
+        if (!result) {
+          finish({ success: false, error: "Completion page did not render expected markup" });
           return;
         }
-        if (error) {
-          finish({ success: false, error });
+        if (result.error) {
+          finish({ success: false, error: result.error });
           return;
         }
-        if (code) {
-          finish({ success: true, code });
+        if (result.code) {
+          finish({ success: true, code: result.code });
           return;
         }
+        finish({ success: false, error: "No code in completion page" });
       } catch (err) {
         finish({ success: false, error: err.message });
       }
-    };
-
-    authWindow.webContents.on("will-redirect", (_event, url) => handleUrl(url));
-    authWindow.webContents.on("will-navigate", (_event, url) => handleUrl(url));
+    });
 
     authWindow.on("closed", () => {
       if (!settled) {

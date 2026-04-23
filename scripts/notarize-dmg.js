@@ -76,4 +76,34 @@ execFileSync(
 console.log(`notarize-dmg: stapling ticket to ${dmg}...`);
 execFileSync("xcrun", ["stapler", "staple", dmgPath], { stdio: "inherit" });
 
+// Regenerate blockmap + latest-mac.yml: signing + stapling modified the DMG
+// bytes after electron-builder emitted them, so the sha512 and size inside
+// latest-mac.yml are stale and auto-updater would reject the update.
+console.log("notarize-dmg: regenerating blockmap + latest-mac.yml...");
+const arch = process.arch === "arm64" ? "arm64" : "amd64";
+const appBuilder = path.join(
+  __dirname, "..", "node_modules", "app-builder-bin", "mac", `app-builder_${arch}`
+);
+execFileSync(appBuilder, [
+  "blockmap", "--input", dmgPath, "--output", `${dmgPath}.blockmap`,
+  "--compression", "gzip",
+], { stdio: "inherit" });
+
+const crypto = require("crypto");
+const dmgBuf = fs.readFileSync(dmgPath);
+const sha512 = crypto.createHash("sha512").update(dmgBuf).digest("base64");
+const size = dmgBuf.length;
+const version = require(path.join(__dirname, "..", "package.json")).version;
+const releaseDate = new Date().toISOString();
+const yml =
+  `version: ${version}\n` +
+  `files:\n` +
+  `  - url: ${dmg}\n` +
+  `    sha512: ${sha512}\n` +
+  `    size: ${size}\n` +
+  `path: ${dmg}\n` +
+  `sha512: ${sha512}\n` +
+  `releaseDate: '${releaseDate}'\n`;
+fs.writeFileSync(path.join(DIST_DIR, "latest-mac.yml"), yml);
+
 console.log("notarize-dmg: done.");
