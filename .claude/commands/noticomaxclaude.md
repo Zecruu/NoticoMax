@@ -16,7 +16,7 @@ case "$(uname -s)" in
   MINGW*|CYGWIN*|MSYS*) ME=windows-claude ;;
   *) ME=$(uname -s | tr '[:upper:]' '[:lower:]')-claude ;;
 esac
-API=https://www.noticomax.com/api/claude-handoff
+API=https://app.noticomax.com/api/claude-handoff
 ```
 
 Keep these variables available for the rest of the session.

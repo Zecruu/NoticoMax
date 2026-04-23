@@ -350,7 +350,7 @@ ipcMain.handle("set-open-at-login", (event, enabled) => {
 // Apple Sign-In config for Electron (Mac) flow.
 // Client ID is the Services ID (not the bundle ID).
 const APPLE_CLIENT_ID = "com.noticomax.signin";
-const APPLE_REDIRECT_URI = "https://www.noticomax.com/api/auth/apple/callback";
+const APPLE_REDIRECT_URI = "https://app.noticomax.com/api/auth/apple/callback";
 
 ipcMain.handle("open-apple-signin", async () => {
   const crypto = require("crypto");
