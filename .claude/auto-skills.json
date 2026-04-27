@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "triggers": [
+    {
+      "skill": "/build-electron",
+      "event": "Stop",
+      "condition": "code-changed",
+      "paths": ["src/", "electron/", "package.json"],
+      "reason": "Code changes detected (unpushed commits or modified files under src/, electron/, package.json). Run /build-electron now to bump the version, build the installer, and publish a GitHub release. Do not stop until the release is published and the working tree is clean and pushed."
+    }
+  ]
+}
