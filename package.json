@@ -16,6 +16,8 @@
     "cap:android": "npx cap open android",
     "cap:dev:ios": "npx cap run ios --livereload --external",
     "cap:dev:android": "npx cap run android --livereload --external",
+    "ios:build": "node scripts/build-ios.js",
+    "ios:build:upload": "node scripts/build-ios.js --upload",
     "postinstall": "patch-package"
   },
   "build": {
