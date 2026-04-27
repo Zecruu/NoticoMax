@@ -220,12 +220,14 @@ function startProductionServer() {
     const { serverPath, cwd } = findServerJs();
 
     // Write a DNS fix script that runs before the server starts.
-    // mongodb+srv:// needs DNS SRV lookups which can fail with the default
-    // system DNS in Electron. Public DNS servers (Google/Cloudflare) support SRV.
+    // mongodb+srv:// needs DNS SRV lookups, which fail with ECONNREFUSED on
+    // many ISP/corporate DNS resolvers. Replace the resolver list entirely
+    // with public DNS (Google + Cloudflare) so SRV queries always succeed.
+    // Also force ipv4-first to avoid IPv6 hangs on some networks.
     const dnsFixPath = path.join(cwd, "_dns-fix.js");
     fs.writeFileSync(
       dnsFixPath,
-      'try{const d=require("dns");const s=d.getServers();if(!s.some(x=>x==="8.8.8.8"||x==="1.1.1.1")){d.setServers(s.concat(["8.8.8.8","8.8.4.4","1.1.1.1"]))}}catch(e){}'
+      'try{const d=require("dns");d.setServers(["8.8.8.8","1.1.1.1","8.8.4.4","1.0.0.1"]);if(typeof d.setDefaultResultOrder==="function"){d.setDefaultResultOrder("ipv4first")}}catch(e){}'
     );
 
     logger.info("server", `Starting Next.js server: ${serverPath}`);
