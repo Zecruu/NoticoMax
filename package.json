@@ -117,6 +117,8 @@
     "@capacitor/status-bar": "^8.0.1",
     "@capawesome/capacitor-badge": "^8.0.0",
     "@ducanh2912/next-pwa": "^10.2.9",
+    "@supabase/ssr": "^0.10.2",
+    "@supabase/supabase-js": "^2.105.1",
     "capacitor-native-biometric": "^4.2.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
