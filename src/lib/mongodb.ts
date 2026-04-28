@@ -35,8 +35,20 @@ async function dbConnect(): Promise<typeof mongoose> {
   }
 
   if (!cached.promise) {
+    // Tight pool limits: each Electron install + Railway each hold their own
+    // pool. Mongoose's default maxPoolSize=100 multiplied across N users blows
+    // past Atlas connection caps. 5 is plenty for a single-user Electron and
+    // for Railway's typical concurrent load.
+    const poolOptions = {
+      maxPoolSize: 5,
+      minPoolSize: 0,
+      maxIdleTimeMS: 30000,
+      socketTimeoutMS: 45000,
+    };
+
     cached.promise = mongoose
       .connect(uri, {
+        ...poolOptions,
         serverSelectionTimeoutMS: 10000,
         connectTimeoutMS: 10000,
       })
@@ -46,6 +58,7 @@ async function dbConnect(): Promise<typeof mongoose> {
         console.warn("[mongodb] First connection attempt failed, retrying...", err.message);
         await new Promise((r) => setTimeout(r, 2000));
         return mongoose.connect(uri, {
+          ...poolOptions,
           serverSelectionTimeoutMS: 15000,
           connectTimeoutMS: 15000,
         });
