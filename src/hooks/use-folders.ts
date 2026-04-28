@@ -10,7 +10,7 @@ import {
   setOnSyncComplete,
 } from "@/lib/sync/sync-engine";
 
-export function useFolders(licenseKey: string | null = null) {
+export function useFolders() {
   const [folders, setFolders] = useState<LocalFolder[]>([]);
   const [loading, setLoading] = useState(true);
 

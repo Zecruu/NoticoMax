@@ -6,11 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LogIn, UserPlus, Apple } from "lucide-react";
-import { triggerAppleSignIn, type AppleSignInPayload } from "@/lib/auth/apple-signin-client";
+import { triggerAppleSignIn } from "@/lib/auth/apple-signin-client";
 
 interface AuthGateProps {
   onLogin: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  onLoginWithApple: (payload: AppleSignInPayload & { email?: string }) => Promise<{ success: boolean; error?: string }>;
+  onLoginWithApple: (payload: { identityToken?: string; code?: string }) => Promise<{ success: boolean; error?: string }>;
   onRegister: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   onSkip: () => void;
 }
@@ -28,13 +28,21 @@ export function AuthGate({ onLogin, onLoginWithApple, onRegister, onSkip }: Auth
     setError("");
     setAppleLoading(true);
     const result = await triggerAppleSignIn();
-    if (!result.success || !result.payload) {
+
+    if (!result.success) {
       setAppleLoading(false);
       if (result.error && result.error !== "Sign-in cancelled") {
         setError(result.error);
       }
       return;
     }
+
+    // Web flow returns success without a payload because the browser is
+    // redirecting to Apple — leave the loading spinner up so the user knows
+    // something is happening.
+    if (!result.payload) return;
+
+    // iOS native flow — pass the identity token to Supabase Auth.
     const authResult = await onLoginWithApple(result.payload);
     setAppleLoading(false);
     if (!authResult.success) {

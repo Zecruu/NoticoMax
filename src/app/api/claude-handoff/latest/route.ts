@@ -1,37 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
-import dbConnect from "@/lib/mongodb";
-import ClaudeResume from "@/models/ClaudeResume";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { isAdminAuthorized } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 
-/**
- * GET /api/claude-handoff/latest
- * Returns the most recent resume, or 404 if none exist.
- */
 export async function GET(request: NextRequest) {
   if (!isAdminAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    await dbConnect();
-    const resume = await ClaudeResume.findOne().sort({ number: -1 });
+    const admin = getSupabaseAdminClient();
+    const { data, error } = await admin
+      .from("claude_resumes")
+      .select("*")
+      .order("number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    if (!resume) {
-      return NextResponse.json({ error: "No resumes yet" }, { status: 404 });
-    }
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!data) return NextResponse.json({ error: "No resumes yet" }, { status: 404 });
 
     return NextResponse.json({
-      number: resume.number,
-      author: resume.author,
-      content: resume.content,
-      tags: resume.tags,
-      createdAt: resume.createdAt,
+      number: data.number,
+      author: data.author,
+      content: data.content,
+      tags: data.tags,
+      createdAt: data.created_at,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error("[claude-handoff/latest]", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
