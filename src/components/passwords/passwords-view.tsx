@@ -33,8 +33,12 @@ import {
   type Credential,
 } from "@/lib/sync/sync-engine";
 
-export function PasswordsView() {
-  const [tab, setTab] = useState<"logins" | "envvars">("logins");
+interface PasswordsViewProps {
+  initialTab?: "logins" | "envvars";
+}
+
+export function PasswordsView({ initialTab = "logins" }: PasswordsViewProps = {}) {
+  const [tab, setTab] = useState<"logins" | "envvars">(initialTab);
 
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
   const [newEnvProject, setNewEnvProject] = useState("");

@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileCode,
+  Terminal,
 } from "lucide-react";
 import { toast } from "@/lib/native-toast";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +29,7 @@ interface SupportingFile {
 
 interface CloudSkill {
   skillId: string;
+  tool?: "claude" | "codex";
   name: string;
   description: string;
   frontmatter: Record<string, unknown>;
@@ -38,7 +40,37 @@ interface CloudSkill {
   updatedAt: string;
 }
 
-export function SkillsView() {
+interface SkillsViewProps {
+  tool?: "claude" | "codex";
+}
+
+export function SkillsView({ tool = "claude" }: SkillsViewProps = {}) {
+  const isCodex = tool === "codex";
+  const labels = isCodex
+    ? {
+        title: "Codex Skills",
+        Icon: Terminal,
+        bootstrapPath: "~/.codex/prompts/noticomax.md",
+        bootstrapUrl: "/api/skills/bootstrap?tool=codex",
+        commandPrefix: "/noticomax",
+        emptyMessage:
+          "No Codex prompts synced yet. Use /noticomax push in Codex CLI to upload prompts.",
+        loginMessage: "Log in to view and manage your Codex CLI prompts.",
+        copyLabel: "Copy prompt",
+      }
+    : {
+        title: "Claude Skills",
+        Icon: Wand2,
+        bootstrapPath: "~/.claude/skills/noticomax/SKILL.md",
+        bootstrapUrl: "/api/skills/bootstrap",
+        commandPrefix: "/noticomax",
+        emptyMessage:
+          "No skills synced yet. Use /noticomax push in Claude Code to upload skills.",
+        loginMessage: "Log in to view and manage your Claude Code skills.",
+        copyLabel: "Copy SKILL.md",
+      };
+  const HeaderIcon = labels.Icon;
+
   const [skills, setSkills] = useState<CloudSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -58,6 +90,7 @@ export function SkillsView() {
       const params = new URLSearchParams();
       if (searchQuery) params.set("search", searchQuery);
       params.set("public", "true");
+      params.set("tool", tool);
 
       const res = await fetch(`/api/skills?${params.toString()}`, {
         headers: { Authorization: `Bearer ${sessionToken}` },
@@ -76,11 +109,24 @@ export function SkillsView() {
     } finally {
       setLoading(false);
     }
-  }, [searchQuery]);
+  }, [searchQuery, tool]);
 
   useEffect(() => {
     fetchSkills();
   }, [fetchSkills]);
+
+  const buildSkillFile = useCallback((skill: CloudSkill) => {
+    const hasFrontmatter = Object.keys(skill.frontmatter ?? {}).length > 0;
+    if (!hasFrontmatter) return skill.content;
+    const frontmatterLines = Object.entries(skill.frontmatter)
+      .map(([key, value]) => {
+        if (typeof value === "string") return `${key}: ${value}`;
+        if (typeof value === "boolean") return `${key}: ${value}`;
+        return `${key}: ${JSON.stringify(value)}`;
+      })
+      .join("\n");
+    return `---\n${frontmatterLines}\n---\n\n${skill.content}`;
+  }, []);
 
   const handleDelete = async (skillId: string, name: string) => {
     try {
@@ -104,23 +150,14 @@ export function SkillsView() {
   };
 
   const handleCopySkill = (skill: CloudSkill) => {
-    // Reconstruct the SKILL.md content
-    const frontmatterLines = Object.entries(skill.frontmatter)
-      .map(([key, value]) => {
-        if (typeof value === "string") return `${key}: ${value}`;
-        if (typeof value === "boolean") return `${key}: ${value}`;
-        return `${key}: ${JSON.stringify(value)}`;
-      })
-      .join("\n");
-
-    const skillMd = `---\n${frontmatterLines}\n---\n\n${skill.content}`;
-    navigator.clipboard.writeText(skillMd);
-    toast.success(`Copied ${skill.name} SKILL.md`);
+    navigator.clipboard.writeText(buildSkillFile(skill));
+    toast.success(`Copied ${skill.name}`);
   };
 
+  const bootstrapCmd = `curl -s ${typeof window !== "undefined" ? window.location.origin : ""}${labels.bootstrapUrl} -o ${labels.bootstrapPath} --create-dirs`;
+
   const handleCopyBootstrap = () => {
-    const cmd = `curl -s ${window.location.origin}/api/skills/bootstrap -o ~/.claude/skills/noticomax/SKILL.md --create-dirs`;
-    navigator.clipboard.writeText(cmd);
+    navigator.clipboard.writeText(bootstrapCmd);
     toast.success("Bootstrap command copied");
   };
 
@@ -145,8 +182,8 @@ export function SkillsView() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="text-base flex items-center gap-2">
-              <Wand2 className="h-4 w-4" />
-              Claude Skills
+              <HeaderIcon className="h-4 w-4" />
+              {labels.title}
             </CardTitle>
             <Button
               variant="ghost"
@@ -165,19 +202,18 @@ export function SkillsView() {
         <CardContent className="space-y-4">
           {!isLoggedIn ? (
             <p className="text-sm text-muted-foreground text-center py-8">
-              Log in to view and manage your Claude Code skills.
+              {labels.loginMessage}
             </p>
           ) : (
             <>
               {/* Setup hint */}
               <div className="rounded-md border border-dashed p-3 space-y-2">
                 <p className="text-xs text-muted-foreground">
-                  To sync skills on a new computer, run this in your terminal:
+                  To sync on a new computer, run this in your terminal:
                 </p>
                 <div className="flex gap-2">
                   <code className="flex-1 text-xs bg-muted rounded px-2 py-1.5 font-mono truncate">
-                    curl -s {window.location.origin}/api/skills/bootstrap -o
-                    ~/.claude/skills/noticomax/SKILL.md --create-dirs
+                    {bootstrapCmd}
                   </code>
                   <Button
                     variant="outline"
@@ -192,9 +228,10 @@ export function SkillsView() {
                 <p className="text-xs text-muted-foreground">
                   Then use{" "}
                   <code className="bg-muted px-1 rounded text-[11px]">
-                    /noticomax pull
+                    {labels.commandPrefix} pull
                   </code>{" "}
-                  in Claude Code to download all your skills.
+                  in {isCodex ? "Codex CLI" : "Claude Code"} to download all your{" "}
+                  {isCodex ? "prompts" : "skills"}.
                 </p>
               </div>
 
@@ -217,8 +254,8 @@ export function SkillsView() {
               ) : skills.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">
                   {searchQuery
-                    ? "No skills match your search."
-                    : "No skills synced yet. Use /noticomax push in Claude Code to upload skills."}
+                    ? "No matches for your search."
+                    : labels.emptyMessage}
                 </p>
               ) : (
                 <div className="space-y-2">
@@ -264,7 +301,7 @@ export function SkillsView() {
                               e.stopPropagation();
                               handleCopySkill(skill);
                             }}
-                            title="Copy SKILL.md"
+                            title={labels.copyLabel}
                           >
                             <Copy className="h-3.5 w-3.5" />
                           </Button>

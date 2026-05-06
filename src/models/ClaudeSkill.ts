@@ -5,9 +5,12 @@ export interface ISupportingFile {
   content: string;
 }
 
+export type SkillTool = "claude" | "codex";
+
 export interface IClaudeSkill {
   skillId: string;
   userId: string;
+  tool: SkillTool;
   name: string;
   description: string;
   frontmatter: Record<string, unknown>;
@@ -42,6 +45,12 @@ const ClaudeSkillSchema = new Schema<IClaudeSkillDocument>(
     userId: {
       type: String,
       required: true,
+      index: true,
+    },
+    tool: {
+      type: String,
+      enum: ["claude", "codex"],
+      default: "claude",
       index: true,
     },
     name: {
@@ -86,8 +95,11 @@ const ClaudeSkillSchema = new Schema<IClaudeSkillDocument>(
   }
 );
 
-// A user can only have one skill with a given name
-ClaudeSkillSchema.index({ userId: 1, name: 1 }, { unique: true });
+// A user can only have one skill with a given (name, tool) pair.
+// NOTE: Existing deployments may have a unique index on (userId, name) from the
+// pre-codex schema. Drop it manually before this index is created, e.g.:
+//   db.claudeskills.dropIndex("userId_1_name_1")
+ClaudeSkillSchema.index({ userId: 1, tool: 1, name: 1 }, { unique: true });
 ClaudeSkillSchema.index({ name: "text", description: "text", tags: "text" });
 
 const ClaudeSkill: Model<IClaudeSkillDocument> =
