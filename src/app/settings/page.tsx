@@ -24,20 +24,23 @@ export default function SettingsPage() {
 
   const handleUpgrade = async () => {
     try {
-      toast.info("Opening paywall...");
-      const outcome = await presentPaywall();
-      if (outcome === "purchased" || outcome === "restored") {
-        // Webhook will sync entitlements server-side; reload to pick them up.
-        window.location.reload();
-      } else if (outcome === "error") {
-        toast.error("Paywall failed to present (RC error)");
-      } else if (outcome === "not_presented") {
-        toast.error("Paywall not presented (offering may be missing on RevenueCat side)");
-      }
+      toast.info("Step 1: importing RC SDK...");
+      const mod = await import("@/lib/iap/revenuecat-client");
+
+      toast.info("Step 2: initIAP...");
+      await mod.initIAP();
+
+      toast.info("Step 3: loading RC UI plugin...");
+      const ui = await import("@revenuecat/purchases-capacitor-ui");
+      if (!ui.RevenueCatUI) throw new Error("RevenueCatUI export missing");
+
+      toast.info("Step 4: calling presentPaywall...");
+      const { result } = await ui.RevenueCatUI.presentPaywall();
+      toast.info(`Paywall result: ${result}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      toast.error(`Paywall error: ${msg}`);
-      console.error("[paywall]", err);
+      toast.error(`Paywall error: ${msg.slice(0, 200)}`);
+      console.error("[paywall debug]", err);
     }
   };
   const [importing, setImporting] = useState(false);
