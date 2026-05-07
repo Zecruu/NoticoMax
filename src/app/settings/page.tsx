@@ -23,20 +23,31 @@ export default function SettingsPage() {
   const showManageSub = typeof window !== "undefined" && isIOS() && isPro;
 
   const handleUpgrade = async () => {
+    const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> =>
+      Promise.race([
+        p,
+        new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timed out after ${ms}ms`)), ms)),
+      ]);
     try {
-      toast.info("Step 1: importing RC SDK...");
-      const mod = await import("@/lib/iap/revenuecat-client");
+      toast.info("1: importing Purchases module...");
+      const purchasesMod = await import("@revenuecat/purchases-capacitor");
+      if (!purchasesMod.Purchases) throw new Error("Purchases export missing");
 
-      toast.info("Step 2: initIAP...");
-      await mod.initIAP();
+      const apiKey = process.env.NEXT_PUBLIC_REVENUECAT_IOS_KEY;
+      toast.info(`2: API key present? ${apiKey ? "yes (" + apiKey.slice(0, 10) + "…)" : "NO"}`);
+      if (!apiKey) throw new Error("NEXT_PUBLIC_REVENUECAT_IOS_KEY missing in bundle");
 
-      toast.info("Step 3: loading RC UI plugin...");
-      const ui = await import("@revenuecat/purchases-capacitor-ui");
-      if (!ui.RevenueCatUI) throw new Error("RevenueCatUI export missing");
+      toast.info("3: calling Purchases.configure()...");
+      await withTimeout(purchasesMod.Purchases.configure({ apiKey }), 8000, "configure");
+      toast.success("4: configure done");
 
-      toast.info("Step 4: calling presentPaywall...");
-      const { result } = await ui.RevenueCatUI.presentPaywall();
-      toast.info(`Paywall result: ${result}`);
+      toast.info("5: importing RC UI module...");
+      const uiMod = await import("@revenuecat/purchases-capacitor-ui");
+      if (!uiMod.RevenueCatUI) throw new Error("RevenueCatUI export missing");
+
+      toast.info("6: calling presentPaywall...");
+      const res = await withTimeout(uiMod.RevenueCatUI.presentPaywall(), 30000, "presentPaywall");
+      toast.success(`7: result = ${res.result}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(`Paywall error: ${msg.slice(0, 200)}`);
