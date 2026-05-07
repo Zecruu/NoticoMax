@@ -31,6 +31,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      userId: user._id.toString(),
       email: user.email,
       licenseKey: user.licenseKey || null,
       sessionToken,
