@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { ComputedEntitlements } from "@/lib/entitlements";
+import { identifyIAPUser, resetIAPUser } from "@/lib/iap/revenuecat-client";
 
 const SESSION_KEY = "noticomax_session";
 const LICENSE_KEY = "noticomax_license_key";
 const EMAIL_KEY = "noticomax_email";
+const USER_ID_KEY = "noticomax_user_id";
 const ENTITLEMENTS_KEY = "noticomax_entitlements";
 
 const FREE_ENTITLEMENTS: ComputedEntitlements = {
@@ -18,6 +20,7 @@ export function useLicense() {
   const [licenseKey, setLicenseKeyState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [email, setEmail] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [entitlements, setEntitlements] = useState<ComputedEntitlements>(FREE_ENTITLEMENTS);
 
@@ -25,6 +28,7 @@ export function useLicense() {
   useEffect(() => {
     const sessionToken = localStorage.getItem(SESSION_KEY);
     const storedEmail = localStorage.getItem(EMAIL_KEY);
+    const storedUserId = localStorage.getItem(USER_ID_KEY);
     const storedLicense = localStorage.getItem(LICENSE_KEY);
     const storedEnt = localStorage.getItem(ENTITLEMENTS_KEY);
 
@@ -35,6 +39,10 @@ export function useLicense() {
 
     // Set cached values immediately for fast UI
     if (storedEmail) setEmail(storedEmail);
+    if (storedUserId) {
+      setUserId(storedUserId);
+      identifyIAPUser(storedUserId).catch(() => { /* iap optional */ });
+    }
     if (storedLicense) setLicenseKeyState(storedLicense);
     if (storedEmail) setIsLoggedIn(true);
     if (storedEnt) {
@@ -57,6 +65,11 @@ export function useLicense() {
           setEmail(data.email);
           setIsLoggedIn(true);
           localStorage.setItem(EMAIL_KEY, data.email);
+          if (data.userId) {
+            setUserId(data.userId);
+            localStorage.setItem(USER_ID_KEY, data.userId);
+            identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
+          }
           if (data.licenseKey) {
             setLicenseKeyState(data.licenseKey);
             localStorage.setItem(LICENSE_KEY, data.licenseKey);
@@ -72,12 +85,15 @@ export function useLicense() {
           // Session expired, clear everything
           localStorage.removeItem(SESSION_KEY);
           localStorage.removeItem(EMAIL_KEY);
+          localStorage.removeItem(USER_ID_KEY);
           localStorage.removeItem(LICENSE_KEY);
           localStorage.removeItem(ENTITLEMENTS_KEY);
           setIsLoggedIn(false);
           setEmail(null);
+          setUserId(null);
           setLicenseKeyState(null);
           setEntitlements(FREE_ENTITLEMENTS);
+          resetIAPUser().catch(() => { /* iap optional */ });
         }
       })
       .catch(() => {
@@ -101,6 +117,11 @@ export function useLicense() {
       localStorage.setItem(EMAIL_KEY, data.email);
       setEmail(data.email);
       setIsLoggedIn(true);
+      if (data.userId) {
+        setUserId(data.userId);
+        localStorage.setItem(USER_ID_KEY, data.userId);
+        identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
+      }
       if (data.licenseKey) {
         localStorage.setItem(LICENSE_KEY, data.licenseKey);
         setLicenseKeyState(data.licenseKey);
@@ -133,6 +154,11 @@ export function useLicense() {
       localStorage.setItem(EMAIL_KEY, data.email);
       setEmail(data.email);
       setIsLoggedIn(true);
+      if (data.userId) {
+        setUserId(data.userId);
+        localStorage.setItem(USER_ID_KEY, data.userId);
+        identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
+      }
       if (data.licenseKey) {
         localStorage.setItem(LICENSE_KEY, data.licenseKey);
         setLicenseKeyState(data.licenseKey);
@@ -161,6 +187,11 @@ export function useLicense() {
       localStorage.setItem(EMAIL_KEY, data.email);
       setEmail(data.email);
       setIsLoggedIn(true);
+      if (data.userId) {
+        setUserId(data.userId);
+        localStorage.setItem(USER_ID_KEY, data.userId);
+        identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
+      }
       if (data.licenseKey) {
         localStorage.setItem(LICENSE_KEY, data.licenseKey);
         setLicenseKeyState(data.licenseKey);
@@ -201,11 +232,14 @@ export function useLicense() {
     localStorage.removeItem(SESSION_KEY);
     localStorage.removeItem(LICENSE_KEY);
     localStorage.removeItem(EMAIL_KEY);
+    localStorage.removeItem(USER_ID_KEY);
     localStorage.removeItem(ENTITLEMENTS_KEY);
     setLicenseKeyState(null);
     setEmail(null);
+    setUserId(null);
     setIsLoggedIn(false);
     setEntitlements(FREE_ENTITLEMENTS);
+    resetIAPUser().catch(() => { /* iap optional */ });
   }, []);
 
   // Pro is the canonical "is this user paying" check.
@@ -222,6 +256,7 @@ export function useLicense() {
     isLoading,
     isLoggedIn,
     email,
+    userId,
     login,
     loginWithApple,
     register,

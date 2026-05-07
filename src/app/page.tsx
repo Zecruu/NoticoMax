@@ -218,8 +218,12 @@ export default function Dashboard() {
             <StudyView />
           ) : activeView === "passwords" ? (
             <PasswordsView />
+          ) : activeView === "envvars" ? (
+            <PasswordsView initialTab="envvars" />
           ) : activeView === "skills" ? (
-            <SkillsView />
+            <SkillsView tool="claude" />
+          ) : activeView === "codex-skills" ? (
+            <SkillsView tool="codex" />
           ) : (
             <ItemList
               items={displayedItems}

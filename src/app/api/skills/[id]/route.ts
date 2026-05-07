@@ -52,6 +52,7 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     "supportingFiles",
     "tags",
     "isPublic",
+    "tool",
   ] as const;
 
   for (const field of allowedFields) {

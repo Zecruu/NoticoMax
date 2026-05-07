@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "# claude-auto: /build-electron #\nif unpushed=$(git rev-list @{u}..HEAD --count 2>/dev/null || echo 0); changes=$(git status --porcelain -- src/ electron/ package.json 2>/dev/null); [ \"$unpushed\" -gt 0 ] || [ -n \"$changes\" ]; then echo \"{\\\"decision\\\":\\\"block\\\",\\\"reason\\\":\\\"Code changes detected (unpushed commits or modified files under src/, electron/, package.json). Run /build-electron now to bump the version, build the installer, and publish a GitHub release. Do not stop until the release is published and the working tree is clean and pushed.\\\"}\"; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

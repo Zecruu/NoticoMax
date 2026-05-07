@@ -22,7 +22,7 @@ export async function triggerAppleSignIn(): Promise<AppleSignInResult> {
       const { SignInWithApple } = await import("@capacitor-community/apple-sign-in");
       const result = await SignInWithApple.authorize({
         clientId: "com.noticomax.app",
-        redirectURI: "https://www.noticomax.com/api/auth/apple/callback",
+        redirectURI: "https://app.noticomax.com/api/auth/apple/callback",
         scopes: "email name",
       });
       const token = result.response?.identityToken;
@@ -54,7 +54,7 @@ function webPopupSignIn(): Promise<AppleSignInResult> {
     const state = Math.random().toString(36).slice(2);
     const params = new URLSearchParams({
       client_id: "com.noticomax.signin",
-      redirect_uri: "https://www.noticomax.com/api/auth/apple/callback",
+      redirect_uri: "https://app.noticomax.com/api/auth/apple/callback",
       response_type: "code",
       scope: "name email",
       state,

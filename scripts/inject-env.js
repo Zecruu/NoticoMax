@@ -21,6 +21,9 @@ const DEFAULTS = {
   APPLE_BUNDLE_ID: "placeholder",
   APPLE_REDIRECT_URI: "placeholder",
   APPLE_PRIVATE_KEY_BASE64: "placeholder",
+  NEXT_PUBLIC_SUPABASE_URL: "placeholder",
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "placeholder",
+  SUPABASE_SECRET_KEY: "placeholder",
 };
 
 function parseEnv(filePath) {

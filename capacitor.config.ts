@@ -6,13 +6,13 @@ const config: CapacitorConfig = {
   webDir: "out",
 
   server: {
-    url: "https://www.noticomax.com",
+    url: "https://app.noticomax.com",
     cleartext: false,
     allowNavigation: [
+      "app.noticomax.com",
       "www.noticomax.com",
       "noticomax.com",
-      "accounts.google.com",
-      "*.stripe.com",
+      "appleid.apple.com",
     ],
   },
 

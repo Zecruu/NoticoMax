@@ -5,6 +5,7 @@ import dbConnect from "@/lib/mongodb";
 import ClaudeSkill from "@/models/ClaudeSkill";
 
 // GET /api/skills - List the user's skills (or public skills)
+// Optional ?tool=claude|codex filter. Omit to return both (used by /noticomax pull).
 export async function GET(request: NextRequest) {
   const { error, userId } = await requireSession(request);
   if (error) return error;
@@ -13,6 +14,8 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get("search");
   const tag = searchParams.get("tag");
   const includePublic = searchParams.get("public") === "true";
+  const toolParam = searchParams.get("tool");
+  const tool = toolParam === "claude" || toolParam === "codex" ? toolParam : null;
 
   await dbConnect();
 
@@ -30,6 +33,9 @@ export async function GET(request: NextRequest) {
   if (tag) {
     query.tags = tag;
   }
+  if (tool) {
+    query.tool = tool;
+  }
 
   const skills = await ClaudeSkill.find(query)
     .sort({ updatedAt: -1 })
@@ -45,6 +51,7 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json();
   const { name, description, frontmatter, content, supportingFiles, tags, isPublic } = body;
+  const tool: "claude" | "codex" = body.tool === "codex" ? "codex" : "claude";
 
   if (!name || !content) {
     return NextResponse.json(
@@ -55,8 +62,8 @@ export async function POST(request: NextRequest) {
 
   await dbConnect();
 
-  // Upsert: if a skill with this name already exists for this user, update it
-  const existing = await ClaudeSkill.findOne({ userId, name, deleted: false });
+  // Upsert: if a skill with this (name, tool) already exists for this user, update it
+  const existing = await ClaudeSkill.findOne({ userId, name, tool, deleted: false });
 
   if (existing) {
     existing.description = description ?? existing.description;
@@ -73,6 +80,7 @@ export async function POST(request: NextRequest) {
   const skill = await ClaudeSkill.create({
     skillId: nanoid(12),
     userId,
+    tool,
     name,
     description: description ?? "",
     frontmatter: frontmatter ?? {},

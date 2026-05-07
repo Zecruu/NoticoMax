@@ -40,22 +40,35 @@ A cross-platform note-taking and organization app with cloud sync.
 - `/build-electron [patch|minor|major]` - Full build, version bump, and GitHub release pipeline
 - `/sync-skills [push|pull|list] [skill-name]` - Sync Claude Code skills to/from NoticoMax cloud
 
-## Claude Skills Sync (cross-computer setup)
+## Skills Sync (cross-computer setup)
 
-On a new computer, run this one-liner in your terminal to bootstrap the NoticoMax skill:
+The `ClaudeSkill` model stores both Claude Code skills and Codex CLI prompts, discriminated by a `tool: "claude" | "codex"` field. Uniqueness is per `(userId, tool, name)`.
 
-```bash
-curl -s https://www.noticomax.com/api/skills/bootstrap | mkdir -p ~/.claude/skills/noticomax && cat > ~/.claude/skills/noticomax/SKILL.md
+**Migration note**: existing deployments have a unique index on `(userId, name)` from the pre-Codex schema. Drop it before deploying so claude+codex records can share a name:
+```
+db.claudeskills.dropIndex("userId_1_name_1")
 ```
 
-Then in Claude Code, run `/noticomax pull` to download all your skills from the cloud.
+### Bootstrap one-liners
+
+Claude Code (writes to `~/.claude/skills/noticomax/SKILL.md`):
+```bash
+curl -s https://www.noticomax.com/api/skills/bootstrap -o ~/.claude/skills/noticomax/SKILL.md --create-dirs
+```
+
+Codex CLI (writes to `~/.codex/prompts/noticomax.md`):
+```bash
+curl -s "https://www.noticomax.com/api/skills/bootstrap?tool=codex" -o ~/.codex/prompts/noticomax.md --create-dirs
+```
+
+`/noticomax pull` from Claude Code downloads BOTH Claude skills (to `~/.claude/skills/`) and Codex prompts (to `~/.codex/prompts/`).
 
 ### Skills API endpoints
 
-- `GET /api/skills/bootstrap` - Public, no auth. Returns the bootstrap SKILL.md
-- `GET /api/skills` - List skills (session auth via Bearer token)
-- `POST /api/skills` - Create/upsert skill
-- `GET/PUT/DELETE /api/skills/:skillId` - Single skill CRUD
+- `GET /api/skills/bootstrap` — Public, no auth. Returns Claude SKILL.md by default; pass `?tool=codex` for the Codex prompt.
+- `GET /api/skills` — List skills (Bearer auth). Query params: `search`, `tag`, `public=true`, `tool=claude|codex` (omit for both).
+- `POST /api/skills` — Create/upsert by `(name, tool)`. Body includes `tool` (defaults to `"claude"`).
+- `GET/PUT/DELETE /api/skills/:skillId` — Single skill CRUD.
 
 ## Common Gotchas
 

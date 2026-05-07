@@ -9,14 +9,26 @@ import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing
 import { exportData, importData } from "@/lib/import-export";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
-import { isCapacitorNative } from "@/lib/platform";
+import { isCapacitorNative, isIOS } from "@/lib/platform";
 import { getDeviceName, setDeviceName } from "@/lib/device";
 import { checkBiometricAvailability } from "@/lib/capacitor/biometric-auth";
+import { presentPaywall, presentCustomerCenter } from "@/lib/iap/revenuecat-client";
+import { Sparkles, Settings as SettingsIcon } from "lucide-react";
 
 export default function SettingsPage() {
-  const { licenseKey, isActivated, isLoggedIn, email, activate, logout } = useLicense();
+  const { licenseKey, isActivated, isPro, isLoggedIn, email, activate, logout } = useLicense();
   const [licenseInput, setLicenseInput] = useState("");
   const [activating, setActivating] = useState(false);
+  const showPaywallCTA = typeof window !== "undefined" && isIOS();
+  const showManageSub = typeof window !== "undefined" && isIOS() && isPro;
+
+  const handleUpgrade = async () => {
+    const outcome = await presentPaywall();
+    if (outcome === "purchased" || outcome === "restored") {
+      // Webhook will sync entitlements server-side; reload to pick them up.
+      window.location.reload();
+    }
+  };
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isDesktop = typeof window !== "undefined" && window.electronAPI?.isElectron;
@@ -454,27 +466,38 @@ export default function SettingsPage() {
                         Cloud Sync
                       </span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono truncate">
-                        {licenseKey}
-                      </code>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0"
-                        onClick={() => {
-                          if (licenseKey) {
+                    {licenseKey && (
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono truncate">
+                          {licenseKey}
+                        </code>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={() => {
                             navigator.clipboard.writeText(licenseKey);
                             toast.success("License key copied");
-                          }
-                        }}
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
+                          }}
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    )}
                     <p className="text-sm text-muted-foreground">
                       Cloud sync is enabled. Your data syncs across all your devices.
                     </p>
+                    {showManageSub && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => presentCustomerCenter()}
+                      >
+                        <SettingsIcon className="h-3.5 w-3.5" />
+                        Manage subscription
+                      </Button>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -482,8 +505,19 @@ export default function SettingsPage() {
                       <XCircle className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">No License</span>
                     </div>
+                    {showPaywallCTA && (
+                      <Button
+                        className="w-full gap-2"
+                        onClick={handleUpgrade}
+                      >
+                        <Sparkles className="h-4 w-4" />
+                        Upgrade to Pro
+                      </Button>
+                    )}
                     <p className="text-sm text-muted-foreground">
-                      Enter your product key to enable cloud sync across all your devices.
+                      {showPaywallCTA
+                        ? "Or enter an existing license key:"
+                        : "Enter your product key to enable cloud sync across all your devices."}
                     </p>
                     <div className="flex gap-2">
                       <Input
@@ -629,8 +663,60 @@ export default function SettingsPage() {
                 </p>
                 <div className="text-xs text-muted-foreground space-y-0.5">
                   <p><code className="bg-muted px-1 rounded">/noticomax push</code> — Upload skills to cloud</p>
-                  <p><code className="bg-muted px-1 rounded">/noticomax pull</code> — Download skills from cloud</p>
+                  <p><code className="bg-muted px-1 rounded">/noticomax pull</code> — Download Claude skills <em>and</em> Codex prompts</p>
                   <p><code className="bg-muted px-1 rounded">/noticomax list</code> — View all synced skills</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Codex CLI Integration */}
+        {isLoggedIn && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Terminal className="h-4 w-4" />
+                Codex CLI Integration
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Sync your Codex CLI prompts (<code className="bg-muted px-1 rounded text-xs">~/.codex/prompts/*.md</code>) across computers using the same NoticoMax session token.
+              </p>
+
+              <div>
+                <p className="text-xs text-muted-foreground mb-1.5">Quick Setup (run on a new computer)</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono truncate">
+                    curl -s {typeof window !== "undefined" ? window.location.origin : "https://www.noticomax.com"}/api/skills/bootstrap?tool=codex -o ~/.codex/prompts/noticomax.md --create-dirs
+                  </code>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => {
+                      const origin = typeof window !== "undefined" ? window.location.origin : "https://www.noticomax.com";
+                      navigator.clipboard.writeText(
+                        `curl -s ${origin}/api/skills/bootstrap?tool=codex -o ~/.codex/prompts/noticomax.md --create-dirs`
+                      );
+                      toast.success("Setup command copied");
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="rounded-md border border-dashed p-3 space-y-1.5">
+                <p className="text-xs font-medium flex items-center gap-1.5">
+                  <Terminal className="h-3 w-3" />
+                  Usage (inside Codex CLI)
+                </p>
+                <div className="text-xs text-muted-foreground space-y-0.5">
+                  <p><code className="bg-muted px-1 rounded">/noticomax push</code> — Upload prompts to cloud</p>
+                  <p><code className="bg-muted px-1 rounded">/noticomax pull</code> — Download Codex prompts</p>
+                  <p><code className="bg-muted px-1 rounded">/noticomax list</code> — View all synced items</p>
                 </div>
               </div>
             </CardContent>

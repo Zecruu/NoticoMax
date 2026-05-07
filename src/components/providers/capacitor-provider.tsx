@@ -22,6 +22,12 @@ export function CapacitorProvider({ children }: { children: React.ReactNode }) {
         initPushNotifications();
       }
     );
+
+    if (isIOS()) {
+      import("@/lib/iap/revenuecat-client").then(({ initIAP }) => {
+        initIAP();
+      });
+    }
   }, []);
 
   return <>{children}</>;
