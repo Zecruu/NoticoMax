@@ -89,6 +89,9 @@ export async function POST(request: NextRequest) {
       licenseKey: user.licenseKey || null,
       sessionToken,
       entitlements,
+      deviceNames: user.deviceNames
+        ? Object.fromEntries(user.deviceNames)
+        : {},
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -17,6 +17,12 @@ export interface IUser {
   sessionTokens: string[];
   appleUserId?: string;
   entitlements: IUserEntitlements;
+  /**
+   * User-chosen display names for their devices, keyed by client-generated
+   * deviceId. Synced across devices so e.g. an iPhone can see what the user
+   * named their MacBook. Updated via PUT /api/user/device-names.
+   */
+  deviceNames?: Map<string, string>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -64,6 +70,11 @@ const UserSchema = new Schema<IUserDocument>(
       lifetimePro: { type: Boolean, default: false },
       proExpiresAt: { type: Date, default: undefined },
       proSource: { type: String, default: undefined },
+    },
+    deviceNames: {
+      type: Map,
+      of: String,
+      default: () => new Map(),
     },
   },
   {

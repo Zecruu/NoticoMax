@@ -31,14 +31,49 @@ export function getDeviceName(): string {
 }
 
 /**
- * Rename the current device.
+ * Rename the current device. Persists locally and (if the user is signed in)
+ * syncs to the server so the new name shows up on their other devices.
  */
 export function setDeviceName(name: string): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(DEVICE_NAME_KEY, name.trim());
-  // Also save in the device names map
+  const trimmed = name.trim();
+  localStorage.setItem(DEVICE_NAME_KEY, trimmed);
   const id = getDeviceId();
-  saveDeviceNameMapping(id, name.trim());
+  saveDeviceNameMapping(id, trimmed);
+  // Best-effort server sync. No-op if logged out.
+  void pushDeviceNameToServer(id, trimmed);
+}
+
+const SESSION_KEY = "noticomax_session";
+
+async function pushDeviceNameToServer(deviceId: string, name: string): Promise<void> {
+  if (typeof window === "undefined") return;
+  const sessionToken = localStorage.getItem(SESSION_KEY);
+  if (!sessionToken) return;
+  try {
+    await fetch("/api/user/device-names", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionToken}`,
+      },
+      body: JSON.stringify({ deviceId, name }),
+    });
+  } catch {
+    // best-effort; will retry naturally on next setDeviceName
+  }
+}
+
+/**
+ * Bulk-replace the local device-names map (e.g. from a server fetch).
+ * Preserves any locally-known mappings the server doesn't know about,
+ * server values win on conflict.
+ */
+export function mergeDeviceNamesFromServer(serverMap: Record<string, string>): void {
+  if (typeof window === "undefined") return;
+  const local = getDeviceNamesMap();
+  const merged = { ...local, ...serverMap };
+  localStorage.setItem(DEVICE_NAMES_KEY, JSON.stringify(merged));
 }
 
 /**

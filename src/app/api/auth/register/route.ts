@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
       licenseKey: user.licenseKey || null,
       sessionToken,
       entitlements,
+      deviceNames: {},
     });
   } catch (error) {
     console.error("[auth/register] Error:", error);

@@ -31,6 +31,9 @@ export async function POST(request: NextRequest) {
       email: user.email,
       licenseKey: user.licenseKey || null,
       entitlements,
+      deviceNames: user.deviceNames
+        ? Object.fromEntries(user.deviceNames)
+        : {},
     });
   } catch (error) {
     console.error("[auth/verify] Error:", error);

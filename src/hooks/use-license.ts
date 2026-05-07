@@ -4,6 +4,26 @@ import { useState, useEffect, useCallback } from "react";
 import type { ComputedEntitlements } from "@/lib/entitlements";
 import { identifyIAPUser, resetIAPUser } from "@/lib/iap/revenuecat-client";
 import { wipeLocalDB } from "@/lib/db/indexed-db";
+import { mergeDeviceNamesFromServer, getDeviceId, getDeviceName } from "@/lib/device";
+
+/**
+ * After login, push the local device's chosen name up to the server so other
+ * devices on this account can see it. Best-effort; no-op if no session.
+ */
+async function pushLocalDeviceNameOnLogin(sessionToken: string): Promise<void> {
+  try {
+    await fetch("/api/user/device-names", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionToken}`,
+      },
+      body: JSON.stringify({ deviceId: getDeviceId(), name: getDeviceName() }),
+    });
+  } catch {
+    /* best effort */
+  }
+}
 
 /**
  * Wipe local IndexedDB if a different user is signing in. Local data is
@@ -88,6 +108,11 @@ export function useLicense() {
             localStorage.setItem(USER_ID_KEY, data.userId);
             identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
           }
+          if (data.deviceNames) {
+            mergeDeviceNamesFromServer(data.deviceNames);
+          }
+          // Push this device's local name up in case it's never been synced
+          pushLocalDeviceNameOnLogin(sessionToken);
           if (data.licenseKey) {
             setLicenseKeyState(data.licenseKey);
             localStorage.setItem(LICENSE_KEY, data.licenseKey);
@@ -141,6 +166,10 @@ export function useLicense() {
         localStorage.setItem(USER_ID_KEY, data.userId);
         identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
       }
+      if (data.deviceNames) {
+        mergeDeviceNamesFromServer(data.deviceNames);
+      }
+      pushLocalDeviceNameOnLogin(data.sessionToken);
       if (data.licenseKey) {
         localStorage.setItem(LICENSE_KEY, data.licenseKey);
         setLicenseKeyState(data.licenseKey);
@@ -179,6 +208,10 @@ export function useLicense() {
         localStorage.setItem(USER_ID_KEY, data.userId);
         identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
       }
+      if (data.deviceNames) {
+        mergeDeviceNamesFromServer(data.deviceNames);
+      }
+      pushLocalDeviceNameOnLogin(data.sessionToken);
       if (data.licenseKey) {
         localStorage.setItem(LICENSE_KEY, data.licenseKey);
         setLicenseKeyState(data.licenseKey);
@@ -213,6 +246,10 @@ export function useLicense() {
         localStorage.setItem(USER_ID_KEY, data.userId);
         identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
       }
+      if (data.deviceNames) {
+        mergeDeviceNamesFromServer(data.deviceNames);
+      }
+      pushLocalDeviceNameOnLogin(data.sessionToken);
       if (data.licenseKey) {
         localStorage.setItem(LICENSE_KEY, data.licenseKey);
         setLicenseKeyState(data.licenseKey);
