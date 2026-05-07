@@ -23,10 +23,21 @@ export default function SettingsPage() {
   const showManageSub = typeof window !== "undefined" && isIOS() && isPro;
 
   const handleUpgrade = async () => {
-    const outcome = await presentPaywall();
-    if (outcome === "purchased" || outcome === "restored") {
-      // Webhook will sync entitlements server-side; reload to pick them up.
-      window.location.reload();
+    try {
+      toast.info("Opening paywall...");
+      const outcome = await presentPaywall();
+      if (outcome === "purchased" || outcome === "restored") {
+        // Webhook will sync entitlements server-side; reload to pick them up.
+        window.location.reload();
+      } else if (outcome === "error") {
+        toast.error("Paywall failed to present (RC error)");
+      } else if (outcome === "not_presented") {
+        toast.error("Paywall not presented (offering may be missing on RevenueCat side)");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Paywall error: ${msg}`);
+      console.error("[paywall]", err);
     }
   };
   const [importing, setImporting] = useState(false);
