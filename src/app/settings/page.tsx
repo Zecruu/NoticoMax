@@ -41,6 +41,21 @@ export default function SettingsPage() {
       await withTimeout(purchasesMod.Purchases.configure({ apiKey }), 8000, "configure");
       toast.success("4: configure done");
 
+      toast.info("4b: getOfferings()...");
+      try {
+        const offerings = await withTimeout(purchasesMod.Purchases.getOfferings(), 10000, "getOfferings");
+        const cur = offerings.current;
+        toast.info(`offerings: current=${cur?.identifier ?? "NONE"}, packages=${cur?.availablePackages?.length ?? 0}`);
+        if (cur?.availablePackages?.[0]) {
+          const p = cur.availablePackages[0];
+          toast.info(`pkg: ${p.identifier} → ${p.product.identifier} @ ${p.product.priceString}`);
+        }
+      } catch (e: unknown) {
+        const m = e instanceof Error ? e.message : String(e);
+        toast.error(`getOfferings failed: ${m.slice(0, 200)}`);
+        throw e;
+      }
+
       toast.info("5: importing RC UI module...");
       const uiMod = await import("@revenuecat/purchases-capacitor-ui");
       if (!uiMod.RevenueCatUI) throw new Error("RevenueCatUI export missing");
