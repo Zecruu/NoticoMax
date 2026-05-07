@@ -100,15 +100,15 @@ export function useLicense() {
           setEntitlements(ent);
           localStorage.setItem(ENTITLEMENTS_KEY, JSON.stringify(ent));
         } else {
-          // Session expired, clear everything
+          // Session expired, clear everything EXCEPT USER_ID_KEY — we keep
+          // that as a "last user" marker so the next login can detect a
+          // user-switch and wipe local IndexedDB (see wipeIfUserChanged).
           localStorage.removeItem(SESSION_KEY);
           localStorage.removeItem(EMAIL_KEY);
-          localStorage.removeItem(USER_ID_KEY);
           localStorage.removeItem(LICENSE_KEY);
           localStorage.removeItem(ENTITLEMENTS_KEY);
           setIsLoggedIn(false);
           setEmail(null);
-          setUserId(null);
           setLicenseKeyState(null);
           setEntitlements(FREE_ENTITLEMENTS);
           resetIAPUser().catch(() => { /* iap optional */ });
@@ -250,14 +250,15 @@ export function useLicense() {
   }, []);
 
   const logout = useCallback(() => {
+    // Keep USER_ID_KEY across logout — see wipeIfUserChanged. Wiping it here
+    // means the next login as a different user wouldn't see a user-switch
+    // and local IndexedDB would still hold the prior user's data.
     localStorage.removeItem(SESSION_KEY);
     localStorage.removeItem(LICENSE_KEY);
     localStorage.removeItem(EMAIL_KEY);
-    localStorage.removeItem(USER_ID_KEY);
     localStorage.removeItem(ENTITLEMENTS_KEY);
     setLicenseKeyState(null);
     setEmail(null);
-    setUserId(null);
     setIsLoggedIn(false);
     setEntitlements(FREE_ENTITLEMENTS);
     resetIAPUser().catch(() => { /* iap optional */ });
