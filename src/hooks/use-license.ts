@@ -3,6 +3,23 @@
 import { useState, useEffect, useCallback } from "react";
 import type { ComputedEntitlements } from "@/lib/entitlements";
 import { identifyIAPUser, resetIAPUser } from "@/lib/iap/revenuecat-client";
+import { wipeLocalDB } from "@/lib/db/indexed-db";
+
+/**
+ * Wipe local IndexedDB if a different user is signing in. Local data is
+ * shared across logins on the device, so without this a new account would
+ * see the prior account's notes.
+ */
+async function wipeIfUserChanged(newUserId: string): Promise<void> {
+  const prev = localStorage.getItem(USER_ID_KEY);
+  if (prev && prev !== newUserId) {
+    try {
+      await wipeLocalDB();
+    } catch (err) {
+      console.warn("[use-license] wipeLocalDB failed:", err);
+    }
+  }
+}
 
 const SESSION_KEY = "noticomax_session";
 const LICENSE_KEY = "noticomax_license_key";
@@ -60,12 +77,13 @@ export function useLicense() {
       body: JSON.stringify({ sessionToken }),
     })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
+      .then(async (data) => {
         if (data?.success) {
           setEmail(data.email);
           setIsLoggedIn(true);
           localStorage.setItem(EMAIL_KEY, data.email);
           if (data.userId) {
+            await wipeIfUserChanged(data.userId);
             setUserId(data.userId);
             localStorage.setItem(USER_ID_KEY, data.userId);
             identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
@@ -118,6 +136,7 @@ export function useLicense() {
       setEmail(data.email);
       setIsLoggedIn(true);
       if (data.userId) {
+        await wipeIfUserChanged(data.userId);
         setUserId(data.userId);
         localStorage.setItem(USER_ID_KEY, data.userId);
         identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
@@ -155,6 +174,7 @@ export function useLicense() {
       setEmail(data.email);
       setIsLoggedIn(true);
       if (data.userId) {
+        await wipeIfUserChanged(data.userId);
         setUserId(data.userId);
         localStorage.setItem(USER_ID_KEY, data.userId);
         identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
@@ -188,6 +208,7 @@ export function useLicense() {
       setEmail(data.email);
       setIsLoggedIn(true);
       if (data.userId) {
+        await wipeIfUserChanged(data.userId);
         setUserId(data.userId);
         localStorage.setItem(USER_ID_KEY, data.userId);
         identifyIAPUser(data.userId).catch(() => { /* iap optional */ });

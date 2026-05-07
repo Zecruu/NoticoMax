@@ -129,3 +129,21 @@ class NoticoDatabase extends Dexie {
 const db = new NoticoDatabase();
 
 export default db;
+
+/**
+ * Clear all locally cached items, folders, study sets, quizzes, and the sync
+ * queue. Use when a different user signs in on the device — local IndexedDB
+ * is shared across logins, so without this, the new user would see the prior
+ * user's data.
+ *
+ * Does NOT touch localStorage or sessionStorage (use-license handles those).
+ */
+export async function wipeLocalDB(): Promise<void> {
+  await Promise.all([
+    db.items.clear(),
+    db.folders.clear(),
+    db.studySets.clear(),
+    db.quizzes.clear(),
+    db.syncQueue.clear(),
+  ]);
+}
