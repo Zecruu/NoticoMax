@@ -54,7 +54,7 @@ Read \`~/.noticomax-claude\` to get the session token and API URL.
 
 ### If action is \`push\` (or no action specified)
 
-This action pushes Claude skills only. To push Codex prompts, use the \`/noticomax\` prompt inside Codex CLI.
+This action pushes Claude skills only. To push Codex prompts, use \`$noticomax push\` inside Codex CLI (Codex prompts use a \`$\` prefix, not \`/\`).
 
 1. Find all skills to push:
    - If a skill name was provided (\`$1\`), only push that one
@@ -131,7 +131,7 @@ const codexPromptMd = `# Sync Codex CLI Prompts with NoticoMax
 
 Push or pull Codex CLI prompts to/from the NoticoMax cloud so they can be shared across computers.
 
-This prompt was installed at \`~/.codex/prompts/noticomax.md\`. Invoke it from Codex CLI as \`/noticomax [push|pull|list] [name]\`. The first argument after \`/noticomax\` is the action; the second is an optional name filter.
+This prompt was installed at \`~/.codex/prompts/noticomax.md\`. Invoke it from Codex CLI as \`$noticomax [push|pull|list] [name]\` (Codex prompts use a \`$\` prefix, not \`/\`). The first argument after \`$noticomax\` is the action; the second is an optional name filter.
 
 ## How it works
 

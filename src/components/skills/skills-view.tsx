@@ -52,9 +52,9 @@ export function SkillsView({ tool = "claude" }: SkillsViewProps = {}) {
         Icon: Terminal,
         bootstrapPath: "~/.codex/prompts/noticomax.md",
         bootstrapUrl: "/api/skills/bootstrap?tool=codex",
-        commandPrefix: "/noticomax",
+        commandPrefix: "$noticomax",
         emptyMessage:
-          "No Codex prompts synced yet. Use /noticomax push in Codex CLI to upload prompts.",
+          "No Codex prompts synced yet. Use $noticomax push in Codex CLI to upload prompts.",
         loginMessage: "Log in to view and manage your Codex CLI prompts.",
         copyLabel: "Copy prompt",
       }

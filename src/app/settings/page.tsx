@@ -754,9 +754,9 @@ export default function SettingsPage() {
                   Usage (inside Codex CLI)
                 </p>
                 <div className="text-xs text-muted-foreground space-y-0.5">
-                  <p><code className="bg-muted px-1 rounded">/noticomax push</code> — Upload prompts to cloud</p>
-                  <p><code className="bg-muted px-1 rounded">/noticomax pull</code> — Download Codex prompts</p>
-                  <p><code className="bg-muted px-1 rounded">/noticomax list</code> — View all synced items</p>
+                  <p><code className="bg-muted px-1 rounded">$noticomax push</code> — Upload prompts to cloud</p>
+                  <p><code className="bg-muted px-1 rounded">$noticomax pull</code> — Download Codex prompts</p>
+                  <p><code className="bg-muted px-1 rounded">$noticomax list</code> — View all synced items</p>
                 </div>
               </div>
             </CardContent>
