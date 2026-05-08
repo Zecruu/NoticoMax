@@ -111,12 +111,8 @@ function main() {
   const env = { ...parseEnv(ENV_FILE), ...process.env };
   const teamId = env.APPLE_TEAM_ID || "XJ2JD24RGF";
 
-  console.log("build-ios: injecting env vars (for symmetry with electron build)...");
-  try {
-    sh("node", ["scripts/inject-env.js", "inject"], { cwd: ROOT });
-  } catch (e) {
-    console.warn("build-ios: inject-env failed (missing .env?) — continuing without injection");
-  }
+  // v2.5.0+: secrets are no longer bundled into the build (Capacitor loads
+  // app.noticomax.com directly), so inject-env.js is gone. Nothing to do here.
 
   try {
     console.log("build-ios: next build + fix-standalone...");
@@ -189,9 +185,7 @@ function main() {
 
     console.log("build-ios: done.");
   } finally {
-    try {
-      sh("node", ["scripts/inject-env.js", "restore"], { cwd: ROOT });
-    } catch {}
+    // v2.5.0+: no env injection means no restore step needed.
   }
 }
 
