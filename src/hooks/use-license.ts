@@ -19,6 +19,29 @@ const FREE_ENTITLEMENTS: ComputedEntitlements = {
 };
 
 const ENTITLEMENTS_KEY = "noticomax_entitlements";
+const LAST_USER_KEY = "noticomax_user_id";
+
+/**
+ * IndexedDB lives at the device level — not per-user — so when a different
+ * user signs in we have to wipe local notes/folders/etc. or the new user
+ * sees the previous user's data.
+ *
+ * The previous user's id is kept across logout (intentionally, as the
+ * "last user" marker) so that a fresh login as a different user still
+ * triggers the wipe.
+ */
+async function wipeIfUserChanged(newUserId: string): Promise<void> {
+  const prev = localStorage.getItem(LAST_USER_KEY);
+  if (prev && prev !== newUserId) {
+    try {
+      const { wipeLocalDB } = await import("@/lib/db/indexed-db");
+      await wipeLocalDB();
+    } catch (err) {
+      console.warn("[use-license] wipeLocalDB failed:", err);
+    }
+  }
+  localStorage.setItem(LAST_USER_KEY, newUserId);
+}
 
 interface MeResponse {
   authenticated: boolean;
@@ -48,6 +71,7 @@ export function useLicense() {
   const refresh = useCallback(async () => {
     const me = await fetchMe();
     if (me?.authenticated && me.userId) {
+      await wipeIfUserChanged(me.userId);
       setUserId(me.userId);
       setEmail(me.email ?? null);
       setIsLoggedIn(true);
