@@ -9,6 +9,7 @@ import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing
 import { exportData, importData } from "@/lib/import-export";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { isCapacitorNative, isIOS } from "@/lib/platform";
 import { getDeviceName, setDeviceName } from "@/lib/device";
 import { checkBiometricAvailability } from "@/lib/capacitor/biometric-auth";
@@ -18,7 +19,16 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from "@/components/ui/label";
 
 export default function SettingsPage() {
-  const { licenseKey, isActivated, isPro, isLoggedIn, email, activate, logout, deleteAccount } = useLicense();
+  const router = useRouter();
+  const { userId, licenseKey, isActivated, isPro, isLoggedIn, isLoading, email, activate, logout, deleteAccount } = useLicense();
+
+  // Sign-out (or account deletion) doesn't unmount this page — push the user
+  // back home where AuthGate gates them.
+  useEffect(() => {
+    if (!isLoading && !isLoggedIn) {
+      router.replace("/");
+    }
+  }, [isLoading, isLoggedIn, router]);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -45,6 +55,24 @@ export default function SettingsPage() {
       toast.info("3: calling Purchases.configure()...");
       await withTimeout(purchasesMod.Purchases.configure({ apiKey }), 8000, "configure");
       toast.success("4: configure done");
+
+      // CRITICAL: alias RC's anonymous ID to our Supabase userId BEFORE the
+      // purchase. Without this, the webhook receives "$RCAnonymousID:..." and
+      // can't link the receipt back to the signed-in user, so Pro never
+      // shows up in the app.
+      if (userId) {
+        toast.info("4a: identifying user to RC...");
+        try {
+          await withTimeout(purchasesMod.Purchases.logIn({ appUserID: userId }), 8000, "logIn");
+        } catch (e) {
+          const m = e instanceof Error ? e.message : String(e);
+          toast.error(`logIn failed: ${m.slice(0, 200)}`);
+          throw e;
+        }
+      } else {
+        toast.error("Not signed in — sign in first, then upgrade.");
+        return;
+      }
 
       toast.info("4b: getOfferings()...");
       try {
