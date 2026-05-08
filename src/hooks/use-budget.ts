@@ -40,8 +40,7 @@ export function useBudget() {
   }, []);
 
   const categories = useLiveQuery(
-    () => db.budgetCategories.where("deleted").equals(0).toArray()
-      .catch(() => db.budgetCategories.toArray().then((r) => r.filter((c) => !c.deleted))),
+    () => db.budgetCategories.toArray().then((r) => r.filter((c) => !c.deleted)),
     [],
     [] as LocalBudgetCategory[],
   );
