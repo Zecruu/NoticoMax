@@ -56,6 +56,13 @@ export function useLicense() {
       try {
         localStorage.setItem(ENTITLEMENTS_KEY, JSON.stringify(ent));
       } catch {}
+      // Tell RevenueCat which Supabase user this device represents so a
+      // purchase webhook can be matched back to the right entitlements row.
+      // Anonymous purchases that happened before logIn are aliased to this
+      // userId by RC automatically.
+      import("@/lib/iap/revenuecat-client")
+        .then(({ identifyIAPUser }) => identifyIAPUser(me.userId!))
+        .catch(() => { /* iap optional */ });
     } else {
       setUserId(null);
       setEmail(null);
@@ -64,6 +71,9 @@ export function useLicense() {
       try {
         localStorage.removeItem(ENTITLEMENTS_KEY);
       } catch {}
+      import("@/lib/iap/revenuecat-client")
+        .then(({ resetIAPUser }) => resetIAPUser())
+        .catch(() => { /* iap optional */ });
     }
   }, []);
 
