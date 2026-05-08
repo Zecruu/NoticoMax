@@ -5,15 +5,38 @@ import {
   cancelReminderNotification,
 } from "@/lib/capacitor/local-notifications";
 import { getDeviceId, saveDeviceNameMapping, getDeviceName } from "@/lib/device";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 const SYNC_KEY = "notico_last_sync";
 
-// ─── LICENSE KEY ───
+// ─── SYNC GATE ───
+// When false, all writes still go to IndexedDB but don't enqueue server sync.
 
-let currentLicenseKey: string | null = null;
+let syncEnabled = false;
+let currentUserId: string | null = null;
 
+export function setSyncEnabled(enabled: boolean) {
+  syncEnabled = enabled;
+  if (enabled) {
+    void getCurrentUserId();
+  } else {
+    currentUserId = null;
+    teardownRealtime();
+  }
+}
+
+/** Backward-compat wrapper used by hooks that still pass a licenseKey. */
 export function setSyncLicenseKey(key: string | null) {
-  currentLicenseKey = key;
+  setSyncEnabled(!!key);
+}
+
+async function getCurrentUserId(): Promise<string | null> {
+  if (currentUserId) return currentUserId;
+  const supabase = getSupabaseBrowserClient();
+  const { data } = await supabase.auth.getUser();
+  currentUserId = data.user?.id ?? null;
+  return currentUserId;
 }
 
 function getLastSync(): string | null {
@@ -27,14 +50,112 @@ function setLastSync(timestamp: string) {
   }
 }
 
-// ─── ITEM OPERATIONS ───
+// ─── FIELD MAPPING (LocalItem ↔ Supabase row) ───
+
+interface SupabaseItem {
+  client_id: string;
+  user_id: string;
+  type: string;
+  title: string;
+  content: string;
+  url: string | null;
+  reminder_date: string | null;
+  reminder_completed: boolean | null;
+  tags: string[];
+  pinned: boolean;
+  color: string | null;
+  folder_id: string | null;
+  device_id: string | null;
+  deleted: boolean;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SupabaseFolder {
+  client_id: string;
+  user_id: string;
+  name: string;
+  color: string | null;
+  deleted: boolean;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function localToSupabaseItem(item: LocalItem, userId: string): Partial<SupabaseItem> {
+  return {
+    client_id: item.clientId,
+    user_id: userId,
+    type: item.type,
+    title: item.title,
+    content: item.content,
+    url: item.url ?? null,
+    reminder_date: item.reminderDate ?? null,
+    reminder_completed: item.reminderCompleted ?? null,
+    tags: item.tags ?? [],
+    pinned: item.pinned ?? false,
+    color: item.color ?? null,
+    folder_id: item.folderId ?? null,
+    device_id: item.deviceId ?? null,
+    deleted: item.deleted ?? false,
+    deleted_at: item.deletedAt ?? null,
+    created_at: item.createdAt,
+    updated_at: item.updatedAt,
+  };
+}
+
+function supabaseToLocalItem(row: SupabaseItem): LocalItem {
+  return {
+    clientId: row.client_id,
+    type: row.type as LocalItem["type"],
+    title: row.title,
+    content: row.content ?? "",
+    url: row.url ?? undefined,
+    reminderDate: row.reminder_date ?? undefined,
+    reminderCompleted: row.reminder_completed ?? undefined,
+    tags: row.tags ?? [],
+    pinned: row.pinned ?? false,
+    color: row.color ?? undefined,
+    folderId: row.folder_id ?? undefined,
+    deviceId: row.device_id ?? undefined,
+    deleted: row.deleted ?? false,
+    deletedAt: row.deleted_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function localToSupabaseFolder(folder: LocalFolder, userId: string): Partial<SupabaseFolder> {
+  return {
+    client_id: folder.clientId,
+    user_id: userId,
+    name: folder.name,
+    color: folder.color ?? null,
+    deleted: folder.deleted ?? false,
+    created_at: folder.createdAt,
+    updated_at: folder.updatedAt,
+  };
+}
+
+function supabaseToLocalFolder(row: SupabaseFolder): LocalFolder {
+  return {
+    clientId: row.client_id,
+    name: row.name,
+    color: row.color ?? undefined,
+    deleted: row.deleted ?? false,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+// ─── ITEM OPERATIONS (write through IndexedDB → enqueue → flush) ───
 
 export async function createItem(
   item: Omit<LocalItem, "id" | "clientId" | "createdAt" | "updatedAt" | "deleted">
 ): Promise<LocalItem> {
   const now = new Date().toISOString();
   const clientId = uuidv4();
-
   const deviceId = getDeviceId();
 
   const localItem: LocalItem = {
@@ -46,9 +167,7 @@ export async function createItem(
     updatedAt: now,
   };
 
-  // Ensure current device name is in the mapping
   saveDeviceNameMapping(deviceId, getDeviceName());
-
   await db.items.add(localItem);
 
   await db.syncQueue.add({
@@ -59,7 +178,6 @@ export async function createItem(
     timestamp: now,
   });
 
-  // Schedule native notification for reminders
   if (localItem.type === "reminder" && localItem.reminderDate) {
     scheduleReminderNotification(
       clientId,
@@ -114,9 +232,7 @@ export async function deleteItem(clientId: string): Promise<void> {
     timestamp: now,
   });
 
-  // Cancel any scheduled native notification
   cancelReminderNotification(clientId);
-
   triggerSync();
 }
 
@@ -133,15 +249,12 @@ export async function getItems(
     items = await db.items.toArray();
   }
 
-  // Filter out deleted items, env vars, and credentials (shown in settings only)
   items = items.filter((item) => !item.deleted && item.type !== "envvar" && item.type !== "credential");
 
-  // Filter by folder
   if (folderId) {
     items = items.filter((item) => item.folderId === folderId);
   }
 
-  // Client-side search
   if (searchQuery) {
     const terms = searchQuery.toLowerCase().split(/\s+/);
     items = items.filter((item) => {
@@ -150,7 +263,6 @@ export async function getItems(
     });
   }
 
-  // Sort: pinned first, then by updatedAt descending
   items.sort((a, b) => {
     if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
     return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
@@ -159,7 +271,7 @@ export async function getItems(
   return items;
 }
 
-// ─── TRASH OPERATIONS ───
+// ─── TRASH ───
 
 export async function getDeletedItems(): Promise<LocalItem[]> {
   const items = await db.items.toArray();
@@ -271,13 +383,11 @@ export async function updateFolder(
 export async function deleteFolder(clientId: string): Promise<void> {
   const now = new Date().toISOString();
 
-  // Soft-delete the folder
   await db.folders.where("clientId").equals(clientId).modify((f) => {
     f.deleted = true;
     f.updatedAt = now;
   });
 
-  // Cascade: soft-delete all items in this folder
   const folderItems = await db.items.where("folderId").equals(clientId).toArray();
   for (const item of folderItems) {
     if (!item.deleted) {
@@ -307,122 +417,75 @@ export async function deleteFolder(clientId: string): Promise<void> {
 
 export async function getFolders(): Promise<LocalFolder[]> {
   const folders = await db.folders.toArray();
-  return folders
-    .filter((f) => !f.deleted)
-    .sort((a, b) => a.name.localeCompare(b.name));
+  return folders.filter((f) => !f.deleted).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ─── SYNC ───
+// ─── SYNC TO SUPABASE ───
 
 let syncInProgress = false;
 
 export async function performSync(): Promise<boolean> {
-  if (!currentLicenseKey) return false;
+  if (!syncEnabled) return false;
   if (syncInProgress || !navigator.onLine) return false;
 
+  const userId = await getCurrentUserId();
+  if (!userId) return false;
+
   syncInProgress = true;
+  const supabase = getSupabaseBrowserClient();
 
   try {
     const queue = await db.syncQueue.orderBy("timestamp").toArray();
+    if (queue.length === 0) {
+      // No outgoing changes — pull anyway in case there are server changes since last sync
+      await pullChanges(userId);
+      return true;
+    }
 
-    // Separate item and folder operations, deduplicate per clientId
+    // Deduplicate per (entityType, clientId), keeping latest action.
     const itemOps = new Map<string, (typeof queue)[0]>();
     const folderOps = new Map<string, (typeof queue)[0]>();
-
     for (const entry of queue) {
-      if (entry.entityType === "folder") {
-        folderOps.set(entry.clientId, entry);
+      if (entry.entityType === "folder") folderOps.set(entry.clientId, entry);
+      else itemOps.set(entry.clientId, entry);
+    }
+
+    // Folders first (items may reference them via folder_id).
+    for (const op of folderOps.values()) {
+      if (op.action === "delete") {
+        await supabase
+          .from("folders")
+          .update({ deleted: true, updated_at: op.timestamp })
+          .eq("client_id", op.clientId);
       } else {
-        itemOps.set(entry.clientId, entry);
-      }
-    }
-
-    const operations = Array.from(itemOps.values()).map((e) => ({
-      action: e.action,
-      clientId: e.clientId,
-      data: e.data,
-    }));
-
-    const folderOperations = Array.from(folderOps.values()).map((e) => ({
-      action: e.action,
-      clientId: e.clientId,
-      data: e.data,
-    }));
-
-    const lastSyncAt = getLastSync();
-
-    const response = await fetch("/api/items/sync", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${currentLicenseKey}`,
-      },
-      body: JSON.stringify({ operations, folderOperations, lastSyncAt }),
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => "");
-      throw new Error(`Sync failed: ${response.status} ${errorBody}`);
-    }
-
-    const { serverItems, serverFolders, syncedAt } = await response.json();
-
-    await db.syncQueue.clear();
-
-    // Merge server items
-    for (const serverItem of serverItems) {
-      const localItem = await db.items.where("clientId").equals(serverItem.clientId).first();
-
-      const mapped: LocalItem = {
-        clientId: serverItem.clientId,
-        serverId: serverItem._id,
-        type: serverItem.type,
-        title: serverItem.title,
-        content: serverItem.content || "",
-        url: serverItem.url,
-        reminderDate: serverItem.reminderDate,
-        reminderCompleted: serverItem.reminderCompleted,
-        tags: serverItem.tags || [],
-        pinned: serverItem.pinned || false,
-        color: serverItem.color,
-        folderId: serverItem.folderId,
-        deviceId: serverItem.deviceId,
-        deleted: serverItem.deleted || false,
-        createdAt: serverItem.createdAt,
-        updatedAt: serverItem.updatedAt,
-      };
-
-      if (localItem) {
-        await db.items.where("clientId").equals(serverItem.clientId).modify((i) => { Object.assign(i, mapped); });
-      } else {
-        await db.items.add(mapped);
-      }
-    }
-
-    // Merge server folders
-    if (serverFolders) {
-      for (const serverFolder of serverFolders) {
-        const localFolder = await db.folders.where("clientId").equals(serverFolder.clientId).first();
-
-        const mapped: LocalFolder = {
-          clientId: serverFolder.clientId,
-          serverId: serverFolder._id,
-          name: serverFolder.name,
-          color: serverFolder.color,
-          deleted: serverFolder.deleted || false,
-          createdAt: serverFolder.createdAt,
-          updatedAt: serverFolder.updatedAt,
-        };
-
-        if (localFolder) {
-          await db.folders.where("clientId").equals(serverFolder.clientId).modify((f) => { Object.assign(f, mapped); });
-        } else {
-          await db.folders.add(mapped);
+        const folder = await db.folders.where("clientId").equals(op.clientId).first();
+        if (folder) {
+          await supabase
+            .from("folders")
+            .upsert(localToSupabaseFolder(folder, userId), { onConflict: "client_id" });
         }
       }
     }
 
-    setLastSync(syncedAt);
+    for (const op of itemOps.values()) {
+      if (op.action === "delete") {
+        await supabase
+          .from("items")
+          .update({ deleted: true, deleted_at: op.timestamp, updated_at: op.timestamp })
+          .eq("client_id", op.clientId);
+      } else {
+        const item = await db.items.where("clientId").equals(op.clientId).first();
+        if (item) {
+          await supabase
+            .from("items")
+            .upsert(localToSupabaseItem(item, userId), { onConflict: "client_id" });
+        }
+      }
+    }
+
+    await db.syncQueue.clear();
+    await pullChanges(userId);
+    setLastSync(new Date().toISOString());
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -434,10 +497,57 @@ export async function performSync(): Promise<boolean> {
   }
 }
 
+async function pullChanges(userId: string): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  const lastSync = getLastSync();
+
+  let itemsQuery = supabase.from("items").select("*").eq("user_id", userId);
+  if (lastSync) itemsQuery = itemsQuery.gt("updated_at", lastSync);
+  const { data: items } = await itemsQuery;
+
+  if (items) {
+    for (const row of items as SupabaseItem[]) {
+      const mapped = supabaseToLocalItem(row);
+      const existing = await db.items.where("clientId").equals(mapped.clientId).first();
+      if (existing) {
+        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
+        if (hasPending === 0) {
+          await db.items.where("clientId").equals(mapped.clientId).modify((i) => {
+            Object.assign(i, mapped);
+          });
+        }
+      } else {
+        await db.items.add(mapped);
+      }
+    }
+  }
+
+  let foldersQuery = supabase.from("folders").select("*").eq("user_id", userId);
+  if (lastSync) foldersQuery = foldersQuery.gt("updated_at", lastSync);
+  const { data: folders } = await foldersQuery;
+
+  if (folders) {
+    for (const row of folders as SupabaseFolder[]) {
+      const mapped = supabaseToLocalFolder(row);
+      const existing = await db.folders.where("clientId").equals(mapped.clientId).first();
+      if (existing) {
+        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
+        if (hasPending === 0) {
+          await db.folders.where("clientId").equals(mapped.clientId).modify((f) => {
+            Object.assign(f, mapped);
+          });
+        }
+      } else {
+        await db.folders.add(mapped);
+      }
+    }
+  }
+}
+
 let syncTimeout: ReturnType<typeof setTimeout> | null = null;
 
 export function triggerSync() {
-  if (!currentLicenseKey) return;
+  if (!syncEnabled) return;
   if (syncTimeout) clearTimeout(syncTimeout);
   syncTimeout = setTimeout(() => {
     performSync();
@@ -445,84 +555,88 @@ export function triggerSync() {
 }
 
 export async function initialSync(): Promise<void> {
-  if (!currentLicenseKey) return;
+  if (!syncEnabled) return;
   if (!navigator.onLine) return;
 
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  // Full pull, ignoring lastSync. Safe because we merge by client_id.
+  const previousLastSync = localStorage.getItem(SYNC_KEY);
+  localStorage.removeItem(SYNC_KEY);
   try {
-    const headers = { "Authorization": `Bearer ${currentLicenseKey}` };
-
-    // Sync items
-    const itemsRes = await fetch("/api/items", { headers });
-    if (itemsRes.ok) {
-      const serverItems = await itemsRes.json();
-      for (const serverItem of serverItems) {
-        const localItem = await db.items.where("clientId").equals(serverItem.clientId).first();
-
-        const mapped: LocalItem = {
-          clientId: serverItem.clientId,
-          serverId: serverItem._id,
-          type: serverItem.type,
-          title: serverItem.title,
-          content: serverItem.content || "",
-          url: serverItem.url,
-          reminderDate: serverItem.reminderDate,
-          reminderCompleted: serverItem.reminderCompleted,
-          tags: serverItem.tags || [],
-          pinned: serverItem.pinned || false,
-          color: serverItem.color,
-          folderId: serverItem.folderId,
-          deviceId: serverItem.deviceId,
-          deleted: serverItem.deleted || false,
-          createdAt: serverItem.createdAt,
-          updatedAt: serverItem.updatedAt,
-        };
-
-        if (!localItem) {
-          await db.items.add(mapped);
-        } else {
-          const hasPending = await db.syncQueue.where("clientId").equals(serverItem.clientId).count();
-          if (hasPending === 0) {
-            await db.items.where("clientId").equals(serverItem.clientId).modify((i) => { Object.assign(i, mapped); });
-          }
-        }
-      }
-    }
-
-    // Sync folders
-    const foldersRes = await fetch("/api/folders", { headers });
-    if (foldersRes.ok) {
-      const serverFolders = await foldersRes.json();
-      for (const serverFolder of serverFolders) {
-        const localFolder = await db.folders.where("clientId").equals(serverFolder.clientId).first();
-
-        const mapped: LocalFolder = {
-          clientId: serverFolder.clientId,
-          serverId: serverFolder._id,
-          name: serverFolder.name,
-          color: serverFolder.color,
-          deleted: serverFolder.deleted || false,
-          createdAt: serverFolder.createdAt,
-          updatedAt: serverFolder.updatedAt,
-        };
-
-        if (!localFolder) {
-          await db.folders.add(mapped);
-        } else {
-          const hasPending = await db.syncQueue.where("clientId").equals(serverFolder.clientId).count();
-          if (hasPending === 0) {
-            await db.folders.where("clientId").equals(serverFolder.clientId).modify((f) => { Object.assign(f, mapped); });
-          }
-        }
-      }
-    }
-
+    await pullChanges(userId);
     setLastSync(new Date().toISOString());
   } catch (error) {
+    if (previousLastSync) localStorage.setItem(SYNC_KEY, previousLastSync);
     console.error("Initial sync error:", error);
   }
 }
 
-const POLL_INTERVAL_MS = 30_000; // Poll every 30 seconds for cross-device sync
+// ─── REALTIME ───
+
+let realtimeChannel: RealtimeChannel | null = null;
+
+function teardownRealtime() {
+  if (realtimeChannel) {
+    const supabase = getSupabaseBrowserClient();
+    void supabase.removeChannel(realtimeChannel);
+    realtimeChannel = null;
+  }
+}
+
+async function setupRealtime() {
+  teardownRealtime();
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  const supabase = getSupabaseBrowserClient();
+  realtimeChannel = supabase
+    .channel(`user-${userId}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "items", filter: `user_id=eq.${userId}` },
+      async (payload: { new: unknown; old: unknown }) => {
+        const row = (payload.new ?? payload.old) as SupabaseItem | undefined;
+        if (!row) return;
+        const mapped = supabaseToLocalItem(row);
+        const existing = await db.items.where("clientId").equals(mapped.clientId).first();
+        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
+        if (hasPending === 0) {
+          if (existing) {
+            await db.items.where("clientId").equals(mapped.clientId).modify((i) => {
+              Object.assign(i, mapped);
+            });
+          } else {
+            await db.items.add(mapped);
+          }
+        }
+        if (onSyncComplete) onSyncComplete();
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "folders", filter: `user_id=eq.${userId}` },
+      async (payload: { new: unknown; old: unknown }) => {
+        const row = (payload.new ?? payload.old) as SupabaseFolder | undefined;
+        if (!row) return;
+        const mapped = supabaseToLocalFolder(row);
+        const existing = await db.folders.where("clientId").equals(mapped.clientId).first();
+        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
+        if (hasPending === 0) {
+          if (existing) {
+            await db.folders.where("clientId").equals(mapped.clientId).modify((f) => {
+              Object.assign(f, mapped);
+            });
+          } else {
+            await db.folders.add(mapped);
+          }
+        }
+        if (onSyncComplete) onSyncComplete();
+      }
+    )
+    .subscribe();
+}
 
 let onSyncComplete: (() => void) | null = null;
 let onSyncError: ((error: string) => void) | null = null;
@@ -547,27 +661,23 @@ export function setupSyncListeners(): () => void {
 
   window.addEventListener("online", onOnline);
 
-  // Periodic polling for cross-device sync
-  const intervalId = setInterval(async () => {
-    if (!currentLicenseKey || !navigator.onLine) return;
-    const didSync = await performSync();
-    if (didSync && onSyncComplete) onSyncComplete();
-  }, POLL_INTERVAL_MS);
-
-  // Pull server changes when tab regains focus (user switching devices)
+  // Realtime supersedes polling — but pull on visibility change in case realtime
+  // dropped a message while the tab was hidden.
   const onVisibilityChange = async () => {
-    if (document.visibilityState === "visible" && currentLicenseKey && navigator.onLine) {
+    if (document.visibilityState === "visible" && syncEnabled && navigator.onLine) {
       const didSync = await performSync();
       if (didSync && onSyncComplete) onSyncComplete();
     }
   };
   document.addEventListener("visibilitychange", onVisibilityChange);
 
-  // Return cleanup function
+  // Spin up realtime if we're already enabled
+  if (syncEnabled) void setupRealtime();
+
   return () => {
     window.removeEventListener("online", onOnline);
     document.removeEventListener("visibilitychange", onVisibilityChange);
-    clearInterval(intervalId);
+    teardownRealtime();
   };
 }
 
@@ -594,7 +704,7 @@ export async function getEnvVars(): Promise<EnvVar[]> {
     }));
 }
 
-export async function addEnvVar(name: string, value: string, project: string, syncEnabled: boolean): Promise<void> {
+export async function addEnvVar(name: string, value: string, project: string, syncFlag: boolean): Promise<void> {
   const now = new Date().toISOString();
   const clientId = uuidv4();
   const projectName = project.trim() || DEFAULT_ENV_PROJECT;
@@ -614,7 +724,7 @@ export async function addEnvVar(name: string, value: string, project: string, sy
 
   await db.items.add(localItem);
 
-  if (syncEnabled && currentLicenseKey) {
+  if (syncFlag && syncEnabled) {
     await db.syncQueue.add({
       action: "create",
       entityType: "item",
@@ -626,7 +736,7 @@ export async function addEnvVar(name: string, value: string, project: string, sy
   }
 }
 
-export async function removeEnvVar(clientId: string, syncEnabled: boolean): Promise<void> {
+export async function removeEnvVar(clientId: string, syncFlag: boolean): Promise<void> {
   const now = new Date().toISOString();
 
   await db.items.where("clientId").equals(clientId).modify((i) => {
@@ -635,7 +745,7 @@ export async function removeEnvVar(clientId: string, syncEnabled: boolean): Prom
     i.updatedAt = now;
   });
 
-  if (syncEnabled && currentLicenseKey) {
+  if (syncFlag && syncEnabled) {
     await db.syncQueue.add({
       action: "delete",
       entityType: "item",
@@ -645,7 +755,6 @@ export async function removeEnvVar(clientId: string, syncEnabled: boolean): Prom
     });
     triggerSync();
   } else {
-    // If not syncing, just hard delete locally
     await db.items.where("clientId").equals(clientId).delete();
   }
 }
@@ -655,7 +764,7 @@ export async function updateEnvVar(
   name: string,
   value: string,
   project: string,
-  syncEnabled: boolean
+  syncFlag: boolean
 ): Promise<void> {
   const now = new Date().toISOString();
   const projectName = project.trim() || DEFAULT_ENV_PROJECT;
@@ -667,7 +776,7 @@ export async function updateEnvVar(
     i.updatedAt = now;
   });
 
-  if (syncEnabled && currentLicenseKey) {
+  if (syncFlag && syncEnabled) {
     await db.syncQueue.add({
       action: "update",
       entityType: "item",
@@ -679,7 +788,7 @@ export async function updateEnvVar(
   }
 }
 
-// ─── CREDENTIALS (PASSWORDS) ───
+// ─── CREDENTIALS ───
 
 export interface Credential {
   clientId: string;
@@ -702,7 +811,7 @@ export async function getCredentials(): Promise<Credential[]> {
     });
 }
 
-export async function addCredential(label: string, username: string, password: string, syncEnabled: boolean): Promise<void> {
+export async function addCredential(label: string, username: string, password: string, syncFlag: boolean): Promise<void> {
   const now = new Date().toISOString();
   const clientId = uuidv4();
 
@@ -721,7 +830,7 @@ export async function addCredential(label: string, username: string, password: s
 
   await db.items.add(localItem);
 
-  if (syncEnabled && currentLicenseKey) {
+  if (syncFlag && syncEnabled) {
     await db.syncQueue.add({
       action: "create",
       entityType: "item",
@@ -733,7 +842,7 @@ export async function addCredential(label: string, username: string, password: s
   }
 }
 
-export async function removeCredential(clientId: string, syncEnabled: boolean): Promise<void> {
+export async function removeCredential(clientId: string, syncFlag: boolean): Promise<void> {
   const now = new Date().toISOString();
 
   await db.items.where("clientId").equals(clientId).modify((i) => {
@@ -742,7 +851,7 @@ export async function removeCredential(clientId: string, syncEnabled: boolean): 
     i.updatedAt = now;
   });
 
-  if (syncEnabled && currentLicenseKey) {
+  if (syncFlag && syncEnabled) {
     await db.syncQueue.add({
       action: "delete",
       entityType: "item",

@@ -16,7 +16,7 @@ import {
   setOnSyncComplete,
   setOnSyncError,
   performSync,
-  setSyncLicenseKey,
+  setSyncEnabled,
 } from "@/lib/sync/sync-engine";
 import { toast } from "@/lib/native-toast";
 
@@ -24,17 +24,16 @@ export function useItems(
   typeFilter?: string,
   searchQuery?: string,
   folderFilter?: string | null,
-  licenseKey: string | null = null
+  syncEnabledFlag: boolean = false
 ) {
   const [items, setItems] = useState<LocalItem[]>([]);
   const [trashedItems, setTrashedItems] = useState<LocalItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  // Keep sync engine license key in sync
   useEffect(() => {
-    setSyncLicenseKey(licenseKey);
-  }, [licenseKey]);
+    setSyncEnabled(syncEnabledFlag);
+  }, [syncEnabledFlag]);
 
   const refresh = useCallback(async () => {
     const result = await getItems(typeFilter, searchQuery, folderFilter);
@@ -56,7 +55,7 @@ export function useItems(
       await refresh();
 
       // Then sync with server (only for activated users)
-      if (mounted && licenseKey) {
+      if (mounted && syncEnabledFlag) {
         setSyncing(true);
         await initialSync();
         if (mounted) await refresh();
@@ -85,7 +84,7 @@ export function useItems(
       setOnSyncError(null);
       cleanupListeners();
     };
-  }, [refresh, licenseKey]);
+  }, [refresh, syncEnabledFlag]);
 
   const addItem = useCallback(
     async (item: Omit<LocalItem, "id" | "clientId" | "createdAt" | "updatedAt" | "deleted">) => {
@@ -136,12 +135,12 @@ export function useItems(
   );
 
   const syncNow = useCallback(async () => {
-    if (!licenseKey) return;
+    if (!syncEnabledFlag) return;
     setSyncing(true);
     await performSync();
     await refresh();
     setSyncing(false);
-  }, [refresh, licenseKey]);
+  }, [refresh, syncEnabledFlag]);
 
   return {
     items,

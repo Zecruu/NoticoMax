@@ -1,51 +1,16 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { ComputedEntitlements } from "@/lib/entitlements";
-import { identifyIAPUser, resetIAPUser } from "@/lib/iap/revenuecat-client";
-import { wipeLocalDB } from "@/lib/db/indexed-db";
-import { mergeDeviceNamesFromServer, getDeviceId, getDeviceName } from "@/lib/device";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
-/**
- * After login, push the local device's chosen name up to the server so other
- * devices on this account can see it. Best-effort; no-op if no session.
- */
-async function pushLocalDeviceNameOnLogin(sessionToken: string): Promise<void> {
-  try {
-    await fetch("/api/user/device-names", {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${sessionToken}`,
-      },
-      body: JSON.stringify({ deviceId: getDeviceId(), name: getDeviceName() }),
-    });
-  } catch {
-    /* best effort */
-  }
+export interface ComputedEntitlements {
+  proActive: boolean;
+  syncEnabled: boolean;
+  adsRemoved: boolean;
+  source?: string | null;
+  expiresAt?: string | null;
+  lifetimePro?: boolean;
 }
-
-/**
- * Wipe local IndexedDB if a different user is signing in. Local data is
- * shared across logins on the device, so without this a new account would
- * see the prior account's notes.
- */
-async function wipeIfUserChanged(newUserId: string): Promise<void> {
-  const prev = localStorage.getItem(USER_ID_KEY);
-  if (prev && prev !== newUserId) {
-    try {
-      await wipeLocalDB();
-    } catch (err) {
-      console.warn("[use-license] wipeLocalDB failed:", err);
-    }
-  }
-}
-
-const SESSION_KEY = "noticomax_session";
-const LICENSE_KEY = "noticomax_license_key";
-const EMAIL_KEY = "noticomax_email";
-const USER_ID_KEY = "noticomax_user_id";
-const ENTITLEMENTS_KEY = "noticomax_entitlements";
 
 const FREE_ENTITLEMENTS: ComputedEntitlements = {
   proActive: false,
@@ -53,269 +18,202 @@ const FREE_ENTITLEMENTS: ComputedEntitlements = {
   adsRemoved: false,
 };
 
+const ENTITLEMENTS_KEY = "noticomax_entitlements";
+
+interface MeResponse {
+  authenticated: boolean;
+  userId?: string;
+  email?: string | null;
+  entitlements?: ComputedEntitlements;
+}
+
+async function fetchMe(): Promise<MeResponse | null> {
+  try {
+    const res = await fetch("/api/auth/me", { credentials: "include" });
+    if (!res.ok) return null;
+    return (await res.json()) as MeResponse;
+  } catch {
+    return null;
+  }
+}
+
 export function useLicense() {
-  const [licenseKey, setLicenseKeyState] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [email, setEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [entitlements, setEntitlements] = useState<ComputedEntitlements>(FREE_ENTITLEMENTS);
 
-  // On mount, verify stored session
-  useEffect(() => {
-    const sessionToken = localStorage.getItem(SESSION_KEY);
-    const storedEmail = localStorage.getItem(EMAIL_KEY);
-    const storedUserId = localStorage.getItem(USER_ID_KEY);
-    const storedLicense = localStorage.getItem(LICENSE_KEY);
-    const storedEnt = localStorage.getItem(ENTITLEMENTS_KEY);
-
-    if (!sessionToken) {
-      setIsLoading(false);
-      return;
-    }
-
-    // Set cached values immediately for fast UI
-    if (storedEmail) setEmail(storedEmail);
-    if (storedUserId) {
-      setUserId(storedUserId);
-      identifyIAPUser(storedUserId).catch(() => { /* iap optional */ });
-    }
-    if (storedLicense) setLicenseKeyState(storedLicense);
-    if (storedEmail) setIsLoggedIn(true);
-    if (storedEnt) {
+  // Refresh state from /api/auth/me; called on mount and on auth changes.
+  const refresh = useCallback(async () => {
+    const me = await fetchMe();
+    if (me?.authenticated && me.userId) {
+      setUserId(me.userId);
+      setEmail(me.email ?? null);
+      setIsLoggedIn(true);
+      const ent = me.entitlements ?? FREE_ENTITLEMENTS;
+      setEntitlements(ent);
       try {
-        setEntitlements(JSON.parse(storedEnt));
-      } catch {
-        // ignore corrupt cache
-      }
+        localStorage.setItem(ENTITLEMENTS_KEY, JSON.stringify(ent));
+      } catch {}
+    } else {
+      setUserId(null);
+      setEmail(null);
+      setIsLoggedIn(false);
+      setEntitlements(FREE_ENTITLEMENTS);
+      try {
+        localStorage.removeItem(ENTITLEMENTS_KEY);
+      } catch {}
     }
+  }, []);
 
-    // Verify session with server and get latest license key
-    fetch("/api/auth/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionToken }),
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then(async (data) => {
-        if (data?.success) {
-          setEmail(data.email);
-          setIsLoggedIn(true);
-          localStorage.setItem(EMAIL_KEY, data.email);
-          if (data.userId) {
-            await wipeIfUserChanged(data.userId);
-            setUserId(data.userId);
-            localStorage.setItem(USER_ID_KEY, data.userId);
-            identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
-          }
-          if (data.deviceNames) {
-            mergeDeviceNamesFromServer(data.deviceNames);
-          }
-          // Push this device's local name up in case it's never been synced
-          pushLocalDeviceNameOnLogin(sessionToken);
-          if (data.licenseKey) {
-            setLicenseKeyState(data.licenseKey);
-            localStorage.setItem(LICENSE_KEY, data.licenseKey);
-          } else {
-            // Server says no license, clear local
-            setLicenseKeyState(null);
-            localStorage.removeItem(LICENSE_KEY);
-          }
-          const ent: ComputedEntitlements = data.entitlements ?? FREE_ENTITLEMENTS;
-          setEntitlements(ent);
-          localStorage.setItem(ENTITLEMENTS_KEY, JSON.stringify(ent));
-        } else {
-          // Session expired, clear everything EXCEPT USER_ID_KEY — we keep
-          // that as a "last user" marker so the next login can detect a
-          // user-switch and wipe local IndexedDB (see wipeIfUserChanged).
-          localStorage.removeItem(SESSION_KEY);
-          localStorage.removeItem(EMAIL_KEY);
-          localStorage.removeItem(LICENSE_KEY);
-          localStorage.removeItem(ENTITLEMENTS_KEY);
-          setIsLoggedIn(false);
-          setEmail(null);
-          setLicenseKeyState(null);
-          setEntitlements(FREE_ENTITLEMENTS);
-          resetIAPUser().catch(() => { /* iap optional */ });
+  // Subscribe to Supabase auth state and seed initial state.
+  useEffect(() => {
+    // Hydrate from cache so UI doesn't flash unauthenticated.
+    try {
+      const cached = localStorage.getItem(ENTITLEMENTS_KEY);
+      if (cached) setEntitlements(JSON.parse(cached));
+    } catch {}
+
+    const supabase = getSupabaseBrowserClient();
+    refresh().finally(() => setIsLoading(false));
+
+    const { data: sub } = supabase.auth.onAuthStateChange(() => {
+      refresh();
+    });
+
+    return () => sub.subscription.unsubscribe();
+  }, [refresh]);
+
+  const login = useCallback(
+    async (
+      loginEmail: string,
+      password: string
+    ): Promise<{ success: boolean; error?: string }> => {
+      const supabase = getSupabaseBrowserClient();
+      const { error } = await supabase.auth.signInWithPassword({
+        email: loginEmail.trim(),
+        password,
+      });
+
+      if (!error) return { success: true };
+
+      // Maybe a legacy PBKDF2 user — try the migration endpoint.
+      if (error.message.toLowerCase().includes("invalid")) {
+        const legacyRes = await fetch("/api/auth/legacy-login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: loginEmail.trim(), password }),
+        });
+
+        if (legacyRes.ok) {
+          // Hash upgraded; retry the normal sign-in.
+          const retry = await supabase.auth.signInWithPassword({
+            email: loginEmail.trim(),
+            password,
+          });
+          if (!retry.error) return { success: true };
+          return { success: false, error: retry.error.message };
         }
-      })
-      .catch(() => {
-        // Network error - keep cached values
-      })
-      .finally(() => setIsLoading(false));
-  }, []);
+      }
 
-  const login = useCallback(async (loginEmail: string, password: string): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginEmail, password }),
+      return { success: false, error: error.message };
+    },
+    []
+  );
+
+  const register = useCallback(
+    async (
+      regEmail: string,
+      password: string
+    ): Promise<{ success: boolean; error?: string }> => {
+      const supabase = getSupabaseBrowserClient();
+      const { error } = await supabase.auth.signUp({
+        email: regEmail.trim(),
+        password,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        return { success: false, error: data.error || "Login failed" };
-      }
-      localStorage.setItem(SESSION_KEY, data.sessionToken);
-      localStorage.setItem(EMAIL_KEY, data.email);
-      setEmail(data.email);
-      setIsLoggedIn(true);
-      if (data.userId) {
-        await wipeIfUserChanged(data.userId);
-        setUserId(data.userId);
-        localStorage.setItem(USER_ID_KEY, data.userId);
-        identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
-      }
-      if (data.deviceNames) {
-        mergeDeviceNamesFromServer(data.deviceNames);
-      }
-      pushLocalDeviceNameOnLogin(data.sessionToken);
-      if (data.licenseKey) {
-        localStorage.setItem(LICENSE_KEY, data.licenseKey);
-        setLicenseKeyState(data.licenseKey);
-      }
-      const ent: ComputedEntitlements = data.entitlements ?? FREE_ENTITLEMENTS;
-      setEntitlements(ent);
-      localStorage.setItem(ENTITLEMENTS_KEY, JSON.stringify(ent));
+      if (error) return { success: false, error: error.message };
       return { success: true };
-    } catch {
-      return { success: false, error: "Failed to connect to server" };
-    }
-  }, []);
+    },
+    []
+  );
 
-  const loginWithApple = useCallback(async (payload: {
-    identityToken?: string;
-    code?: string;
-    email?: string;
-  }): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const res = await fetch("/api/auth/apple", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        return { success: false, error: data.error || "Apple sign-in failed" };
-      }
-      localStorage.setItem(SESSION_KEY, data.sessionToken);
-      localStorage.setItem(EMAIL_KEY, data.email);
-      setEmail(data.email);
-      setIsLoggedIn(true);
-      if (data.userId) {
-        await wipeIfUserChanged(data.userId);
-        setUserId(data.userId);
-        localStorage.setItem(USER_ID_KEY, data.userId);
-        identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
-      }
-      if (data.deviceNames) {
-        mergeDeviceNamesFromServer(data.deviceNames);
-      }
-      pushLocalDeviceNameOnLogin(data.sessionToken);
-      if (data.licenseKey) {
-        localStorage.setItem(LICENSE_KEY, data.licenseKey);
-        setLicenseKeyState(data.licenseKey);
-      }
-      const ent: ComputedEntitlements = data.entitlements ?? FREE_ENTITLEMENTS;
-      setEntitlements(ent);
-      localStorage.setItem(ENTITLEMENTS_KEY, JSON.stringify(ent));
-      return { success: true };
-    } catch {
-      return { success: false, error: "Failed to connect to server" };
-    }
-  }, []);
+  const loginWithApple = useCallback(
+    async (payload: {
+      identityToken?: string;
+      code?: string;
+    }): Promise<{ success: boolean; error?: string }> => {
+      const supabase = getSupabaseBrowserClient();
 
-  const register = useCallback(async (regEmail: string, password: string): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: regEmail, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        return { success: false, error: data.error || "Registration failed" };
+      if (payload.identityToken) {
+        // Native iOS path
+        const { error } = await supabase.auth.signInWithIdToken({
+          provider: "apple",
+          token: payload.identityToken,
+        });
+        if (error) return { success: false, error: error.message };
+        return { success: true };
       }
-      localStorage.setItem(SESSION_KEY, data.sessionToken);
-      localStorage.setItem(EMAIL_KEY, data.email);
-      setEmail(data.email);
-      setIsLoggedIn(true);
-      if (data.userId) {
-        await wipeIfUserChanged(data.userId);
-        setUserId(data.userId);
-        localStorage.setItem(USER_ID_KEY, data.userId);
-        identifyIAPUser(data.userId).catch(() => { /* iap optional */ });
-      }
-      if (data.deviceNames) {
-        mergeDeviceNamesFromServer(data.deviceNames);
-      }
-      pushLocalDeviceNameOnLogin(data.sessionToken);
-      if (data.licenseKey) {
-        localStorage.setItem(LICENSE_KEY, data.licenseKey);
-        setLicenseKeyState(data.licenseKey);
-      }
-      const ent: ComputedEntitlements = data.entitlements ?? FREE_ENTITLEMENTS;
-      setEntitlements(ent);
-      localStorage.setItem(ENTITLEMENTS_KEY, JSON.stringify(ent));
-      return { success: true };
-    } catch {
-      return { success: false, error: "Failed to connect to server" };
-    }
-  }, []);
 
-  const activate = useCallback(async (key: string): Promise<{ success: boolean; error?: string }> => {
-    const sessionToken = localStorage.getItem(SESSION_KEY);
-    if (!sessionToken) {
-      return { success: false, error: "You must be logged in to activate a license" };
-    }
-    try {
-      const res = await fetch("/api/auth/link-license", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionToken, licenseKey: key.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        return { success: false, error: data.error || "Activation failed" };
+      if (payload.code) {
+        // Web/Electron OAuth code-exchange path
+        const { error } = await supabase.auth.exchangeCodeForSession(payload.code);
+        if (error) return { success: false, error: error.message };
+        return { success: true };
       }
-      localStorage.setItem(LICENSE_KEY, key.trim());
-      setLicenseKeyState(key.trim());
-      return { success: true };
-    } catch {
-      return { success: false, error: "Failed to connect to server" };
-    }
-  }, []);
 
-  const logout = useCallback(() => {
-    // Keep USER_ID_KEY across logout — see wipeIfUserChanged. Wiping it here
-    // means the next login as a different user wouldn't see a user-switch
-    // and local IndexedDB would still hold the prior user's data.
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem(LICENSE_KEY);
-    localStorage.removeItem(EMAIL_KEY);
-    localStorage.removeItem(ENTITLEMENTS_KEY);
-    setLicenseKeyState(null);
+      return { success: false, error: "Missing identityToken or code" };
+    },
+    []
+  );
+
+  const activate = useCallback(
+    async (key: string): Promise<{ success: boolean; error?: string }> => {
+      try {
+        const res = await fetch("/api/auth/link-license", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ licenseKey: key.trim() }),
+          credentials: "include",
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          return { success: false, error: data.error || "Activation failed" };
+        }
+        await refresh();
+        return { success: true };
+      } catch {
+        return { success: false, error: "Failed to connect to server" };
+      }
+    },
+    [refresh]
+  );
+
+  const logout = useCallback(async () => {
+    const supabase = getSupabaseBrowserClient();
+    await supabase.auth.signOut();
+    setUserId(null);
     setEmail(null);
     setIsLoggedIn(false);
     setEntitlements(FREE_ENTITLEMENTS);
-    resetIAPUser().catch(() => { /* iap optional */ });
+    try {
+      localStorage.removeItem(ENTITLEMENTS_KEY);
+    } catch {}
   }, []);
 
-  // Pro is the canonical "is this user paying" check.
-  // Legacy isActivated is kept for backward compat with components that
-  // gate sync on the license key — Pro implies sync access.
   const isPro = entitlements.proActive;
-  const isActivated = isPro || !!licenseKey;
+  // Backward-compat alias used elsewhere in the codebase.
+  const isActivated = isPro;
 
   return {
-    licenseKey,
+    userId,
+    licenseKey: null as string | null,
     isActivated,
     isPro,
     entitlements,
     isLoading,
     isLoggedIn,
     email,
-    userId,
     login,
     loginWithApple,
     register,

@@ -31,9 +31,9 @@ export default function Dashboard() {
   const [defaultType, setDefaultType] = useState<"note" | "url" | "reminder">("note");
   const [skippedActivation, setSkippedActivation] = useState(false);
 
-  const { licenseKey, isActivated, isLoading, isLoggedIn, login, loginWithApple, register } = useLicense();
+  const { isActivated, isPro, isLoading, isLoggedIn, login, loginWithApple, register } = useLicense();
 
-  const { folders, addFolder, editFolder, removeFolder } = useFolders(licenseKey);
+  const { folders, addFolder, editFolder, removeFolder } = useFolders();
   const {
     items,
     trashedItems,
@@ -46,7 +46,7 @@ export default function Dashboard() {
     restoreItem,
     permanentlyDeleteItem,
     syncNow,
-  } = useItems(activeFilter, searchQuery, activeFolder, licenseKey);
+  } = useItems(activeFilter, searchQuery, activeFolder, isPro);
 
   // Counts for sidebar (type-based, ignoring folder filter)
   const itemCounts = useMemo(() => {

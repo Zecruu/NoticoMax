@@ -13,6 +13,7 @@ const config: CapacitorConfig = {
       "www.noticomax.com",
       "noticomax.com",
       "appleid.apple.com",
+      "rsahskcjdodshgtcxqmq.supabase.co",
     ],
   },
 

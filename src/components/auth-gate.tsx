@@ -5,12 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { LogIn, UserPlus, Apple, Eye, EyeOff } from "lucide-react";
-import { triggerAppleSignIn, type AppleSignInPayload } from "@/lib/auth/apple-signin-client";
+import { LogIn, UserPlus, Apple } from "lucide-react";
+import { triggerAppleSignIn } from "@/lib/auth/apple-signin-client";
 
 interface AuthGateProps {
   onLogin: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  onLoginWithApple: (payload: AppleSignInPayload & { email?: string }) => Promise<{ success: boolean; error?: string }>;
+  onLoginWithApple: (payload: { identityToken?: string; code?: string }) => Promise<{ success: boolean; error?: string }>;
   onRegister: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   onSkip: () => void;
 }
@@ -23,20 +23,26 @@ export function AuthGate({ onLogin, onLoginWithApple, onRegister, onSkip }: Auth
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const handleAppleSignIn = async () => {
     setError("");
     setAppleLoading(true);
     const result = await triggerAppleSignIn();
-    if (!result.success || !result.payload) {
+
+    if (!result.success) {
       setAppleLoading(false);
       if (result.error && result.error !== "Sign-in cancelled") {
         setError(result.error);
       }
       return;
     }
+
+    // Web flow returns success without a payload because the browser is
+    // redirecting to Apple — leave the loading spinner up so the user knows
+    // something is happening.
+    if (!result.payload) return;
+
+    // iOS native flow — pass the identity token to Supabase Auth.
     const authResult = await onLoginWithApple(result.payload);
     setAppleLoading(false);
     if (!authResult.success) {
@@ -128,50 +134,26 @@ export function AuthGate({ onLogin, onLoginWithApple, onRegister, onSkip }: Auth
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  className="pr-9"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  tabIndex={-1}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
+              <Input
+                id="password"
+                type="password"
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
             </div>
             {mode === "register" && (
               <div className="space-y-2">
                 <Label htmlFor="confirm-password">Confirm Password</Label>
-                <div className="relative">
-                  <Input
-                    id="confirm-password"
-                    type={showConfirmPassword ? "text" : "password"}
-                    placeholder="Confirm your password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    required
-                    className="pr-9"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword((v) => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
-                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
-                    tabIndex={-1}
-                  >
-                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
+                <Input
+                  id="confirm-password"
+                  type="password"
+                  placeholder="Confirm your password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                />
               </div>
             )}
             {error && <p className="text-sm text-destructive">{error}</p>}
