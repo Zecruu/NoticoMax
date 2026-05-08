@@ -23,17 +23,16 @@ A cross-platform note-taking and organization app with cloud sync.
 
 ## Key Patterns
 
-- Electron spawns a Next.js standalone server on port 3099 in production
-- Sync engine uses IndexedDB locally, syncs to MongoDB for licensed users
-- Middleware runs in edge runtime - do NOT import Node.js modules (mongoose, bcrypt, etc.)
-- The `scripts/inject-env.js` injects .env values into electron/main.js for builds, `restore` reverts them
-- Capacitor loads the live URL (www.noticomax.com), not a static export
+- Electron loads `https://app.noticomax.com` directly — same as Capacitor mobile. No local Next.js server, no bundled secrets. The desktop binary contains only the Electron shell + IPC bridges (auto-updater, OS settings, Apple sign-in window, wipe-data).
+- Cloud server runs on Railway. Server-side env vars (MONGODB_URI, SUPABASE_SECRET_KEY, APPLE_PRIVATE_KEY_BASE64, ADMIN_SECRET) live there, NOT in the desktop bundle.
+- Sync engine uses IndexedDB locally, syncs to MongoDB for licensed users (via `app.noticomax.com/api/items/sync`).
+- Middleware runs in edge runtime - do NOT import Node.js modules (mongoose, bcrypt, etc.).
 
 ## Build & Release
 
 - Electron installer artifact format: `Notico-Max-Setup-X.Y.Z.exe` (hyphens required for auto-updater)
 - GitHub releases must include: `.exe`, `.exe.blockmap`, and `latest.yml`
-- Always restore env vars after building: `node scripts/inject-env.js restore`
+- Build is just `electron-builder --win --publish never` — no env injection, no Next.js bundling.
 
 ## Custom Skills
 

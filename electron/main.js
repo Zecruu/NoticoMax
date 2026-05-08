@@ -1,7 +1,5 @@
 const { app, BrowserWindow, shell, Menu, ipcMain } = require("electron");
 const path = require("path");
-const { spawn } = require("child_process");
-const fs = require("fs");
 const logger = require("./logger");
 const { autoUpdater } = require("electron-updater");
 
@@ -18,27 +16,9 @@ autoUpdater.logger = {
 
 const isDev = process.env.NODE_ENV === "development";
 const DEV_URL = "http://localhost:5467";
-const PROD_PORT = 3099;
-
-// Embedded app configuration (packed inside app.asar, not a plaintext file)
-// Replace placeholder values with real ones before building the installer
-const APP_ENV = {
-  MONGODB_URI: "placeholder",
-  ADMIN_SECRET: "placeholder",
-  APPLE_TEAM_ID: "placeholder",
-  APPLE_KEY_ID: "placeholder",
-  APPLE_CLIENT_ID: "placeholder",
-  APPLE_BUNDLE_ID: "placeholder",
-  APPLE_REDIRECT_URI: "placeholder",
-  APPLE_PRIVATE_KEY_BASE64: "placeholder",
-  NEXT_PUBLIC_SUPABASE_URL: "placeholder",
-  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "placeholder",
-  SUPABASE_SECRET_KEY: "placeholder",
-  NEXT_PUBLIC_APP_URL: `http://localhost:${PROD_PORT}`,
-};
+const PROD_URL = "https://app.noticomax.com";
 
 let mainWindow;
-let serverProcess;
 
 // Initialize logger immediately with userData path
 logger.init(app.getPath("userData"));
@@ -112,9 +92,6 @@ function createWindow(url) {
     minWidth: 400,
     minHeight: 600,
     title: "NOTICO MAX",
-    icon: isDev
-      ? path.join(__dirname, "..", "public", "logo.png")
-      : path.join(process.resourcesPath, "standalone", "public", "logo.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,
@@ -131,7 +108,6 @@ function createWindow(url) {
 
   mainWindow.webContents.on("did-fail-load", (event, errorCode, errorDescription) => {
     logger.error("electron", `Window failed to load: ${errorCode} ${errorDescription}`);
-    // Retry loading after a short delay — the server may still be warming up
     if (!isDev) {
       logger.info("electron", "Retrying page load in 2 seconds...");
       setTimeout(() => {
@@ -151,132 +127,6 @@ function createWindow(url) {
 
   mainWindow.on("closed", () => {
     mainWindow = null;
-  });
-}
-
-function findServerJs() {
-  const standaloneDir = path.join(process.resourcesPath, "standalone");
-
-  const directPath = path.join(standaloneDir, "server.js");
-  if (fs.existsSync(directPath)) {
-    return { serverPath: directPath, cwd: standaloneDir };
-  }
-
-  function findFile(dir, filename, depth = 0) {
-    if (depth > 4) return null;
-    try {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isFile() && entry.name === filename) return dir;
-        if (entry.isDirectory() && entry.name !== "node_modules" && entry.name !== ".next") {
-          const found = findFile(path.join(dir, entry.name), filename, depth + 1);
-          if (found) return found;
-        }
-      }
-    } catch {}
-    return null;
-  }
-
-  const serverDir = findFile(standaloneDir, "server.js");
-  if (serverDir) {
-    return { serverPath: path.join(serverDir, "server.js"), cwd: serverDir };
-  }
-
-  logger.error("electron", `server.js not found in ${standaloneDir}`);
-  return { serverPath: directPath, cwd: standaloneDir };
-}
-
-function waitForServer(url, maxAttempts = 30, interval = 500) {
-  const http = require("http");
-  return new Promise((resolve, reject) => {
-    let attempts = 0;
-    const check = () => {
-      attempts++;
-      const req = http.get(url, (res) => {
-        logger.info("server", `Server responded with status ${res.statusCode} on attempt ${attempts}`);
-        res.resume();
-        resolve();
-      });
-      req.on("error", () => {
-        if (attempts >= maxAttempts) {
-          logger.error("server", `Server not reachable after ${attempts} attempts`);
-          reject(new Error("Server failed to start in time"));
-        } else {
-          setTimeout(check, interval);
-        }
-      });
-      req.setTimeout(1000, () => {
-        req.destroy();
-        if (attempts >= maxAttempts) {
-          reject(new Error("Server failed to start in time"));
-        } else {
-          setTimeout(check, interval);
-        }
-      });
-    };
-    check();
-  });
-}
-
-function startProductionServer() {
-  return new Promise((resolve, reject) => {
-    const { serverPath, cwd } = findServerJs();
-
-    // Write a DNS fix script that runs before the server starts.
-    // mongodb+srv:// needs DNS SRV lookups, which fail with ECONNREFUSED on
-    // many ISP/corporate DNS resolvers. Replace the resolver list entirely
-    // with public DNS (Google + Cloudflare) so SRV queries always succeed.
-    // Also force ipv4-first to avoid IPv6 hangs on some networks.
-    const dnsFixPath = path.join(cwd, "_dns-fix.js");
-    fs.writeFileSync(
-      dnsFixPath,
-      'try{const d=require("dns");d.setServers(["8.8.8.8","1.1.1.1","8.8.4.4","1.0.0.1"]);if(typeof d.setDefaultResultOrder==="function"){d.setDefaultResultOrder("ipv4first")}}catch(e){}'
-    );
-
-    logger.info("server", `Starting Next.js server: ${serverPath}`);
-    logger.info("server", `Working directory: ${cwd}`);
-    logger.info("server", `Env keys: ${Object.keys(APP_ENV).join(", ")}`);
-
-    serverProcess = spawn(process.execPath, ["--require", dnsFixPath, serverPath], {
-      env: {
-        ...process.env,
-        ...APP_ENV,
-        ELECTRON_RUN_AS_NODE: "1",
-        PORT: String(PROD_PORT),
-        HOSTNAME: "localhost",
-        NODE_ENV: "production",
-      },
-      cwd: cwd,
-      stdio: "pipe",
-    });
-
-    serverProcess.stdout.on("data", (data) => {
-      const output = data.toString().trim();
-      if (output) logger.info("server", output);
-    });
-
-    serverProcess.stderr.on("data", (data) => {
-      const output = data.toString().trim();
-      if (output) logger.error("server", output);
-    });
-
-    serverProcess.on("error", (err) => {
-      logger.error("server", `Failed to start: ${err.message}`);
-      reject(err);
-    });
-
-    serverProcess.on("exit", (code, signal) => {
-      logger.warn("server", `Process exited with code ${code}, signal ${signal}`);
-    });
-
-    const url = `http://localhost:${PROD_PORT}`;
-    // Poll the server with HTTP requests until it actually responds
-    waitForServer(url)
-      .then(() => {
-        logger.info("server", `Server confirmed ready on port ${PROD_PORT}`);
-        resolve(url);
-      })
-      .catch(reject);
   });
 }
 
@@ -352,7 +202,7 @@ ipcMain.handle("set-open-at-login", (event, enabled) => {
   return enabled;
 });
 
-// Apple Sign-In config for Electron (Mac) flow.
+// Apple Sign-In config for Electron flow.
 // Client ID is the Services ID (not the bundle ID).
 const APPLE_CLIENT_ID = "com.noticomax.signin";
 const APPLE_REDIRECT_URI = "https://app.noticomax.com/api/auth/apple/callback";
@@ -461,7 +311,6 @@ ipcMain.handle("wipe-local-data", async () => {
     });
     await win.webContents.session.clearCache();
     logger.info("electron", "Local data wiped");
-    // Schedule a relaunch so the renderer starts from a clean slate
     app.relaunch();
     setTimeout(() => app.exit(0), 500);
     return { success: true };
@@ -473,34 +322,23 @@ ipcMain.handle("wipe-local-data", async () => {
 
 // --- App Startup ---
 
-app.whenReady().then(async () => {
-  if (isDev) {
-    logger.info("electron", "Dev mode - connecting to dev server.");
-    createWindow(DEV_URL);
-  } else {
-    try {
-      const url = await startProductionServer();
-      createWindow(url);
-    } catch (err) {
-      logger.error("electron", `Fatal error starting server: ${err.message}`);
-      app.quit();
-    }
-  }
+app.whenReady().then(() => {
+  const url = isDev ? DEV_URL : PROD_URL;
+  logger.info("electron", `${isDev ? "Dev" : "Prod"} mode - loading ${url}`);
+  createWindow(url);
 });
 
 app.on("window-all-closed", () => {
   logger.info("electron", "All windows closed.");
-  if (serverProcess) serverProcess.kill();
   if (process.platform !== "darwin") app.quit();
 });
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0 && isDev) {
-    createWindow(DEV_URL);
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow(isDev ? DEV_URL : PROD_URL);
   }
 });
 
 app.on("before-quit", () => {
   logger.info("electron", "App quitting.");
-  if (serverProcess) serverProcess.kill();
 });
