@@ -13,11 +13,6 @@ const withPWA = withPWAInit({
 });
 
 const nextConfig: NextConfig = {
-  output: "standalone",
-  serverExternalPackages: [
-    "mongoose",
-    "mongodb",
-  ],
   turbopack: {
     root: __dirname,
   },
