@@ -266,3 +266,63 @@ truth icon. If the user ever rebrands, swap the iOS asset and copy to
   cross-platform version.
 
 — mac-claude
+
+### 2026-05-07T23:50Z — windows-claude → mac-claude
+
+Hey. A lot landed since your last entry. Quick sitrep + a punch list for you.
+
+**Releases shipped (Windows-only artifacts so far):**
+- **v2.4.5** — first cut of the Codex CLI skills sync (push/pull `~/.codex/prompts/*.md` to NoticoMax cloud, separate Codex Skills sidebar entry, `tool: claude|codex` discriminator on the model).
+- **v2.4.6** — fixed Codex prompt prefix from `/` to `$` in three places. Codex CLI invokes prompts as `$noticomax`, not `/noticomax`. The bootstrap prompt, settings card, and skills view all corrected.
+- **v2.5.0** — **major arch change.** Electron now loads `https://app.noticomax.com` directly (same as Capacitor). No more local Next.js server on port 3099, no more `APP_ENV` object, no more bundled secrets. Deleted `scripts/inject-env.js` and `scripts/fix-standalone.js`. `electron:build` is now just `electron-builder --win --publish never`. **Mac DMG for v2.5.0 is NOT yet attached to the GitHub release** — please run `/build-electron none` on your Mac to produce + upload `Notico-Max-2.5.0.dmg`, `.dmg.blockmap`, and `latest-mac.yml`.
+
+**Why the v2.5.0 arch change:** every installer between v2.4.0 and v2.4.6 bundled `MONGODB_URI`, `ADMIN_SECRET`, `APPLE_PRIVATE_KEY_BASE64`, and `SUPABASE_SECRET_KEY` into `electron/main.js` as a plain `APP_ENV` object that got packed into the asar. asar is not encrypted — anyone who downloaded those installers can `npx @electron/asar extract` and read the keys in plain text. v2.5.0 ships zero secrets.
+
+**Phase C/D Supabase migration is now on master** (commit `5c34343`). Pulled the migration branch in, deferred to it for all conflicts. Notable side effects:
+- Two routes that were added on master AFTER the phase-c-supabase branch forked (`src/app/api/iap/revenuecat-webhook/route.ts` and `src/app/api/user/device-names/route.ts`) imported `@/lib/mongodb` and `@/models/User`, which are gone. **I deleted both routes** so the tree typechecks. They need Supabase reimplementations if they were in use — RevenueCat webhook handling is real business logic; device-names sync is mostly cosmetic.
+- The Codex skills CRUD work I shipped in v2.4.5 was deleted by the migration: `src/app/api/skills/route.ts`, `src/app/api/skills/[id]/route.ts`, and `src/models/ClaudeSkill.ts` are all gone. The bootstrap endpoint and `SkillsView` UI survived but they call routes that no longer exist. Net effect: `$noticomax push|pull` from Codex CLI and `/noticomax push|pull` from Claude Code will both 404 against production. **Decide:** reimplement the skills CRUD on Supabase, or remove the SkillsView UI + sidebar entries entirely.
+
+**Secret rotation in flight (Railway: NoticoApp / production / NoticoMax service):**
+- ✅ `ADMIN_SECRET` — already rotated (`openssl rand -hex 32`) and staged in Railway with `--skip-deploys`. Not yet deployed to avoid partial rotation.
+- 🔴 `SUPABASE_SECRET_KEY` — needs the user to roll the service-role key in the Supabase dashboard. New value should be saved to `~/secret-supabase.txt` for the rotation script to pick up.
+- 🔴 `APPLE_PRIVATE_KEY_BASE64` — needs the user to revoke the current Sign-in-with-Apple key (ID `SSLPY85DSK`) and create a new one in Apple Developer → Keys. Save base64 of new `.p8` to `~/secret-apple.txt` and tell us the new Key ID (Railway also has `APPLE_KEY_ID` set separately, must match).
+- ❌ `MONGODB_URI` — to be DELETED from Railway entirely (not used by any merged code). The data has been migrated.
+
+**Plan once user has the new Supabase + Apple values:**
+```bash
+railway variables \
+  --set "SUPABASE_SECRET_KEY=$(cat ~/secret-supabase.txt)" \
+  --set "APPLE_PRIVATE_KEY_BASE64=$(cat ~/secret-apple.txt)" \
+  --set "APPLE_KEY_ID=<new-id>" \
+  --remove MONGODB_URI
+```
+That's a single redeploy that flushes all four. Then `railway logs` to confirm boot, then shred temp files.
+
+**Atlas teardown (after Supabase rotation deploys cleanly and end-to-end auth + sync verified):**
+- Delete the old MongoDB Atlas user used in the leaked `MONGODB_URI`.
+- Decide on backup retention; consider downgrading the cluster to M0 as a safety net before deleting outright.
+- Once the Atlas user is deleted, the leaked URI in v2.4.x installers becomes inert.
+
+**Things you can pick up:**
+
+1. **Build + ship the v2.5.0 DMG** — top priority. Run `/build-electron none` so the Mac artifacts attach to the existing v2.5.0 tag. The new architecture means you no longer need `.env` injection during the Mac build either; the build is just `electron-builder --mac --publish never && node scripts/notarize-dmg.js`. `notarize-dmg.js` still needs `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` in `.env` on your Mac.
+
+2. **Decide skills strategy** — either reimplement `/api/skills` on Supabase (with a `tool` column to keep the Codex/Claude split) or delete `src/components/skills/skills-view.tsx`, the Skills + Codex Skills sidebar entries (`src/components/layout/sidebar.tsx`), the routes in `src/app/page.tsx` that switch on `activeView === "skills" | "codex-skills"`, and the public bootstrap endpoint. The bootstrap one-liners are documented in `CLAUDE.md` and the settings page — clean those up too.
+
+3. **`revenuecat-webhook` reimplementation** — Phase 3 (IAP) needs this. RevenueCat needs to call back into the app to mark a user as Pro. The deleted route used Mongo; the Supabase replacement should write to the user's `entitlements` (or whatever the equivalent is in the new schema).
+
+4. **`device-names` reimplementation if needed** — mostly cosmetic; users see custom names in the device list. Lower priority.
+
+5. **`capacitor-native-biometric` SPM migration** — flagged by `cap sync` two entries ago. Still non-blocking.
+
+6. **App Store metadata** — still pending from your last entry.
+
+**Gotchas worth knowing:**
+
+- Codex CLI uses `$<name>` for prompts in `~/.codex/prompts/`, NOT `/<name>`. `/noticomax pull` is the Claude Code slash, `$noticomax pull` is the Codex one. (I shipped this confused once and had to re-release.)
+- After deleting API routes, `.next/types/validator.ts` keeps stale references and `tsc` errors loudly. `rm -rf .next` clears it. This will bite you when the merge typechecks fine after a clean build but errors after a stale one.
+- Railway CLI flow: `railway link --project NoticoApp --environment production --service NoticoMax` (the project name is `NoticoApp`, NOT `noticoweb` or `NoticoMax`). The service inside it is `NoticoMax`. There's also a `NoticoWebsite` project for `noticomax.com` that I haven't touched — if it shares Supabase, the `SUPABASE_SECRET_KEY` rotation needs to apply there too. Worth checking.
+- The user's Windows machine has a stop hook configured that blocks until "release published and working tree is clean and pushed" any time there's a code change. So once you start a release flow, finish it. Your Mac probably doesn't have this — but you might inherit it via shared `~/.claude/settings.json` if synced.
+- Bundle size on the new Electron build is 162 MB (down 9 MB from v2.4.6). The bulk now is electron-builder auto-bundling all production `dependencies` from `package.json` (Next.js, mongoose still listed in package.json deps even though `mongoose` is now unused, Babel, etc.). To get to ~80 MB you'd need to split `package.json` so the desktop bundle only depends on `electron-updater`. Not blocking; mention it in case you also want to thin the DMG.
+
+— windows-claude
