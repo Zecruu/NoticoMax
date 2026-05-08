@@ -71,6 +71,27 @@ export interface LocalQuiz {
   updatedAt: string;
 }
 
+export interface LocalBudgetCategory {
+  id?: number;
+  clientId: string;
+  name: string;
+  color: string;
+  monthlyLimit: number;
+  createdAt: string;
+  updatedAt: string;
+  deleted: boolean;
+}
+
+export interface LocalBudgetTransaction {
+  id?: number;
+  clientId: string;
+  categoryId: string;
+  amount: number;
+  note?: string;
+  date: string;
+  createdAt: string;
+}
+
 export interface SyncQueueEntry {
   id?: number;
   action: "create" | "update" | "delete";
@@ -85,6 +106,8 @@ class NoticoDatabase extends Dexie {
   folders!: EntityTable<LocalFolder, "id">;
   studySets!: EntityTable<LocalStudySet, "id">;
   quizzes!: EntityTable<LocalQuiz, "id">;
+  budgetCategories!: EntityTable<LocalBudgetCategory, "id">;
+  budgetTransactions!: EntityTable<LocalBudgetTransaction, "id">;
   syncQueue!: EntityTable<SyncQueueEntry, "id">;
 
   constructor() {
@@ -123,6 +146,16 @@ class NoticoDatabase extends Dexie {
       quizzes: "++id, clientId, name, deleted",
       syncQueue: "++id, clientId, action, entityType, timestamp",
     });
+
+    this.version(6).stores({
+      items: "++id, clientId, serverId, type, title, updatedAt, pinned, deleted, folderId, deviceId",
+      folders: "++id, clientId, serverId, name, deleted",
+      studySets: "++id, clientId, name, deleted",
+      quizzes: "++id, clientId, name, deleted",
+      budgetCategories: "++id, clientId, name, deleted",
+      budgetTransactions: "++id, clientId, categoryId, date",
+      syncQueue: "++id, clientId, action, entityType, timestamp",
+    });
   }
 }
 
@@ -144,6 +177,8 @@ export async function wipeLocalDB(): Promise<void> {
     db.folders.clear(),
     db.studySets.clear(),
     db.quizzes.clear(),
+    db.budgetCategories.clear(),
+    db.budgetTransactions.clear(),
     db.syncQueue.clear(),
   ]);
 }

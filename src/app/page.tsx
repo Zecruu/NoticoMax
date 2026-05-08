@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useItems } from "@/hooks/use-items";
 import { useFolders } from "@/hooks/use-folders";
 import { type LocalItem } from "@/lib/db/indexed-db";
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { MobileNav } from "@/components/layout/mobile-nav";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ItemList } from "@/components/items/item-list";
 import { ItemDialog } from "@/components/items/item-dialog";
 import { SearchCommand } from "@/components/items/search-bar";
@@ -15,6 +16,7 @@ import { CalendarView } from "@/components/calendar/calendar-view";
 import { StudyView } from "@/components/study/study-view";
 import { PasswordsView } from "@/components/passwords/passwords-view";
 import { SkillsView } from "@/components/skills/skills-view";
+import { BudgetView } from "@/components/budget/budget-view";
 import { useLicense } from "@/hooks/use-license";
 import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
@@ -30,8 +32,25 @@ export default function Dashboard() {
   const [editingItem, setEditingItem] = useState<LocalItem | null>(null);
   const [defaultType, setDefaultType] = useState<"note" | "url" | "reminder">("note");
   const [skippedActivation, setSkippedActivation] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const { isActivated, isPro, isLoading, isLoggedIn, login, loginWithApple, register } = useLicense();
+
+  // Bottom banner ads for non-Pro users on native platforms only.
+  // Pro removes ads (entitlements.adsRemoved). Web/Electron get no ads.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { showBannerAd, hideBannerAd } = await import("@/lib/ads/admob-client");
+      if (cancelled) return;
+      if (isPro || !isLoggedIn) {
+        await hideBannerAd();
+      } else {
+        await showBannerAd();
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isPro, isLoggedIn]);
 
   const { folders, addFolder, editFolder, removeFolder } = useFolders();
   const {
@@ -176,7 +195,36 @@ export default function Dashboard() {
         syncing={syncing}
         onSync={syncNow}
         isActivated={isActivated}
+        onMenuClick={() => setSidebarOpen(true)}
       />
+
+      <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+        <SheetContent side="left" className="w-72 p-0 md:hidden">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Navigation</SheetTitle>
+          </SheetHeader>
+          <Sidebar
+            wrapperClassName="flex h-full w-full flex-col bg-background"
+            activeFilter={activeFilter}
+            activeFolder={activeFolder}
+            onFilterChange={(v) => { setActiveFilter(v); setSidebarOpen(false); }}
+            onFolderChange={(v) => { setActiveFolder(v); setSidebarOpen(false); }}
+            onCreateNew={() => { handleCreateNew(); setSidebarOpen(false); }}
+            itemCounts={itemCounts}
+            folders={folders}
+            folderItemCounts={folderItemCounts}
+            onAddFolder={addFolder}
+            onEditFolder={editFolder}
+            onRemoveFolder={removeFolder}
+            activeView={activeView}
+            onViewChange={(v) => { setActiveView(v); setSidebarOpen(false); }}
+            trashCount={trashedItems.length}
+            allTags={allTags}
+            activeTag={activeTag}
+            onTagChange={(v) => { setActiveTag(v); setSidebarOpen(false); }}
+          />
+        </SheetContent>
+      </Sheet>
 
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
@@ -224,6 +272,8 @@ export default function Dashboard() {
             <SkillsView tool="claude" />
           ) : activeView === "codex-skills" ? (
             <SkillsView tool="codex" />
+          ) : activeView === "budget" ? (
+            <BudgetView />
           ) : (
             <ItemList
               items={displayedItems}

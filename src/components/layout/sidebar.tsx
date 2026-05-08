@@ -22,6 +22,7 @@ import {
   ChevronDown,
   Variable,
   Terminal,
+  Wallet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,6 +78,7 @@ interface SidebarProps {
   allTags?: string[];
   activeTag?: string | null;
   onTagChange?: (tag: string | null) => void;
+  wrapperClassName?: string;
 }
 
 export function Sidebar({
@@ -97,6 +99,7 @@ export function Sidebar({
   allTags = [],
   activeTag,
   onTagChange,
+  wrapperClassName,
 }: SidebarProps) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -163,7 +166,7 @@ export function Sidebar({
   };
 
   return (
-    <aside className="hidden md:flex w-56 flex-col border-r bg-muted/30">
+    <aside className={wrapperClassName ?? "hidden md:flex w-56 flex-col border-r bg-muted/30"}>
       <div className="flex-1 overflow-auto p-4">
         <Button onClick={onCreateNew} className="mb-6 w-full gap-2">
           <Plus className="h-4 w-4" />
@@ -204,7 +207,7 @@ export function Sidebar({
                   }}
                   className={cn(
                     "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                    activeView !== "trash" && activeView !== "calendar" && activeView !== "study" && activeView !== "passwords" && activeView !== "skills" && activeView !== "envvars" && !activeFolder && !activeTag && activeFilter === item.value
+                    activeView !== "trash" && activeView !== "calendar" && activeView !== "study" && activeView !== "passwords" && activeView !== "skills" && activeView !== "envvars" && activeView !== "budget" && !activeFolder && !activeTag && activeFilter === item.value
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground"
                   )}
@@ -214,7 +217,7 @@ export function Sidebar({
                   <span
                     className={cn(
                       "text-xs tabular-nums",
-                      activeView !== "trash" && activeView !== "calendar" && activeView !== "study" && activeView !== "passwords" && activeView !== "skills" && activeView !== "envvars" && !activeFolder && !activeTag && activeFilter === item.value
+                      activeView !== "trash" && activeView !== "calendar" && activeView !== "study" && activeView !== "passwords" && activeView !== "skills" && activeView !== "envvars" && activeView !== "budget" && !activeFolder && !activeTag && activeFilter === item.value
                         ? "text-primary-foreground/70"
                         : "text-muted-foreground"
                     )}
@@ -273,6 +276,23 @@ export function Sidebar({
             >
               <Lock className="h-4 w-4" />
               <span className="flex-1 text-left">Passwords</span>
+            </button>
+
+            <button
+              onClick={() => {
+                onFolderChange(null);
+                onViewChange?.("budget");
+                onTagChange?.(null);
+              }}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                activeView === "budget"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <Wallet className="h-4 w-4" />
+              <span className="flex-1 text-left">BudgetMaxxing</span>
             </button>
 
             <button

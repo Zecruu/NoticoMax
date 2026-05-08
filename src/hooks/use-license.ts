@@ -201,6 +201,41 @@ export function useLicense() {
     } catch {}
   }, []);
 
+  const deleteAccount = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch("/api/auth/delete-account", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        return { success: false, error: data.error || "Account deletion failed" };
+      }
+      // Wipe local IndexedDB so the next login on this device starts clean.
+      try {
+        const { wipeLocalDB } = await import("@/lib/db/indexed-db");
+        await wipeLocalDB();
+      } catch (err) {
+        console.warn("[use-license] wipeLocalDB after deleteAccount failed:", err);
+      }
+      // Sign out client-side too, in case cookies aren't fully cleared by the response.
+      try {
+        const supabase = getSupabaseBrowserClient();
+        await supabase.auth.signOut();
+      } catch {}
+      setUserId(null);
+      setEmail(null);
+      setIsLoggedIn(false);
+      setEntitlements(FREE_ENTITLEMENTS);
+      try {
+        localStorage.removeItem(ENTITLEMENTS_KEY);
+      } catch {}
+      return { success: true };
+    } catch {
+      return { success: false, error: "Failed to connect to server" };
+    }
+  }, []);
+
   const isPro = entitlements.proActive;
   // Backward-compat alias used elsewhere in the codebase.
   const isActivated = isPro;
@@ -219,5 +254,6 @@ export function useLicense() {
     register,
     activate,
     logout,
+    deleteAccount,
   };
 }

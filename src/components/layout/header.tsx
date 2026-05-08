@@ -1,7 +1,7 @@
 "use client";
 
 import { useTheme } from "next-themes";
-import { Moon, Sun, Search, Settings } from "lucide-react";
+import { Moon, Sun, Search, Settings, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SyncStatus } from "@/components/sync-status";
@@ -14,9 +14,10 @@ interface HeaderProps {
   syncing: boolean;
   onSync: () => void;
   isActivated: boolean;
+  onMenuClick?: () => void;
 }
 
-export function Header({ searchQuery, onSearchChange, syncing, onSync, isActivated }: HeaderProps) {
+export function Header({ searchQuery, onSearchChange, syncing, onSync, isActivated, onMenuClick }: HeaderProps) {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
@@ -27,6 +28,18 @@ export function Header({ searchQuery, onSearchChange, syncing, onSync, isActivat
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 pt-[env(safe-area-inset-top)]">
       <div className="flex h-14 items-center gap-4 px-4 md:px-6">
+        {onMenuClick && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="md:hidden -ml-2"
+            onClick={onMenuClick}
+            aria-label="Open menu"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+        )}
+
         <div className="flex items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="NOTICO MAX" className="h-7 w-7" />

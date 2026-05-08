@@ -14,9 +14,14 @@ import { getDeviceName, setDeviceName } from "@/lib/device";
 import { checkBiometricAvailability } from "@/lib/capacitor/biometric-auth";
 import { presentPaywall, presentCustomerCenter } from "@/lib/iap/revenuecat-client";
 import { Sparkles, Settings as SettingsIcon } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 
 export default function SettingsPage() {
-  const { licenseKey, isActivated, isPro, isLoggedIn, email, activate, logout } = useLicense();
+  const { licenseKey, isActivated, isPro, isLoggedIn, email, activate, logout, deleteAccount } = useLicense();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const [licenseInput, setLicenseInput] = useState("");
   const [activating, setActivating] = useState(false);
   const showPaywallCTA = typeof window !== "undefined" && isIOS();
@@ -156,6 +161,23 @@ export default function SettingsPage() {
   const handleLogout = () => {
     logout();
     toast.success("Signed out. Data remains stored locally.");
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirm.trim().toUpperCase() !== "DELETE") {
+      toast.error('Type DELETE to confirm');
+      return;
+    }
+    setDeleting(true);
+    const result = await deleteAccount();
+    setDeleting(false);
+    if (result.success) {
+      setDeleteOpen(false);
+      setDeleteConfirm("");
+      toast.success("Account deleted. All data has been removed.");
+    } else {
+      toast.error(result.error || "Account deletion failed");
+    }
   };
 
   const handleExport = async () => {
@@ -582,15 +604,32 @@ export default function SettingsPage() {
                   </div>
                 )}
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={handleLogout}
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  Sign Out
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={handleLogout}
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    Sign Out
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setDeleteOpen(true)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete Account
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Deleting your account permanently removes your account, all
+                  cloud-synced notes, folders, and shared items. This cannot be
+                  undone. Active subscriptions are managed separately through
+                  your App Store account.
+                </p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -800,6 +839,43 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       </main>
+
+      <Dialog open={deleteOpen} onOpenChange={(o) => { if (!deleting) { setDeleteOpen(o); if (!o) setDeleteConfirm(""); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Account</DialogTitle>
+            <DialogDescription>
+              This permanently deletes your NOTICO MAX account and all
+              cloud-synced data: notes, folders, reminders, and shared items.
+              This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              If you have an active subscription, cancel it from your App Store
+              account settings first — deleting the account here does not
+              cancel billing.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="delete-confirm">Type DELETE to confirm</Label>
+              <Input
+                id="delete-confirm"
+                placeholder="DELETE"
+                value={deleteConfirm}
+                onChange={(e) => setDeleteConfirm(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" disabled={deleting} onClick={() => setDeleteOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" disabled={deleting} onClick={handleDeleteAccount}>
+              {deleting ? "Deleting..." : "Delete Account"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

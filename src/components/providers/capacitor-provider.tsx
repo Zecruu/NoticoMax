@@ -28,6 +28,10 @@ export function CapacitorProvider({ children }: { children: React.ReactNode }) {
         initIAP();
       });
     }
+
+    import("@/lib/ads/admob-client").then(({ initAdMob }) => {
+      initAdMob();
+    });
   }, []);
 
   return <>{children}</>;
