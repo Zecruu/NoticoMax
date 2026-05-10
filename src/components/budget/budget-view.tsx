@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useBudget, type BudgetCategoryWithTotals } from "@/hooks/use-budget";
+import {
+  useBudget,
+  type BudgetCategoryWithTotals,
+  formatMonthKey,
+  getCurrentMonthKey,
+} from "@/hooks/use-budget";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +18,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, Wallet, TrendingDown, TrendingUp, DollarSign } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Wallet,
+  TrendingDown,
+  TrendingUp,
+  DollarSign,
+  ChevronLeft,
+  ChevronRight,
+  History,
+  Crown,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
 
@@ -28,10 +44,17 @@ function formatMoney(n: number): string {
 }
 
 export function BudgetView() {
+  const [viewMonthKey, setViewMonthKey] = useState<string>(getCurrentMonthKey());
+
   const {
+    isCurrentMonth,
+    availableMonths,
+    monthSummaries,
+    allTime,
     monthlyIncome,
     setMonthlyIncome,
     categories,
+    monthTransactions,
     totalBudgeted,
     totalSpent,
     unallocated,
@@ -39,7 +62,11 @@ export function BudgetView() {
     addCategory,
     deleteCategory,
     addTransaction,
-  } = useBudget();
+    deleteTransaction,
+    shiftMonth,
+  } = useBudget(viewMonthKey);
+
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const [incomeInput, setIncomeInput] = useState(monthlyIncome ? String(monthlyIncome) : "");
   const [editingIncome, setEditingIncome] = useState(monthlyIncome === 0);
@@ -97,17 +124,93 @@ export function BudgetView() {
     toast.success(`${formatMoney(amount)} logged`);
   };
 
+  const txCategoryNameById = new Map(categories.map((c) => [c.clientId, c.name]));
+  const txCategoryColorById = new Map(categories.map((c) => [c.clientId, c.color]));
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 md:px-6 md:py-8 space-y-6">
       <div className="flex items-center gap-3">
         <Wallet className="h-6 w-6 text-primary" />
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold tracking-tight">BudgetMaxxing</h1>
           <p className="text-sm text-muted-foreground">
             Track monthly income, set category budgets, watch them tick down as you spend.
           </p>
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => setHistoryOpen(true)}
+        >
+          <History className="h-4 w-4" />
+          History
+        </Button>
       </div>
+
+      {/* Month navigator */}
+      <div className="flex items-center justify-between rounded-lg border bg-card px-3 py-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setViewMonthKey(shiftMonth(viewMonthKey, -1))}
+          aria-label="Previous month"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <div className="text-center">
+          <p className="text-sm font-medium">{formatMonthKey(viewMonthKey)}</p>
+          {!isCurrentMonth && (
+            <button
+              onClick={() => setViewMonthKey(getCurrentMonthKey())}
+              className="text-xs text-primary hover:underline"
+            >
+              Jump to current month
+            </button>
+          )}
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setViewMonthKey(shiftMonth(viewMonthKey, 1))}
+          aria-label="Next month"
+          disabled={isCurrentMonth}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {/* All-time stats */}
+      {allTime.monthsTracked > 0 && (
+        <Card>
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-center gap-2 mb-3 text-xs uppercase text-muted-foreground tracking-wider">
+              <Crown className="h-3 w-3" />
+              All Time
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div>
+                <p className="text-xs text-muted-foreground">Months tracked</p>
+                <p className="text-lg font-semibold tabular-nums">{allTime.monthsTracked}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Total spent</p>
+                <p className="text-lg font-semibold tabular-nums">{formatMoney(allTime.totalSpent)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Avg / month</p>
+                <p className="text-lg font-semibold tabular-nums">{formatMoney(allTime.avgPerMonth)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Top category</p>
+                <p className="text-lg font-semibold truncate" title={allTime.topCategoryName ?? "—"}>
+                  {allTime.topCategoryName ?? "—"}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="pb-3">
@@ -158,7 +261,7 @@ export function BudgetView() {
           </Card>
           <Card>
             <CardContent className="pt-4">
-              <p className="text-xs uppercase text-muted-foreground tracking-wider">Spent this month</p>
+              <p className="text-xs uppercase text-muted-foreground tracking-wider">Spent {isCurrentMonth ? "this month" : "in month"}</p>
               <p className="text-xl font-semibold tabular-nums flex items-center gap-1">
                 <TrendingDown className="h-4 w-4 text-destructive" />
                 {formatMoney(totalSpent)}
@@ -188,10 +291,12 @@ export function BudgetView() {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold">Categories</h2>
-          <Button size="sm" onClick={() => setCreatingCategory(true)} className="gap-1.5">
-            <Plus className="h-4 w-4" />
-            New Category
-          </Button>
+          {isCurrentMonth && (
+            <Button size="sm" onClick={() => setCreatingCategory(true)} className="gap-1.5">
+              <Plus className="h-4 w-4" />
+              New Category
+            </Button>
+          )}
         </div>
 
         {categories.length === 0 ? (
@@ -213,28 +318,30 @@ export function BudgetView() {
                         <div className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: cat.color }} />
                         <h3 className="font-medium truncate">{cat.name}</h3>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <Button size="sm" variant="outline" className="h-7" onClick={() => setSpendingCategory(cat)}>
-                          Log Spend
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                          onClick={() => {
-                            if (confirm(`Delete budget category "${cat.name}"? Its transactions will also be removed.`)) {
-                              deleteCategory(cat.clientId);
-                            }
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
+                      {isCurrentMonth && (
+                        <div className="flex items-center gap-1">
+                          <Button size="sm" variant="outline" className="h-7" onClick={() => setSpendingCategory(cat)}>
+                            Log Spend
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                            onClick={() => {
+                              if (confirm(`Delete budget category "${cat.name}"? Its transactions will also be removed.`)) {
+                                deleteCategory(cat.clientId);
+                              }
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-baseline justify-between text-sm mb-1.5">
                       <span className="tabular-nums">
-                        {formatMoney(cat.spentThisMonth)} / {formatMoney(cat.monthlyLimit)}
+                        {formatMoney(cat.spentInMonth)} / {formatMoney(cat.monthlyLimit)}
                       </span>
                       <span className={cn("tabular-nums font-medium", overspent ? "text-destructive" : "text-muted-foreground")}>
                         {overspent ? `${formatMoney(cat.remaining)} over` : `${formatMoney(cat.remaining)} left`}
@@ -258,6 +365,54 @@ export function BudgetView() {
         )}
       </div>
 
+      {/* Recent transactions for the viewed month */}
+      {monthTransactions.length > 0 && (
+        <div>
+          <h2 className="text-lg font-semibold mb-3">Transactions ({monthTransactions.length})</h2>
+          <Card>
+            <CardContent className="p-0 divide-y">
+              {monthTransactions
+                .slice()
+                .sort((a, b) => b.date.localeCompare(a.date))
+                .slice(0, 50)
+                .map((tx) => (
+                  <div key={tx.clientId} className="flex items-center gap-3 px-4 py-2.5">
+                    <div
+                      className="h-2.5 w-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: txCategoryColorById.get(tx.categoryId) ?? "#6b7280" }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm truncate">
+                        {txCategoryNameById.get(tx.categoryId) ?? "(deleted category)"}
+                        {tx.note && <span className="text-muted-foreground"> · {tx.note}</span>}
+                      </p>
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        {new Date(tx.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      </p>
+                    </div>
+                    <span className="text-sm font-medium tabular-nums">{formatMoney(tx.amount)}</span>
+                    {isCurrentMonth && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          if (confirm(`Remove ${formatMoney(tx.amount)} entry?`)) {
+                            deleteTransaction(tx.clientId);
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* New category dialog */}
       <Dialog open={creatingCategory} onOpenChange={setCreatingCategory}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -312,6 +467,7 @@ export function BudgetView() {
         </DialogContent>
       </Dialog>
 
+      {/* Log spending dialog */}
       <Dialog open={!!spendingCategory} onOpenChange={(o) => !o && setSpendingCategory(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -348,6 +504,43 @@ export function BudgetView() {
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setSpendingCategory(null)}>Cancel</Button>
             <Button onClick={handleAddSpending}>Log Spend</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Monthly history dialog */}
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Spending History</DialogTitle>
+            <DialogDescription>
+              Tap a month to view it in detail.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto -mx-6 px-6">
+            {availableMonths.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4">No months tracked yet.</p>
+            ) : (
+              <div className="divide-y">
+                {monthSummaries.map((m) => (
+                  <button
+                    key={m.monthKey}
+                    onClick={() => { setViewMonthKey(m.monthKey); setHistoryOpen(false); }}
+                    className="flex w-full items-center justify-between py-3 text-left hover:bg-muted/50 -mx-2 px-2 rounded"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{formatMonthKey(m.monthKey)}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {m.topCategoryName
+                          ? <>Top: {m.topCategoryName} · {formatMoney(m.topCategorySpent)}</>
+                          : "No spending"}
+                      </p>
+                    </div>
+                    <span className="tabular-nums font-medium">{formatMoney(m.totalSpent)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
