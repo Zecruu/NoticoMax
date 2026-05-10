@@ -59,33 +59,22 @@ class ShareViewController: SLComposeServiceViewController {
       if let u = collectedURL, !u.isEmpty { queryItems.append(URLQueryItem(name: "url", value: u)) }
       components.queryItems = queryItems
 
+      // Share extensions use NSExtensionContext.open to bounce a URL back
+      // into a host app. UIApplication.shared isn't accessible from inside
+      // app extensions, and the responder-chain `openURL:` trick stopped
+      // working when Apple removed the legacy selector. This is the
+      // documented API and works on iOS 14+.
       if let url = components.url {
-        self.openURL(url)
+        self.extensionContext?.open(url, completionHandler: { _ in
+          self.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
+        })
+      } else {
+        self.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
       }
-      self.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
     }
   }
 
   override func configurationItems() -> [Any]! {
     return []
-  }
-
-  // App extensions can't call UIApplication.shared.open directly. Walk the
-  // responder chain looking for a UIApplication-compatible "open(_:)" method.
-  // Standard pattern for share extensions that need to bounce back into a
-  // host app via URL scheme.
-  @objc @discardableResult private func openURL(_ url: URL) -> Bool {
-    var responder: UIResponder? = self
-    while let r = responder {
-      if r.responds(to: #selector(openURL(_:))) && r !== self {
-        let selector = sel_registerName("openURL:")
-        if r.responds(to: selector) {
-          _ = r.perform(selector, with: url)
-          return true
-        }
-      }
-      responder = r.next
-    }
-    return false
   }
 }
