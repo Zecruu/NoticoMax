@@ -36,7 +36,13 @@ if (!fs.existsSync(DIST_DIR)) {
   process.exit(0);
 }
 
-const dmg = fs.readdirSync(DIST_DIR).find((f) => f.endsWith(".dmg"));
+// Prefer the DMG matching the current package.json version — otherwise
+// stale DMGs from prior builds (alphabetically earlier filenames) get
+// picked instead of the fresh one. Falls back to first match if no
+// version-specific DMG is found.
+const pkgVersion = require(path.join(__dirname, "..", "package.json")).version;
+const dmgs = fs.readdirSync(DIST_DIR).filter((f) => f.endsWith(".dmg"));
+const dmg = dmgs.find((f) => f.includes(`-${pkgVersion}.dmg`)) ?? dmgs[0];
 if (!dmg) {
   console.log("notarize-dmg: no .dmg in dist-electron, skipping.");
   process.exit(0);
