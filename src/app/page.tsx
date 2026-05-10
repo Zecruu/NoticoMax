@@ -17,6 +17,7 @@ import { StudyView } from "@/components/study/study-view";
 import { PasswordsView } from "@/components/passwords/passwords-view";
 import { SkillsView } from "@/components/skills/skills-view";
 import { BudgetView } from "@/components/budget/budget-view";
+import { GoalsView } from "@/components/goals/goals-view";
 import { useLicense } from "@/hooks/use-license";
 import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
@@ -293,6 +294,8 @@ export default function Dashboard() {
             <SkillsView tool="codex" />
           ) : activeView === "budget" ? (
             <BudgetView />
+          ) : activeView === "goals" ? (
+            <GoalsView />
           ) : (
             <ItemList
               items={displayedItems}

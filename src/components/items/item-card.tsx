@@ -24,6 +24,8 @@ import {
   Copy,
   Share2,
   Key,
+  CheckCircle2,
+  Circle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
@@ -90,6 +92,41 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
           </h3>
         </div>
 
+        <div className="flex items-center gap-0.5">
+          {item.type === "reminder" && onToggleComplete && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleComplete(item.clientId, item.reminderCompleted || false);
+              }}
+              aria-label={item.reminderCompleted ? "Mark incomplete" : "Mark complete"}
+              title={item.reminderCompleted ? "Mark incomplete" : "Mark complete"}
+            >
+              {item.reminderCompleted ? (
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+              ) : (
+                <Circle className="h-4 w-4 text-muted-foreground" />
+              )}
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm(`Move "${item.title}" to trash?`)) {
+                onDelete(item.clientId);
+              }
+            }}
+            aria-label="Delete"
+            title="Delete"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
             <Button
@@ -173,6 +210,7 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </CardHeader>
 
       <CardContent className="pt-0">
