@@ -20,8 +20,25 @@ abort "Extension dir not found: #{EXT_DIR}" unless File.directory?(EXT_DIR)
 
 project = Xcodeproj::Project.open(PROJECT_PATH)
 
-if project.targets.any? { |t| t.name == EXT_NAME }
-  puts "Target #{EXT_NAME} already present — nothing to do."
+existing_target = project.targets.find { |t| t.name == EXT_NAME }
+if existing_target
+  puts "Target #{EXT_NAME} already present — refreshing build settings."
+  existing_target.build_configurations.each do |config|
+    config.build_settings.merge!(
+      "PRODUCT_NAME" => "$(TARGET_NAME)",
+      "PRODUCT_BUNDLE_IDENTIFIER" => EXT_BUNDLE_ID,
+      "INFOPLIST_FILE" => "ShareExtension/Info.plist",
+      "DEVELOPMENT_TEAM" => TEAM_ID,
+      "CODE_SIGN_STYLE" => "Automatic",
+      "SWIFT_VERSION" => "5.0",
+      "IPHONEOS_DEPLOYMENT_TARGET" => DEPLOYMENT_TARGET,
+      "TARGETED_DEVICE_FAMILY" => "1,2",
+      "SKIP_INSTALL" => "YES",
+      "GENERATE_INFOPLIST_FILE" => "NO",
+    )
+  end
+  project.save
+  puts "✓ ShareExtension settings refreshed."
   exit 0
 end
 
@@ -43,6 +60,7 @@ ext_target.source_build_phase.add_file_reference(swift_ref, true)
 # 3. Build settings — signing, plist path, swift version, bundle id.
 ext_target.build_configurations.each do |config|
   config.build_settings.merge!(
+    "PRODUCT_NAME" => "$(TARGET_NAME)",
     "PRODUCT_BUNDLE_IDENTIFIER" => EXT_BUNDLE_ID,
     "INFOPLIST_FILE" => "ShareExtension/Info.plist",
     "DEVELOPMENT_TEAM" => TEAM_ID,
