@@ -61,6 +61,7 @@ interface SupabaseItem {
   url: string | null;
   reminder_date: string | null;
   reminder_completed: boolean | null;
+  recurrence: string | null;
   tags: string[];
   pinned: boolean;
   color: string | null;
@@ -93,6 +94,7 @@ function localToSupabaseItem(item: LocalItem, userId: string): Partial<SupabaseI
     url: item.url ?? null,
     reminder_date: item.reminderDate ?? null,
     reminder_completed: item.reminderCompleted ?? null,
+    recurrence: item.recurrence ?? null,
     tags: item.tags ?? [],
     pinned: item.pinned ?? false,
     color: item.color ?? null,
@@ -114,6 +116,7 @@ function supabaseToLocalItem(row: SupabaseItem): LocalItem {
     url: row.url ?? undefined,
     reminderDate: row.reminder_date ?? undefined,
     reminderCompleted: row.reminder_completed ?? undefined,
+    recurrence: (row.recurrence as LocalItem["recurrence"]) ?? undefined,
     tags: row.tags ?? [],
     pinned: row.pinned ?? false,
     color: row.color ?? undefined,
