@@ -198,14 +198,19 @@ export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
     await db.budgetTransactions.where("categoryId").equals(clientId).delete();
   }, []);
 
-  const addTransaction = useCallback(async (input: { categoryId: string; amount: number; note?: string }) => {
+  const addTransaction = useCallback(async (input: {
+    categoryId: string;
+    amount: number;
+    note?: string;
+    date?: string;
+  }) => {
     const now = new Date().toISOString();
     const tx: LocalBudgetTransaction = {
       clientId: crypto.randomUUID(),
       categoryId: input.categoryId,
       amount: input.amount,
       note: input.note,
-      date: now,
+      date: input.date ?? now,
       createdAt: now,
     };
     await db.budgetTransactions.add(tx);

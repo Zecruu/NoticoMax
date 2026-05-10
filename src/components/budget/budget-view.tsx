@@ -113,10 +113,21 @@ export function BudgetView() {
       toast.error("Enter a positive amount");
       return;
     }
+    // Stamp the transaction within the viewed month. For the current month,
+    // use "now" so it lands at today's date; for past months, use the 15th
+    // (mid-month) so category totals attribute correctly.
+    let date: string;
+    if (isCurrentMonth) {
+      date = new Date().toISOString();
+    } else {
+      const [y, m] = viewMonthKey.split("-").map(Number);
+      date = new Date(y, m - 1, 15, 12, 0, 0).toISOString();
+    }
     await addTransaction({
       categoryId: spendingCategory.clientId,
       amount,
       note: spendNote.trim() || undefined,
+      date,
     });
     setSpendAmount("");
     setSpendNote("");
@@ -291,12 +302,10 @@ export function BudgetView() {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold">Categories</h2>
-          {isCurrentMonth && (
-            <Button size="sm" onClick={() => setCreatingCategory(true)} className="gap-1.5">
-              <Plus className="h-4 w-4" />
-              New Category
-            </Button>
-          )}
+          <Button size="sm" onClick={() => setCreatingCategory(true)} className="gap-1.5">
+            <Plus className="h-4 w-4" />
+            New Category
+          </Button>
         </div>
 
         {categories.length === 0 ? (
@@ -318,25 +327,23 @@ export function BudgetView() {
                         <div className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: cat.color }} />
                         <h3 className="font-medium truncate">{cat.name}</h3>
                       </div>
-                      {isCurrentMonth && (
-                        <div className="flex items-center gap-1">
-                          <Button size="sm" variant="outline" className="h-7" onClick={() => setSpendingCategory(cat)}>
-                            Log Spend
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                            onClick={() => {
-                              if (confirm(`Delete budget category "${cat.name}"? Its transactions will also be removed.`)) {
-                                deleteCategory(cat.clientId);
-                              }
-                            }}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-1">
+                        <Button size="sm" variant="outline" className="h-7" onClick={() => setSpendingCategory(cat)}>
+                          Log Spend
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            if (confirm(`Delete budget category "${cat.name}"? Its transactions will also be removed.`)) {
+                              deleteCategory(cat.clientId);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
 
                     <div className="flex items-baseline justify-between text-sm mb-1.5">
@@ -391,20 +398,18 @@ export function BudgetView() {
                       </p>
                     </div>
                     <span className="text-sm font-medium tabular-nums">{formatMoney(tx.amount)}</span>
-                    {isCurrentMonth && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                        onClick={() => {
-                          if (confirm(`Remove ${formatMoney(tx.amount)} entry?`)) {
-                            deleteTransaction(tx.clientId);
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      onClick={() => {
+                        if (confirm(`Remove ${formatMoney(tx.amount)} entry?`)) {
+                          deleteTransaction(tx.clientId);
+                        }
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                 ))}
             </CardContent>
