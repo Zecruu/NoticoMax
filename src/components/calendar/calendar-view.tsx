@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { type LocalItem } from "@/lib/db/indexed-db";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ChevronLeft, ChevronRight, CheckCircle2, Circle, Calendar, Plus, Pencil, Trash2, Clock } from "lucide-react";
+import { ChevronLeft, ChevronRight, CheckCircle2, Circle, Calendar, Plus, Pencil, Trash2, Clock, Repeat } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface CalendarViewProps {
@@ -40,18 +40,63 @@ export function CalendarView({ items, onEdit, onDelete, onToggleComplete, onCrea
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
-  // Map dates to items
+  // Map dates to items. For recurring items, expand into virtual occurrences
+  // across the visible month — the original LocalItem reference is reused
+  // (no clone) so edit/complete/delete still target the source row.
   const dateItemMap = useMemo(() => {
     const map = new Map<string, LocalItem[]>();
-    for (const item of items) {
-      if (!item.reminderDate) continue;
-      const d = new Date(item.reminderDate);
+    const monthStart = new Date(currentYear, currentMonth, 1);
+    const monthEnd = new Date(currentYear, currentMonth + 1, 0);
+
+    const push = (d: Date, item: LocalItem) => {
       const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(item);
+    };
+
+    for (const item of items) {
+      if (!item.reminderDate) continue;
+      const start = new Date(item.reminderDate);
+      const rule = item.recurrence ?? "none";
+
+      if (rule === "none") {
+        push(start, item);
+        continue;
+      }
+
+      // Walk forward from `start` by the rule's cadence, dropping any
+      // occurrence outside the visible month. Cap at ~400 iterations as a
+      // safety net so a malformed item can't lock the loop.
+      const cur = new Date(start);
+      // Fast-forward `cur` to inside or just before the visible month so we
+      // don't iterate years for a daily reminder created long ago.
+      if (rule === "daily") {
+        if (cur < monthStart) {
+          const diffDays = Math.floor((monthStart.getTime() - cur.getTime()) / 86400000);
+          cur.setDate(cur.getDate() + diffDays);
+        }
+      } else if (rule === "weekly") {
+        if (cur < monthStart) {
+          const diffWeeks = Math.floor((monthStart.getTime() - cur.getTime()) / (86400000 * 7));
+          cur.setDate(cur.getDate() + diffWeeks * 7);
+        }
+      } else if (rule === "monthly") {
+        while (cur < monthStart) cur.setMonth(cur.getMonth() + 1);
+      } else if (rule === "yearly") {
+        while (cur < monthStart) cur.setFullYear(cur.getFullYear() + 1);
+      }
+
+      let safety = 0;
+      while (cur <= monthEnd && safety++ < 400) {
+        if (cur >= monthStart) push(new Date(cur), item);
+        if (rule === "daily") cur.setDate(cur.getDate() + 1);
+        else if (rule === "weekly") cur.setDate(cur.getDate() + 7);
+        else if (rule === "monthly") cur.setMonth(cur.getMonth() + 1);
+        else if (rule === "yearly") cur.setFullYear(cur.getFullYear() + 1);
+      }
     }
     return map;
-  }, [items]);
+  }, [items, currentMonth, currentYear]);
 
   // Build calendar grid
   const calendarDays = useMemo(() => {
@@ -243,6 +288,12 @@ export function CalendarView({ items, onEdit, onDelete, onToggleComplete, onCrea
                         <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                           <Clock className="h-3 w-3" />
                           {formatTime(item.reminderDate)}
+                        </span>
+                      )}
+                      {item.recurrence && item.recurrence !== "none" && (
+                        <span className="flex items-center gap-1 text-[11px] text-primary">
+                          <Repeat className="h-3 w-3" />
+                          {item.recurrence}
                         </span>
                       )}
                       {item.content && (

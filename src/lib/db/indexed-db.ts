@@ -2,6 +2,17 @@ import Dexie, { type EntityTable } from "dexie";
 
 export type ItemType = "note" | "url" | "reminder" | "envvar" | "credential";
 
+/**
+ * Reminder recurrence rule. "none" = one-shot. Other values mean the
+ * reminder repeats forever from its original date at the given cadence.
+ * Birthdays/anniversaries are yearly; standups are weekly; etc.
+ *
+ * v1 is client-only — the field doesn't currently round-trip through
+ * the Supabase items table schema. Add a `recurrence` text column there
+ * if/when you want this to sync across devices.
+ */
+export type RecurrenceRule = "none" | "daily" | "weekly" | "monthly" | "yearly";
+
 export interface LocalItem {
   id?: number;
   clientId: string;
@@ -12,6 +23,7 @@ export interface LocalItem {
   url?: string;
   reminderDate?: string;
   reminderCompleted?: boolean;
+  recurrence?: RecurrenceRule;
   tags: string[];
   pinned: boolean;
   color?: string;

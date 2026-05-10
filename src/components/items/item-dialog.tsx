@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { type LocalItem, type ItemType, type LocalFolder } from "@/lib/db/indexed-db";
+import { type LocalItem, type ItemType, type LocalFolder, type RecurrenceRule } from "@/lib/db/indexed-db";
 import {
   Dialog,
   DialogContent,
@@ -43,6 +43,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
   const [content, setContent] = useState("");
   const [url, setUrl] = useState("");
   const [reminderDate, setReminderDate] = useState("");
+  const [recurrence, setRecurrence] = useState<RecurrenceRule>("none");
   const [tagInput, setTagInput] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [pinned, setPinned] = useState(false);
@@ -184,6 +185,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
       setTags(editingItem.tags);
       setPinned(editingItem.pinned);
       setFolderId(editingItem.folderId || undefined);
+      setRecurrence(editingItem.recurrence || "none");
     } else {
       setType(defaultType);
       setTitle("");
@@ -193,6 +195,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
       setTags([]);
       setPinned(false);
       setFolderId(defaultFolderId || undefined);
+      setRecurrence("none");
     }
     setPreviewing(false);
     setActiveListMode(null);
@@ -220,6 +223,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
       url: type === "url" ? url.trim() : undefined,
       reminderDate: type === "reminder" && reminderDate ? reminderDate : undefined,
       reminderCompleted: editingItem?.reminderCompleted || false,
+      recurrence: type === "reminder" ? recurrence : undefined,
       tags,
       pinned,
       color: editingItem?.color,
@@ -327,6 +331,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
           )}
 
           {type === "reminder" && (
+            <>
             <div className="space-y-2">
               <Label htmlFor="reminderDate">Date & Time</Label>
               <Input
@@ -336,6 +341,22 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
                 onChange={(e) => setReminderDate(e.target.value)}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="recurrence">Repeat</Label>
+              <select
+                id="recurrence"
+                value={recurrence}
+                onChange={(e) => setRecurrence(e.target.value as RecurrenceRule)}
+                className="text-foreground bg-transparent dark:bg-input/30 border-input flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+              >
+                <option value="none">Does not repeat</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="yearly">Yearly (birthdays, anniversaries)</option>
+              </select>
+            </div>
+            </>
           )}
 
           <div className="space-y-2">
