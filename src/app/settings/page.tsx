@@ -5,7 +5,8 @@ import { useLicense } from "@/hooks/use-license";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle, LogOut, User, Monitor, Trash2, Wand2, Terminal } from "lucide-react";
+import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle, LogOut, User, Monitor, Trash2, Wand2, Terminal, Eye, EyeOff } from "lucide-react";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { exportData, importData } from "@/lib/import-export";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
@@ -32,6 +33,11 @@ export default function SettingsPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
   const [licenseInput, setLicenseInput] = useState("");
   const [activating, setActivating] = useState(false);
   const showPaywallCTA = typeof window !== "undefined" && isIOS();
@@ -189,6 +195,34 @@ export default function SettingsPage() {
   const handleLogout = () => {
     logout();
     toast.success("Signed out. Data remains stored locally.");
+  };
+
+  const handleChangePassword = async () => {
+    if (newPassword.length < 6) {
+      toast.error("Password must be at least 6 characters");
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      toast.error("Passwords do not match");
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) {
+        toast.error(error.message);
+      } else {
+        toast.success("Password updated");
+        setPasswordOpen(false);
+        setNewPassword("");
+        setConfirmNewPassword("");
+      }
+    } catch {
+      toast.error("Failed to update password");
+    } finally {
+      setSavingPassword(false);
+    }
   };
 
   const handleDeleteAccount = async () => {
@@ -637,6 +671,15 @@ export default function SettingsPage() {
                     variant="outline"
                     size="sm"
                     className="gap-1.5"
+                    onClick={() => setPasswordOpen(true)}
+                  >
+                    <Key className="h-3.5 w-3.5" />
+                    Change Password
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
                     onClick={handleLogout}
                   >
                     <LogOut className="h-3.5 w-3.5" />
@@ -867,6 +910,59 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       </main>
+
+      <Dialog open={passwordOpen} onOpenChange={(o) => { if (!savingPassword) { setPasswordOpen(o); if (!o) { setNewPassword(""); setConfirmNewPassword(""); } } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change Password</DialogTitle>
+            <DialogDescription>
+              Enter a new password. You&apos;ll stay signed in on this device.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="new-password">New Password</Label>
+              <div className="relative">
+                <Input
+                  id="new-password"
+                  type={showNewPassword ? "text" : "password"}
+                  placeholder="At least 6 characters"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="pr-9"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+                  aria-label={showNewPassword ? "Hide password" : "Show password"}
+                  tabIndex={-1}
+                >
+                  {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirm-new-password">Confirm New Password</Label>
+              <Input
+                id="confirm-new-password"
+                type={showNewPassword ? "text" : "password"}
+                placeholder="Re-enter new password"
+                value={confirmNewPassword}
+                onChange={(e) => setConfirmNewPassword(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" disabled={savingPassword} onClick={() => setPasswordOpen(false)}>
+              Cancel
+            </Button>
+            <Button disabled={savingPassword} onClick={handleChangePassword}>
+              {savingPassword ? "Saving..." : "Update Password"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={deleteOpen} onOpenChange={(o) => { if (!deleting) { setDeleteOpen(o); if (!o) setDeleteConfirm(""); } }}>
         <DialogContent className="sm:max-w-md">

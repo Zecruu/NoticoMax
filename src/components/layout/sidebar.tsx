@@ -613,6 +613,11 @@ export function Sidebar({
           <Settings className="h-4 w-4" />
           Settings
         </Link>
+        <div className="flex items-center gap-2 px-3 pt-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="NOTICO MAX" className="h-6 w-6" />
+          <span className="text-sm font-bold tracking-tight text-primary">NOTICO MAX</span>
+        </div>
       </div>
 
       {/* Delete Confirmation Dialog */}
