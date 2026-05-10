@@ -94,6 +94,7 @@
     "dexie-react-hooks": "^4.4.0",
     "electron-updater": "^6.7.3",
     "highlight.js": "^11.11.1",
+    "ical.js": "^2.2.1",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.563.0",
     "nanoid": "^5.1.6",

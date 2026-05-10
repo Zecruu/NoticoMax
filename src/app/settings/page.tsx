@@ -259,10 +259,27 @@ export default function SettingsPage() {
     setImporting(true);
     try {
       const text = await file.text();
+      // .ics calendar files (Apple Calendar, Google Calendar, etc.) — parse
+      // VEVENTs into reminder items and preserve recurrence.
+      if (file.name.toLowerCase().endsWith(".ics") || text.startsWith("BEGIN:VCALENDAR")) {
+        const { parseIcs, importIcsEvents } = await import("@/lib/ics-import");
+        const events = parseIcs(text);
+        if (events.length === 0) {
+          toast.error("No events found in this .ics file");
+          return;
+        }
+        const { inserted, skipped } = await importIcsEvents(events);
+        toast.success(
+          `Imported ${inserted} event${inserted === 1 ? "" : "s"}` +
+            (skipped > 0 ? ` (${skipped} duplicate${skipped === 1 ? "" : "s"} skipped)` : "")
+        );
+        return;
+      }
       const result = await importData(text);
       toast.success(`Imported ${result.items} items and ${result.folders} folders`);
-    } catch {
-      toast.error("Failed to import data. Check the file format.");
+    } catch (err) {
+      console.error("[settings] import failed:", err);
+      toast.error("Failed to import. Check the file format.");
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -902,11 +919,17 @@ export default function SettingsPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".json"
+                accept=".json,.ics,text/calendar"
                 className="hidden"
                 onChange={handleImport}
               />
             </div>
+            <p className="text-xs text-muted-foreground">
+              Import a NoticoMax JSON backup or an Apple/Google Calendar
+              <code className="ml-1 px-1 py-0.5 rounded bg-muted text-foreground">.ics</code>
+              file. Calendar events become reminders with recurrence preserved.
+              Export your Apple Calendar via <em>Calendar → File → Export</em> on macOS.
+            </p>
           </CardContent>
         </Card>
       </main>
