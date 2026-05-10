@@ -12,7 +12,7 @@ interface CalendarViewProps {
   onEdit: (item: LocalItem) => void;
   onDelete?: (clientId: string) => void;
   onToggleComplete: (clientId: string, completed: boolean) => void;
-  onCreateReminder?: () => void;
+  onCreateReminder?: (date?: Date) => void;
 }
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -196,7 +196,12 @@ export function CalendarView({ items, onEdit, onDelete, onToggleComplete, onCrea
               })}
             </h3>
             {onCreateReminder && (
-              <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={onCreateReminder}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 h-7 text-xs"
+                onClick={() => onCreateReminder(selectedDate ?? undefined)}
+              >
                 <Plus className="h-3 w-3" />
                 Add Reminder
               </Button>
@@ -286,7 +291,7 @@ export function CalendarView({ items, onEdit, onDelete, onToggleComplete, onCrea
             Create a reminder to see it on the calendar
           </p>
           {onCreateReminder && (
-            <Button size="sm" className="mt-4 gap-1.5" onClick={onCreateReminder}>
+            <Button size="sm" className="mt-4 gap-1.5" onClick={() => onCreateReminder()}>
               <Plus className="h-3.5 w-3.5" />
               Add Reminder
             </Button>

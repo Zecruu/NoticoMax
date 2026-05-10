@@ -33,10 +33,11 @@ interface ItemDialogProps {
   folders: LocalFolder[];
   defaultFolderId?: string | null;
   defaultType?: ItemType;
+  defaultReminderDate?: string;
   allTags?: string[];
 }
 
-export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folders, defaultFolderId, defaultType = "note", allTags = [] }: ItemDialogProps) {
+export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folders, defaultFolderId, defaultType = "note", defaultReminderDate, allTags = [] }: ItemDialogProps) {
   const [type, setType] = useState<ItemType>("note");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -188,14 +189,14 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
       setTitle("");
       setContent("");
       setUrl("");
-      setReminderDate("");
+      setReminderDate(defaultType === "reminder" && defaultReminderDate ? defaultReminderDate : "");
       setTags([]);
       setPinned(false);
       setFolderId(defaultFolderId || undefined);
     }
     setPreviewing(false);
     setActiveListMode(null);
-  }, [editingItem, open, defaultFolderId, defaultType]);
+  }, [editingItem, open, defaultFolderId, defaultType, defaultReminderDate]);
 
   const handleAddTag = () => {
     const tag = tagInput.trim();

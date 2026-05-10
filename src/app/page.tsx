@@ -31,6 +31,7 @@ export default function Dashboard() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<LocalItem | null>(null);
   const [defaultType, setDefaultType] = useState<"note" | "url" | "reminder">("note");
+  const [defaultReminderDate, setDefaultReminderDate] = useState<string | undefined>(undefined);
   const [skippedActivation, setSkippedActivation] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -118,6 +119,24 @@ export default function Dashboard() {
   const handleCreateWithType = useCallback((type: "note" | "url" | "reminder") => {
     setEditingItem(null);
     setDefaultType(type);
+    setDefaultReminderDate(undefined);
+    setDialogOpen(true);
+  }, []);
+
+  const handleCreateReminderOnDate = useCallback((date?: Date) => {
+    setEditingItem(null);
+    setDefaultType("reminder");
+    if (date) {
+      // Default time = 9:00 AM on the picked date. Format for <input type="datetime-local">.
+      const d = new Date(date);
+      d.setHours(9, 0, 0, 0);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      setDefaultReminderDate(
+        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+      );
+    } else {
+      setDefaultReminderDate(undefined);
+    }
     setDialogOpen(true);
   }, []);
 
@@ -260,7 +279,7 @@ export default function Dashboard() {
               onEdit={handleEdit}
               onDelete={handleDelete}
               onToggleComplete={handleToggleComplete}
-              onCreateReminder={() => handleCreateWithType("reminder")}
+              onCreateReminder={handleCreateReminderOnDate}
             />
           ) : activeView === "study" ? (
             <StudyView />
@@ -319,6 +338,7 @@ export default function Dashboard() {
         folders={folders}
         defaultFolderId={activeFolder}
         defaultType={defaultType}
+        defaultReminderDate={defaultReminderDate}
         allTags={allTags}
       />
 
