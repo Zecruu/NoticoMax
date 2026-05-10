@@ -59,14 +59,18 @@ class ShareViewController: SLComposeServiceViewController {
       if let u = collectedURL, !u.isEmpty { queryItems.append(URLQueryItem(name: "url", value: u)) }
       components.queryItems = queryItems
 
-      // Share extensions use NSExtensionContext.open to bounce a URL back
-      // into a host app. UIApplication.shared isn't accessible from inside
-      // app extensions, and the responder-chain `openURL:` trick stopped
-      // working when Apple removed the legacy selector. This is the
-      // documented API and works on iOS 14+.
+      // Share extensions on iOS 14+ are SUPPOSED to be able to use
+      // extensionContext.open — but Apple's behavior is inconsistent for
+      // custom URL schemes. Try that first, and if it returns success=false
+      // fall back to the legacy responder-chain selector trick (which still
+      // resolves on iOS 16/17 in practice when the extension is hosted in
+      // a process that has UIApplication ancestry).
       if let url = components.url {
-        self.extensionContext?.open(url, completionHandler: { _ in
-          self.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
+        self.extensionContext?.open(url, completionHandler: { [weak self] success in
+          if !success {
+            _ = self?.openURLViaResponderChain(url)
+          }
+          self?.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
         })
       } else {
         self.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
@@ -76,5 +80,23 @@ class ShareViewController: SLComposeServiceViewController {
 
   override func configurationItems() -> [Any]! {
     return []
+  }
+
+  /// Walk the responder chain looking for a UIResponder that answers the
+  /// legacy `openURL:` selector (on iOS this is UIApplication-ish). Apple
+  /// has been deprecating this for years but it still works on current iOS.
+  private func openURLViaResponderChain(_ url: URL) -> Bool {
+    let selector = sel_registerName("openURL:")
+    var responder: UIResponder? = self
+    while let r = responder {
+      // Skip self — our own openURLViaResponderChain doesn't carry that
+      // selector, but be defensive in case a future name collision arises.
+      if r !== self && r.responds(to: selector) {
+        _ = r.perform(selector, with: url)
+        return true
+      }
+      responder = r.next
+    }
+    return false
   }
 }
