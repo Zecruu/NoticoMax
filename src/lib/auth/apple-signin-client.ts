@@ -3,8 +3,12 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export interface AppleSignInResult {
   success: boolean;
-  /** Set on iOS only — pass to useLicense.loginWithApple */
-  payload?: { identityToken: string };
+  /**
+   * Pass to useLicense.loginWithApple. iOS native sign-in returns
+   * `identityToken`; Electron's PKCE OAuth flow returns `code`. Web flow
+   * has no payload — Supabase's auth state listener handles the redirect.
+   */
+  payload?: { identityToken?: string; code?: string };
   error?: string;
 }
 
@@ -39,11 +43,44 @@ export async function triggerAppleSignIn(): Promise<AppleSignInResult> {
   }
 
   if (isElectronDesktop()) {
-    return {
-      success: false,
-      error:
-        "Apple sign-in on desktop is temporarily unavailable during our backend migration. Please use email and password.",
-    };
+    // Desktop flow:
+    //   1. Ask Supabase for the OAuth URL (skipBrowserRedirect so we can
+    //      open it in a popup BrowserWindow ourselves). This also stores
+    //      the PKCE verifier in this renderer's localStorage.
+    //   2. Pass the URL to the Electron main process, which opens it in
+    //      a popup and intercepts the navigation back to /auth/callback
+    //      to extract the `code` query param.
+    //   3. Hand the code back to the caller (auth-gate). Caller then
+    //      calls useLicense.loginWithApple({ code }) which exchanges it
+    //      for a session — the verifier from step 1 is read out of
+    //      localStorage automatically by exchangeCodeForSession.
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "apple",
+        options: {
+          skipBrowserRedirect: true,
+          redirectTo: "https://app.noticomax.com/auth/callback",
+        },
+      });
+      if (error || !data?.url) {
+        return { success: false, error: error?.message || "Could not initialize Apple sign-in" };
+      }
+      const electronAPI = (window as unknown as {
+        electronAPI?: { openAppleSignIn?: (url: string) => Promise<{ success: boolean; code?: string; error?: string }> };
+      }).electronAPI;
+      if (!electronAPI?.openAppleSignIn) {
+        return { success: false, error: "Electron Apple sign-in bridge not available" };
+      }
+      const result = await electronAPI.openAppleSignIn(data.url);
+      if (!result.success || !result.code) {
+        return { success: false, error: result.error || "Sign-in cancelled" };
+      }
+      return { success: true, payload: { code: result.code } };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, error: message };
+    }
   }
 
   // Web fallback — full-page redirect via Supabase OAuth

@@ -202,28 +202,19 @@ ipcMain.handle("set-open-at-login", (event, enabled) => {
   return enabled;
 });
 
-// Apple Sign-In config for Electron flow.
-// Client ID is the Services ID (not the bundle ID).
-const APPLE_CLIENT_ID = "com.noticomax.signin";
-const APPLE_REDIRECT_URI = "https://app.noticomax.com/api/auth/apple/callback";
+// Apple Sign-In on desktop: the renderer initiates the Supabase OAuth flow
+// (which stores the PKCE verifier in localStorage) and passes us the URL to
+// open. We open it in a popup BrowserWindow, watch for navigation to our
+// /auth/callback URL, intercept it before it loads, extract the `code`
+// query param, and hand it back. The renderer then calls
+// supabase.auth.exchangeCodeForSession(code) — using the verifier it stored
+// before kicking off the flow — to get a session.
+const AUTH_CALLBACK_URL = "https://app.noticomax.com/auth/callback";
 
-ipcMain.handle("open-apple-signin", async () => {
-  const crypto = require("crypto");
-  const state = crypto.randomBytes(16).toString("hex");
-  const params = new URLSearchParams({
-    client_id: APPLE_CLIENT_ID,
-    redirect_uri: APPLE_REDIRECT_URI,
-    response_type: "code",
-    scope: "name email",
-    state,
-    // Apple rejects the auth request with `invalid_request` unless
-    // `response_mode=form_post` is used whenever the `name` or `email`
-    // scopes are requested. The server callback at APPLE_REDIRECT_URI
-    // renders an HTML page that exposes `code` / `error` via the
-    // `#code` element's data attributes, which we extract below.
-    response_mode: "form_post",
-  });
-  const authUrl = `https://appleid.apple.com/auth/authorize?${params.toString()}`;
+ipcMain.handle("open-apple-signin", async (_event, authUrl) => {
+  if (!authUrl || typeof authUrl !== "string") {
+    return { success: false, error: "Missing OAuth URL" };
+  }
 
   return new Promise((resolve) => {
     const authWindow = new BrowserWindow({
@@ -236,6 +227,9 @@ ipcMain.handle("open-apple-signin", async () => {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
+        // Use a fresh session partition so cookies from a prior failed
+        // attempt don't auto-complete the new sign-in.
+        partition: "persist:apple-signin",
       },
     });
 
@@ -247,39 +241,42 @@ ipcMain.handle("open-apple-signin", async () => {
       resolve(result);
     };
 
-    authWindow.webContents.on("did-finish-load", async () => {
-      const currentUrl = authWindow.webContents.getURL();
-      if (!currentUrl.startsWith(APPLE_REDIRECT_URI)) return;
+    const tryHandleCallback = (urlString) => {
+      if (!urlString.startsWith(AUTH_CALLBACK_URL)) return false;
       try {
-        const result = await authWindow.webContents.executeJavaScript(`
-          (() => {
-            const el = document.getElementById('code');
-            if (!el) return null;
-            return { code: el.dataset.code || null, error: el.dataset.error || null };
-          })()
-        `);
-        if (!result) {
-          finish({ success: false, error: "Completion page did not render expected markup" });
-          return;
+        const u = new URL(urlString);
+        const error = u.searchParams.get("error_description") || u.searchParams.get("error");
+        if (error) {
+          finish({ success: false, error });
+          return true;
         }
-        if (result.error) {
-          finish({ success: false, error: result.error });
-          return;
+        const code = u.searchParams.get("code");
+        if (code) {
+          finish({ success: true, code });
+          return true;
         }
-        if (result.code) {
-          finish({ success: true, code: result.code });
-          return;
-        }
-        finish({ success: false, error: "No code in completion page" });
+        finish({ success: false, error: "No code in callback URL" });
+        return true;
       } catch (err) {
         finish({ success: false, error: err.message });
+        return true;
       }
+    };
+
+    // Intercept BEFORE navigation completes — we don't want our /auth/callback
+    // page to actually load (it would try to exchange the code itself in a
+    // different localStorage context and fail).
+    authWindow.webContents.on("will-redirect", (event, url) => {
+      if (tryHandleCallback(url)) event.preventDefault();
+    });
+    authWindow.webContents.on("will-navigate", (event, url) => {
+      if (tryHandleCallback(url)) event.preventDefault();
     });
 
     authWindow.on("closed", () => {
       if (!settled) {
         settled = true;
-        resolve({ success: false, error: "Window closed" });
+        resolve({ success: false, error: "Sign-in cancelled" });
       }
     });
 
