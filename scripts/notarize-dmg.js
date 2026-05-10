@@ -96,20 +96,43 @@ execFileSync(appBuilder, [
 ], { stdio: "inherit" });
 
 const crypto = require("crypto");
+function hashOf(buf) { return crypto.createHash("sha512").update(buf).digest("base64"); }
+
 const dmgBuf = fs.readFileSync(dmgPath);
-const sha512 = crypto.createHash("sha512").update(dmgBuf).digest("base64");
-const size = dmgBuf.length;
-const version = require(path.join(__dirname, "..", "package.json")).version;
+const dmgSha = hashOf(dmgBuf);
+const dmgSize = dmgBuf.length;
+
+// Squirrel.Mac (Electron's mac auto-updater) requires a .zip artifact, not
+// .dmg. Include the zip entry in latest-mac.yml as the primary file (must
+// come first under `files:`) — the DMG is still listed for direct download
+// of the first-install artifact.
+let zipEntry = null;
+const zips = fs.readdirSync(DIST_DIR).filter((f) => f.endsWith(".zip"));
+const zip = zips.find((f) => f.includes(`-${pkgVersion}-mac.zip`)) ?? zips.find((f) => f.includes(`-${pkgVersion}.zip`)) ?? zips[0];
+if (zip) {
+  const zipBuf = fs.readFileSync(path.join(DIST_DIR, zip));
+  zipEntry = { url: zip, sha512: hashOf(zipBuf), size: zipBuf.length };
+} else {
+  console.warn("notarize-dmg: no .zip found — auto-updater requires zip; build with mac.target including 'zip'.");
+}
+
+const version = pkgVersion;
 const releaseDate = new Date().toISOString();
-const yml =
-  `version: ${version}\n` +
-  `files:\n` +
-  `  - url: ${dmg}\n` +
-  `    sha512: ${sha512}\n` +
-  `    size: ${size}\n` +
-  `path: ${dmg}\n` +
-  `sha512: ${sha512}\n` +
-  `releaseDate: '${releaseDate}'\n`;
-fs.writeFileSync(path.join(DIST_DIR, "latest-mac.yml"), yml);
+const lines = [`version: ${version}`, `files:`];
+if (zipEntry) {
+  lines.push(`  - url: ${zipEntry.url}`);
+  lines.push(`    sha512: ${zipEntry.sha512}`);
+  lines.push(`    size: ${zipEntry.size}`);
+}
+lines.push(`  - url: ${dmg}`);
+lines.push(`    sha512: ${dmgSha}`);
+lines.push(`    size: ${dmgSize}`);
+// `path` + top-level sha512 must reference the FIRST file in `files`
+// (Squirrel.Mac reads these). Prefer the zip when available.
+const primary = zipEntry ?? { url: dmg, sha512: dmgSha };
+lines.push(`path: ${primary.url}`);
+lines.push(`sha512: ${primary.sha512}`);
+lines.push(`releaseDate: '${releaseDate}'`);
+fs.writeFileSync(path.join(DIST_DIR, "latest-mac.yml"), lines.join("\n") + "\n");
 
 console.log("notarize-dmg: done.");

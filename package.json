@@ -44,8 +44,10 @@
     },
     "mac": {
       "target": [
-        "dmg"
+        "dmg",
+        "zip"
       ],
+      "artifactName": "Notico-Max-${version}-${arch}-mac.${ext}",
       "icon": "public/icon-mac-1024.png",
       "category": "public.app-category.productivity",
       "notarize": true,
