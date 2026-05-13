@@ -352,28 +352,16 @@ ipcMain.handle("set-open-at-login", (event, enabled) => {
   return enabled;
 });
 
-// Apple Sign-In config for Electron (Mac) flow.
-// Client ID is the Services ID (not the bundle ID).
-const APPLE_CLIENT_ID = "com.noticomax.signin";
-const APPLE_REDIRECT_URI = "https://app.noticomax.com/api/auth/apple/callback";
-
-ipcMain.handle("open-apple-signin", async () => {
-  const crypto = require("crypto");
-  const state = crypto.randomBytes(16).toString("hex");
-  const params = new URLSearchParams({
-    client_id: APPLE_CLIENT_ID,
-    redirect_uri: APPLE_REDIRECT_URI,
-    response_type: "code",
-    scope: "name email",
-    state,
-    // Apple rejects the auth request with `invalid_request` unless
-    // `response_mode=form_post` is used whenever the `name` or `email`
-    // scopes are requested. The server callback at APPLE_REDIRECT_URI
-    // renders an HTML page that exposes `code` / `error` via the
-    // `#code` element's data attributes, which we extract below.
-    response_mode: "form_post",
-  });
-  const authUrl = `https://appleid.apple.com/auth/authorize?${params.toString()}`;
+// Generic OAuth window for desktop sign-in flows (Apple, Google, etc.).
+// The renderer hands us an auth URL (e.g. Supabase's signInWithOAuth URL with
+// skipBrowserRedirect:true) and the redirect prefix we should intercept. We
+// open the auth URL in a modal BrowserWindow, watch for navigations to the
+// redirect URL, and resolve with the `code` query param before the localhost
+// callback page actually loads.
+ipcMain.handle("open-oauth-window", async (_event, authUrl, redirectPrefix) => {
+  if (typeof authUrl !== "string" || typeof redirectPrefix !== "string") {
+    return { success: false, error: "Invalid arguments to open-oauth-window" };
+  }
 
   return new Promise((resolve) => {
     const authWindow = new BrowserWindow({
@@ -382,10 +370,11 @@ ipcMain.handle("open-apple-signin", async () => {
       parent: mainWindow ?? undefined,
       modal: true,
       show: true,
-      title: "Sign in with Apple",
+      title: "Sign in",
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
+        partition: "persist:oauth",
       },
     });
 
@@ -397,43 +386,43 @@ ipcMain.handle("open-apple-signin", async () => {
       resolve(result);
     };
 
-    authWindow.webContents.on("did-finish-load", async () => {
-      const currentUrl = authWindow.webContents.getURL();
-      if (!currentUrl.startsWith(APPLE_REDIRECT_URI)) return;
-      try {
-        const result = await authWindow.webContents.executeJavaScript(`
-          (() => {
-            const el = document.getElementById('code');
-            if (!el) return null;
-            return { code: el.dataset.code || null, error: el.dataset.error || null };
-          })()
-        `);
-        if (!result) {
-          finish({ success: false, error: "Completion page did not render expected markup" });
-          return;
-        }
-        if (result.error) {
-          finish({ success: false, error: result.error });
-          return;
-        }
-        if (result.code) {
-          finish({ success: true, code: result.code });
-          return;
-        }
-        finish({ success: false, error: "No code in completion page" });
-      } catch (err) {
-        finish({ success: false, error: err.message });
+    const handleUrl = (urlString, navEvent) => {
+      if (!urlString || !urlString.startsWith(redirectPrefix)) return;
+      if (navEvent && typeof navEvent.preventDefault === "function") {
+        navEvent.preventDefault();
       }
-    });
+      try {
+        const u = new URL(urlString);
+        const err = u.searchParams.get("error_description") || u.searchParams.get("error");
+        if (err) {
+          finish({ success: false, error: err });
+          return;
+        }
+        const code = u.searchParams.get("code");
+        if (code) {
+          finish({ success: true, code });
+          return;
+        }
+        finish({ success: false, error: "Missing code in redirect" });
+      } catch (e) {
+        finish({ success: false, error: e.message });
+      }
+    };
+
+    authWindow.webContents.on("will-redirect", (e, url) => handleUrl(url, e));
+    authWindow.webContents.on("will-navigate", (e, url) => handleUrl(url, e));
+    authWindow.webContents.on("did-navigate", (_e, url) => handleUrl(url, null));
 
     authWindow.on("closed", () => {
       if (!settled) {
         settled = true;
-        resolve({ success: false, error: "Window closed" });
+        resolve({ success: false, error: "Sign-in cancelled" });
       }
     });
 
-    authWindow.loadURL(authUrl);
+    authWindow.loadURL(authUrl).catch((err) => {
+      finish({ success: false, error: `Failed to load auth URL: ${err.message}` });
+    });
   });
 });
 

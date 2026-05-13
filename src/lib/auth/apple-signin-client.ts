@@ -17,8 +17,10 @@ export interface AppleSignInResult {
  *   `success: true` immediately; the actual sign-in completes on redirect-back.
  *   Caller does NOT need to call loginWithApple — the auth state listener picks
  *   up the new session.
- * - **Electron**: not yet supported in the Supabase migration. Email/password
- *   works on Electron in the meantime.
+ * - **Electron**: opens an in-app auth window pointed at Supabase's OAuth URL,
+ *   intercepts the redirect back to `${origin}/auth/callback?code=...`, then
+ *   exchanges the PKCE code for a session. Caller doesn't need to call
+ *   loginWithApple — the auth state listener picks up the session.
  */
 export async function triggerAppleSignIn(): Promise<AppleSignInResult> {
   if (isIOS()) {
@@ -39,11 +41,31 @@ export async function triggerAppleSignIn(): Promise<AppleSignInResult> {
   }
 
   if (isElectronDesktop()) {
-    return {
-      success: false,
-      error:
-        "Apple sign-in on desktop is temporarily unavailable during our backend migration. Please use email and password.",
-    };
+    const electronAPI = window.electronAPI;
+    if (!electronAPI?.openOAuthWindow) {
+      return {
+        success: false,
+        error: "This app build doesn't support Apple sign-in. Please update to the latest version.",
+      };
+    }
+
+    const supabase = getSupabaseBrowserClient();
+    const redirectTo = `${window.location.origin}/auth/callback`;
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: "apple",
+      options: { redirectTo, skipBrowserRedirect: true },
+    });
+    if (error) return { success: false, error: error.message };
+    if (!data?.url) return { success: false, error: "Supabase did not return an OAuth URL" };
+
+    const result = await electronAPI.openOAuthWindow(data.url, redirectTo);
+    if (!result.success || !result.code) {
+      return { success: false, error: result.error || "Apple sign-in failed" };
+    }
+
+    const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(result.code);
+    if (exchangeError) return { success: false, error: exchangeError.message };
+    return { success: true };
   }
 
   // Web fallback — full-page redirect via Supabase OAuth
