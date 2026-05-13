@@ -56,11 +56,15 @@ export async function triggerAppleSignIn(): Promise<AppleSignInResult> {
     //      localStorage automatically by exchangeCodeForSession.
     try {
       const supabase = getSupabaseBrowserClient();
+      // The `source=electron` query param tells the /auth/callback page to
+      // hand the code back to this Electron app via the noticomax:// scheme
+      // instead of running exchangeCodeForSession in the browser (where the
+      // PKCE verifier doesn't exist).
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "apple",
         options: {
           skipBrowserRedirect: true,
-          redirectTo: "https://app.noticomax.com/auth/callback",
+          redirectTo: "https://app.noticomax.com/auth/callback?source=electron",
         },
       });
       if (error || !data?.url) {

@@ -26,6 +26,12 @@
     "directories": {
       "output": "dist-electron"
     },
+    "protocols": [
+      {
+        "name": "NoticoMax Protocol",
+        "schemes": ["noticomax"]
+      }
+    ],
     "publish": [
       {
         "provider": "github",

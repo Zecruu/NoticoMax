@@ -19,24 +19,96 @@ const DEV_URL = "http://localhost:5467";
 const PROD_URL = "https://app.noticomax.com";
 
 let mainWindow;
+// Resolver for an in-flight Apple sign-in started via shell.openExternal.
+// Set by the open-apple-signin IPC handler; consumed by handleAppleSignInUrl
+// when the noticomax:// protocol callback arrives via second-instance (Win)
+// or open-url (mac). Null when no sign-in is pending.
+let pendingAppleSignInResolver = null;
+let pendingAppleSignInTimeout = null;
 
 // Initialize logger immediately with userData path
 logger.init(app.getPath("userData"));
 
-// Prevent multiple instances
+// Register noticomax:// as a custom URL scheme so the post-Apple redirect
+// from app.noticomax.com/auth/callback can hand the OAuth code back to this
+// app. Must run before app.whenReady().
+if (process.defaultApp) {
+  // Dev: launched via `electron .` — bind the protocol to this script path so
+  // the registration sticks to the dev process, not a stray system electron.
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient("noticomax", process.execPath, [
+      path.resolve(process.argv[1]),
+    ]);
+  }
+} else {
+  app.setAsDefaultProtocolClient("noticomax");
+}
+
+function settlePendingAppleSignIn(result) {
+  if (!pendingAppleSignInResolver) return false;
+  const resolver = pendingAppleSignInResolver;
+  pendingAppleSignInResolver = null;
+  if (pendingAppleSignInTimeout) {
+    clearTimeout(pendingAppleSignInTimeout);
+    pendingAppleSignInTimeout = null;
+  }
+  resolver(result);
+  return true;
+}
+
+function handleAppleSignInUrl(urlString) {
+  if (!urlString || !urlString.startsWith("noticomax://auth/callback")) return false;
+  logger.info("electron", `Apple sign-in callback received: ${urlString.slice(0, 80)}...`);
+  try {
+    const u = new URL(urlString);
+    const error = u.searchParams.get("error_description") || u.searchParams.get("error");
+    if (error) {
+      settlePendingAppleSignIn({ success: false, error });
+    } else {
+      const code = u.searchParams.get("code");
+      if (code) {
+        settlePendingAppleSignIn({ success: true, code });
+      } else {
+        settlePendingAppleSignIn({ success: false, error: "No code in callback URL" });
+      }
+    }
+  } catch (err) {
+    settlePendingAppleSignIn({ success: false, error: err.message });
+  }
+  // Bring the app window back to the front so the user lands on the post-
+  // login screen instead of staring at their browser.
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+  return true;
+}
+
+// Prevent multiple instances. The protocol-launched second instance is what
+// delivers the noticomax://auth/callback URL on Windows — we parse its argv.
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   logger.info("electron", "Another instance is already running. Quitting.");
   app.quit();
 } else {
-  app.on("second-instance", () => {
-    logger.info("electron", "Second instance detected, focusing existing window.");
+  app.on("second-instance", (_event, argv) => {
+    logger.info("electron", "Second instance detected.");
+    const protocolUrl = argv.find((a) => typeof a === "string" && a.startsWith("noticomax://"));
+    if (protocolUrl) {
+      handleAppleSignInUrl(protocolUrl);
+    }
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
   });
 }
+
+// macOS delivers protocol URLs via open-url instead of argv.
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  handleAppleSignInUrl(url);
+});
 
 // Build app menu with Help > Open Logs Folder
 const menuTemplate = [
@@ -202,85 +274,34 @@ ipcMain.handle("set-open-at-login", (event, enabled) => {
   return enabled;
 });
 
-// Apple Sign-In on desktop: the renderer initiates the Supabase OAuth flow
-// (which stores the PKCE verifier in localStorage) and passes us the URL to
-// open. We open it in a popup BrowserWindow, watch for navigation to our
-// /auth/callback URL, intercept it before it loads, extract the `code`
-// query param, and hand it back. The renderer then calls
-// supabase.auth.exchangeCodeForSession(code) — using the verifier it stored
-// before kicking off the flow — to get a session.
-const AUTH_CALLBACK_URL = "https://app.noticomax.com/auth/callback";
-
+// Apple Sign-In on desktop. Embedding the Apple authorize page inside an
+// Electron BrowserWindow trips Apple's anti-webview detection on Windows —
+// the user lands on a "URL restricted / no permission" page. So we open the
+// Supabase OAuth URL in the user's default browser via shell.openExternal,
+// and bring the result back through the noticomax://auth/callback custom
+// protocol. The renderer holds the PKCE verifier (it ran signInWithOAuth
+// against app.noticomax.com before invoking this IPC), so when we hand the
+// code back the same renderer can call supabase.auth.exchangeCodeForSession.
 ipcMain.handle("open-apple-signin", async (_event, authUrl) => {
   if (!authUrl || typeof authUrl !== "string") {
     return { success: false, error: "Missing OAuth URL" };
   }
 
+  // If a previous attempt is still pending (user clicked Sign in twice),
+  // cancel it before starting a new one.
+  settlePendingAppleSignIn({ success: false, error: "Sign-in cancelled" });
+
   return new Promise((resolve) => {
-    const authWindow = new BrowserWindow({
-      width: 600,
-      height: 700,
-      parent: mainWindow ?? undefined,
-      modal: true,
-      show: true,
-      title: "Sign in with Apple",
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-        // Use a fresh session partition so cookies from a prior failed
-        // attempt don't auto-complete the new sign-in.
-        partition: "persist:apple-signin",
-      },
+    pendingAppleSignInResolver = resolve;
+
+    pendingAppleSignInTimeout = setTimeout(() => {
+      settlePendingAppleSignIn({ success: false, error: "Sign-in timed out" });
+    }, 5 * 60 * 1000);
+
+    shell.openExternal(authUrl).catch((err) => {
+      logger.error("electron", `Failed to open browser for Apple sign-in: ${err.message}`);
+      settlePendingAppleSignIn({ success: false, error: `Failed to open browser: ${err.message}` });
     });
-
-    let settled = false;
-    const finish = (result) => {
-      if (settled) return;
-      settled = true;
-      if (!authWindow.isDestroyed()) authWindow.close();
-      resolve(result);
-    };
-
-    const tryHandleCallback = (urlString) => {
-      if (!urlString.startsWith(AUTH_CALLBACK_URL)) return false;
-      try {
-        const u = new URL(urlString);
-        const error = u.searchParams.get("error_description") || u.searchParams.get("error");
-        if (error) {
-          finish({ success: false, error });
-          return true;
-        }
-        const code = u.searchParams.get("code");
-        if (code) {
-          finish({ success: true, code });
-          return true;
-        }
-        finish({ success: false, error: "No code in callback URL" });
-        return true;
-      } catch (err) {
-        finish({ success: false, error: err.message });
-        return true;
-      }
-    };
-
-    // Intercept BEFORE navigation completes — we don't want our /auth/callback
-    // page to actually load (it would try to exchange the code itself in a
-    // different localStorage context and fail).
-    authWindow.webContents.on("will-redirect", (event, url) => {
-      if (tryHandleCallback(url)) event.preventDefault();
-    });
-    authWindow.webContents.on("will-navigate", (event, url) => {
-      if (tryHandleCallback(url)) event.preventDefault();
-    });
-
-    authWindow.on("closed", () => {
-      if (!settled) {
-        settled = true;
-        resolve({ success: false, error: "Sign-in cancelled" });
-      }
-    });
-
-    authWindow.loadURL(authUrl);
   });
 });
 

@@ -12,15 +12,28 @@ import { Loader2 } from "lucide-react";
 export default function AuthCallback() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [electronHandoff, setElectronHandoff] = useState(false);
 
   useEffect(() => {
     const url = new URL(window.location.href);
     const code = url.searchParams.get("code");
+    const source = url.searchParams.get("source");
 
     if (!code) {
-      // Maybe an error from the provider
       const err = url.searchParams.get("error_description") || url.searchParams.get("error");
       setError(err || "No authorization code returned");
+      return;
+    }
+
+    // Electron desktop flow: the Electron renderer (running at
+    // app.noticomax.com inside the app shell) holds the PKCE verifier in
+    // localStorage. THIS page is loaded in the user's default browser, which
+    // has no verifier. So bounce the code back to the app via the custom
+    // protocol; the app will run exchangeCodeForSession there.
+    if (source === "electron") {
+      setElectronHandoff(true);
+      const protocolUrl = `noticomax://auth/callback?code=${encodeURIComponent(code)}`;
+      window.location.href = protocolUrl;
       return;
     }
 
@@ -32,13 +45,24 @@ export default function AuthCallback() {
           setError(exchangeError.message);
           return;
         }
-        // Session is now stored; redirect home
         router.replace("/");
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : String(err));
       });
   }, [router]);
+
+  if (electronHandoff) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center p-6 text-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <p className="mt-3 text-sm text-muted-foreground">Returning you to the app…</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          If nothing happens, you can close this tab.
+        </p>
+      </div>
+    );
+  }
 
   if (error) {
     return (
