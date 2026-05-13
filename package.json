@@ -1,6 +1,6 @@
 {
   "name": "notico-max",
-  "version": "2.5.1",
+  "version": "2.5.2",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
