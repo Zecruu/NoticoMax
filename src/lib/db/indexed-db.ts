@@ -119,10 +119,29 @@ export interface LocalGoal {
   updatedAt: string;
 }
 
+export interface LocalLocation {
+  id?: number;
+  clientId: string;
+  serverId?: string;
+  name: string;
+  address?: string;
+  latitude: number;
+  longitude: number;
+  notes?: string;
+  tags: string[];
+  pinned: boolean;
+  color?: string;
+  deviceId?: string;
+  deleted: boolean;
+  deletedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SyncQueueEntry {
   id?: number;
   action: "create" | "update" | "delete";
-  entityType: "item" | "folder";
+  entityType: "item" | "folder" | "location";
   clientId: string;
   data?: Record<string, unknown>;
   timestamp: string;
@@ -136,6 +155,7 @@ class NoticoDatabase extends Dexie {
   budgetCategories!: EntityTable<LocalBudgetCategory, "id">;
   budgetTransactions!: EntityTable<LocalBudgetTransaction, "id">;
   goals!: EntityTable<LocalGoal, "id">;
+  locations!: EntityTable<LocalLocation, "id">;
   syncQueue!: EntityTable<SyncQueueEntry, "id">;
 
   constructor() {
@@ -195,6 +215,18 @@ class NoticoDatabase extends Dexie {
       goals: "++id, clientId, scope, periodKey, completed, createdAt",
       syncQueue: "++id, clientId, action, entityType, timestamp",
     });
+
+    this.version(8).stores({
+      items: "++id, clientId, serverId, type, title, updatedAt, pinned, deleted, folderId, deviceId",
+      folders: "++id, clientId, serverId, name, deleted",
+      studySets: "++id, clientId, name, deleted",
+      quizzes: "++id, clientId, name, deleted",
+      budgetCategories: "++id, clientId, name, deleted",
+      budgetTransactions: "++id, clientId, categoryId, date",
+      goals: "++id, clientId, scope, periodKey, completed, createdAt",
+      locations: "++id, clientId, serverId, name, updatedAt, pinned, deleted, deviceId",
+      syncQueue: "++id, clientId, action, entityType, timestamp",
+    });
   }
 }
 
@@ -219,6 +251,7 @@ export async function wipeLocalDB(): Promise<void> {
     db.budgetCategories.clear(),
     db.budgetTransactions.clear(),
     db.goals.clear(),
+    db.locations.clear(),
     db.syncQueue.clear(),
   ]);
 }

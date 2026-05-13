@@ -1,4 +1,4 @@
-import db, { type LocalItem, type LocalFolder } from "@/lib/db/indexed-db";
+import db, { type LocalItem, type LocalFolder, type LocalLocation } from "@/lib/db/indexed-db";
 import { v4 as uuidv4 } from "uuid";
 import {
   scheduleReminderNotification,
@@ -84,6 +84,24 @@ interface SupabaseFolder {
   updated_at: string;
 }
 
+interface SupabaseLocation {
+  client_id: string;
+  user_id: string;
+  name: string;
+  address: string | null;
+  latitude: number;
+  longitude: number;
+  notes: string | null;
+  tags: string[];
+  pinned: boolean;
+  color: string | null;
+  device_id: string | null;
+  deleted: boolean;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 function localToSupabaseItem(item: LocalItem, userId: string): Partial<SupabaseItem> {
   return {
     client_id: item.clientId,
@@ -147,6 +165,45 @@ function supabaseToLocalFolder(row: SupabaseFolder): LocalFolder {
     name: row.name,
     color: row.color ?? undefined,
     deleted: row.deleted ?? false,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function localToSupabaseLocation(loc: LocalLocation, userId: string): Partial<SupabaseLocation> {
+  return {
+    client_id: loc.clientId,
+    user_id: userId,
+    name: loc.name,
+    address: loc.address ?? null,
+    latitude: loc.latitude,
+    longitude: loc.longitude,
+    notes: loc.notes ?? null,
+    tags: loc.tags ?? [],
+    pinned: loc.pinned ?? false,
+    color: loc.color ?? null,
+    device_id: loc.deviceId ?? null,
+    deleted: loc.deleted ?? false,
+    deleted_at: loc.deletedAt ?? null,
+    created_at: loc.createdAt,
+    updated_at: loc.updatedAt,
+  };
+}
+
+function supabaseToLocalLocation(row: SupabaseLocation): LocalLocation {
+  return {
+    clientId: row.client_id,
+    name: row.name,
+    address: row.address ?? undefined,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    notes: row.notes ?? undefined,
+    tags: row.tags ?? [],
+    pinned: row.pinned ?? false,
+    color: row.color ?? undefined,
+    deviceId: row.device_id ?? undefined,
+    deleted: row.deleted ?? false,
+    deletedAt: row.deleted_at ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -423,6 +480,103 @@ export async function getFolders(): Promise<LocalFolder[]> {
   return folders.filter((f) => !f.deleted).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// ─── LOCATION OPERATIONS ───
+
+export async function createLocation(
+  loc: Omit<LocalLocation, "id" | "clientId" | "createdAt" | "updatedAt" | "deleted">
+): Promise<LocalLocation> {
+  const now = new Date().toISOString();
+  const clientId = uuidv4();
+  const deviceId = getDeviceId();
+
+  const localLocation: LocalLocation = {
+    ...loc,
+    clientId,
+    deviceId,
+    deleted: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  saveDeviceNameMapping(deviceId, getDeviceName());
+  await db.locations.add(localLocation);
+
+  await db.syncQueue.add({
+    action: "create",
+    entityType: "location",
+    clientId,
+    data: localLocation as unknown as Record<string, unknown>,
+    timestamp: now,
+  });
+
+  triggerSync();
+  return localLocation;
+}
+
+export async function updateLocation(
+  clientId: string,
+  updates: Partial<LocalLocation>
+): Promise<LocalLocation | undefined> {
+  const now = new Date().toISOString();
+  const loc = await db.locations.where("clientId").equals(clientId).first();
+  if (!loc) return undefined;
+
+  const updatedData = { ...updates, updatedAt: now };
+  await db.locations.where("clientId").equals(clientId).modify((l) => {
+    Object.assign(l, updatedData);
+  });
+
+  await db.syncQueue.add({
+    action: "update",
+    entityType: "location",
+    clientId,
+    data: updatedData as unknown as Record<string, unknown>,
+    timestamp: now,
+  });
+
+  triggerSync();
+  return { ...loc, ...updatedData };
+}
+
+export async function deleteLocation(clientId: string): Promise<void> {
+  const now = new Date().toISOString();
+
+  await db.locations.where("clientId").equals(clientId).modify((l) => {
+    l.deleted = true;
+    l.deletedAt = now;
+    l.updatedAt = now;
+  });
+
+  await db.syncQueue.add({
+    action: "delete",
+    entityType: "location",
+    clientId,
+    timestamp: now,
+  });
+
+  triggerSync();
+}
+
+export async function getLocations(searchQuery?: string): Promise<LocalLocation[]> {
+  let locations = await db.locations.toArray();
+  locations = locations.filter((l) => !l.deleted);
+
+  if (searchQuery) {
+    const terms = searchQuery.toLowerCase().split(/\s+/);
+    locations = locations.filter((l) => {
+      const searchable = `${l.name} ${l.address ?? ""} ${l.notes ?? ""} ${l.tags.join(" ")}`.toLowerCase();
+      return terms.every((term) => searchable.includes(term));
+    });
+  }
+
+  locations.sort((a, b) => {
+    if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
+    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+  });
+
+  return locations;
+}
+
 // ─── SYNC TO SUPABASE ───
 
 let syncInProgress = false;
@@ -448,8 +602,10 @@ export async function performSync(): Promise<boolean> {
     // Deduplicate per (entityType, clientId), keeping latest action.
     const itemOps = new Map<string, (typeof queue)[0]>();
     const folderOps = new Map<string, (typeof queue)[0]>();
+    const locationOps = new Map<string, (typeof queue)[0]>();
     for (const entry of queue) {
       if (entry.entityType === "folder") folderOps.set(entry.clientId, entry);
+      else if (entry.entityType === "location") locationOps.set(entry.clientId, entry);
       else itemOps.set(entry.clientId, entry);
     }
 
@@ -482,6 +638,22 @@ export async function performSync(): Promise<boolean> {
           await supabase
             .from("items")
             .upsert(localToSupabaseItem(item, userId), { onConflict: "client_id" });
+        }
+      }
+    }
+
+    for (const op of locationOps.values()) {
+      if (op.action === "delete") {
+        await supabase
+          .from("locations")
+          .update({ deleted: true, deleted_at: op.timestamp, updated_at: op.timestamp })
+          .eq("client_id", op.clientId);
+      } else {
+        const loc = await db.locations.where("clientId").equals(op.clientId).first();
+        if (loc) {
+          await supabase
+            .from("locations")
+            .upsert(localToSupabaseLocation(loc, userId), { onConflict: "client_id" });
         }
       }
     }
@@ -542,6 +714,27 @@ async function pullChanges(userId: string): Promise<void> {
         }
       } else {
         await db.folders.add(mapped);
+      }
+    }
+  }
+
+  let locationsQuery = supabase.from("locations").select("*").eq("user_id", userId);
+  if (lastSync) locationsQuery = locationsQuery.gt("updated_at", lastSync);
+  const { data: locations } = await locationsQuery;
+
+  if (locations) {
+    for (const row of locations as SupabaseLocation[]) {
+      const mapped = supabaseToLocalLocation(row);
+      const existing = await db.locations.where("clientId").equals(mapped.clientId).first();
+      if (existing) {
+        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
+        if (hasPending === 0) {
+          await db.locations.where("clientId").equals(mapped.clientId).modify((l) => {
+            Object.assign(l, mapped);
+          });
+        }
+      } else {
+        await db.locations.add(mapped);
       }
     }
   }
@@ -633,6 +826,27 @@ async function setupRealtime() {
             });
           } else {
             await db.folders.add(mapped);
+          }
+        }
+        if (onSyncComplete) onSyncComplete();
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "locations", filter: `user_id=eq.${userId}` },
+      async (payload: { new: unknown; old: unknown }) => {
+        const row = (payload.new ?? payload.old) as SupabaseLocation | undefined;
+        if (!row) return;
+        const mapped = supabaseToLocalLocation(row);
+        const existing = await db.locations.where("clientId").equals(mapped.clientId).first();
+        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
+        if (hasPending === 0) {
+          if (existing) {
+            await db.locations.where("clientId").equals(mapped.clientId).modify((l) => {
+              Object.assign(l, mapped);
+            });
+          } else {
+            await db.locations.add(mapped);
           }
         }
         if (onSyncComplete) onSyncComplete();

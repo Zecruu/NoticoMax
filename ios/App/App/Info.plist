@@ -49,6 +49,8 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Use Face ID to unlock Notico Max</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Save your current location to your favorite spots so you can find them again later.</string>
 	<key>NSUserTrackingUsageDescription</key>
 	<string>Your data is used to deliver more relevant ads in the free tier of Notico Max. You can opt out at any time, and Pro removes ads entirely.</string>
 	<key>GADApplicationIdentifier</key>
