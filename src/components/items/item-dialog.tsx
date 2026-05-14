@@ -5,7 +5,6 @@ import { type LocalItem, type ItemType, type LocalFolder, type RecurrenceRule } 
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -21,14 +20,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Link2, Bell, X, Eye, Pencil, List, ListOrdered, ALargeSmall, ListChecks } from "lucide-react";
+import { FileText, Link2, Bell, X, Eye, Pencil, List, ListOrdered, ALargeSmall, ListChecks, Trash2, ChevronDown } from "lucide-react";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
+import { cn } from "@/lib/utils";
 
 interface ItemDialogProps {
   open: boolean;
   onClose: () => void;
   onSave: (item: Omit<LocalItem, "id" | "clientId" | "createdAt" | "updatedAt" | "deleted">) => void;
   onUpdate?: (clientId: string, updates: Partial<LocalItem>) => void;
+  onDelete?: (clientId: string) => void;
   editingItem?: LocalItem | null;
   folders: LocalFolder[];
   defaultFolderId?: string | null;
@@ -37,7 +38,7 @@ interface ItemDialogProps {
   allTags?: string[];
 }
 
-export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folders, defaultFolderId, defaultType = "note", defaultReminderDate, allTags = [] }: ItemDialogProps) {
+export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingItem, folders, defaultFolderId, defaultType = "note", defaultReminderDate, allTags = [] }: ItemDialogProps) {
   const [type, setType] = useState<ItemType>("note");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -50,7 +51,9 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
   const [folderId, setFolderId] = useState<string | undefined>(undefined);
   const [previewing, setPreviewing] = useState(false);
   const [activeListMode, setActiveListMode] = useState<"bullet" | "numbered" | "lettered" | "checklist" | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const closingRef = useRef(false);
 
   const handleContentKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== "Enter") return;
@@ -207,6 +210,8 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
     }
     setPreviewing(false);
     setActiveListMode(null);
+    setDetailsOpen(false);
+    closingRef.current = false;
   }, [editingItem, open, defaultFolderId, defaultType, defaultReminderDate]);
 
   const handleAddTag = () => {
@@ -221,12 +226,22 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
     setTags(tags.filter((t) => t !== tag));
   };
 
-  const handleSubmit = () => {
-    if (!title.trim()) return;
+  // Auto-title from the first non-empty line of content when title is missing.
+  const computeFinalTitle = (): string => {
+    const t = title.trim();
+    if (t) return t;
+    const firstLine = content
+      .split("\n")
+      .map((l) => l.replace(/^(?:- \[[ xX]\] |- |\d+\. |[a-z]\. )/, "").trim())
+      .find((l) => l.length > 0);
+    if (firstLine) return firstLine.slice(0, 60);
+    return "";
+  };
 
+  const persist = (finalTitle: string) => {
     const itemData = {
       type,
-      title: title.trim(),
+      title: finalTitle,
       content: content.trim(),
       url: type === "url" ? url.trim() : undefined,
       reminderDate: type === "reminder" && reminderDate ? reminderDate : undefined,
@@ -243,7 +258,25 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
     } else {
       onSave(itemData);
     }
+  };
 
+  // Called on every close path (explicit X, escape, outside tap). Auto-saves
+  // if there's anything worth saving, otherwise silently discards. Idempotent
+  // via closingRef so it never double-fires (Radix can call onOpenChange twice).
+  const finalizeAndClose = () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    const finalTitle = computeFinalTitle();
+    if (finalTitle) persist(finalTitle);
+    onClose();
+  };
+
+  const handleDelete = () => {
+    if (!editingItem || !onDelete) return;
+    if (!confirm(`Delete "${editingItem.title}"? This moves it to Trash.`)) return;
+    if (closingRef.current) return;
+    closingRef.current = true;
+    onDelete(editingItem.clientId);
     onClose();
   };
 
@@ -269,15 +302,42 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
   }, []);
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="sm:max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>
+    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && finalizeAndClose()}>
+      <DialogContent
+        showCloseButton={false}
+        onEscapeKeyDown={(e) => { e.preventDefault(); finalizeAndClose(); }}
+        onPointerDownOutside={(e) => { e.preventDefault(); finalizeAndClose(); }}
+        onInteractOutside={(e) => { e.preventDefault(); }}
+        className="!fixed !inset-0 !top-0 !left-0 !translate-x-0 !translate-y-0 !max-w-none !w-screen !h-[100dvh] !max-h-none !rounded-none !border-0 !p-0 !gap-0 flex flex-col bg-background"
+      >
+        {/* Top bar */}
+        <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-b shrink-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <button
+            type="button"
+            onClick={finalizeAndClose}
+            className="inline-flex items-center justify-center h-9 w-9 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            aria-label="Close (auto-saves)"
+            title="Close (auto-saves)"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <DialogTitle className="text-sm font-semibold truncate">
             {editingItem ? "Edit Item" : "New Item"}
           </DialogTitle>
-        </DialogHeader>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={!editingItem || !onDelete}
+            className="inline-flex items-center justify-center h-9 w-9 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            aria-label="Delete"
+            title={editingItem ? "Delete" : "Save first to delete"}
+          >
+            <Trash2 className="h-5 w-5" />
+          </button>
+        </div>
 
-        <div className="space-y-4 pb-[var(--keyboard-height,0px)]">
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-[calc(1rem+var(--keyboard-height,0px))]">
           {!editingItem && (
             <Tabs value={type} onValueChange={(v) => setType(v as ItemType)}>
               <TabsList className="w-full">
@@ -301,50 +361,20 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
             </Tabs>
           )}
 
-          {folders.length > 0 && (
-            <div className="space-y-2">
-              <Label>Folder</Label>
-              <Select
-                value={folderId || "none"}
-                onValueChange={(v) => setFolderId(v === "none" ? undefined : v)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="No folder" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No folder</SelectItem>
-                  {folders.map((folder) => (
-                    <SelectItem key={folder.clientId} value={folder.clientId}>
-                      <div className="flex items-center gap-2">
-                        <div
-                          className="h-2.5 w-2.5 rounded-sm shrink-0"
-                          style={{ backgroundColor: folder.color || "#6b7280" }}
-                        />
-                        {folder.name}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            <Label htmlFor="title">Title</Label>
-            <Input
-              id="title"
-              placeholder={
-                type === "note"
-                  ? "Note title..."
-                  : type === "url"
-                    ? "Bookmark name..."
-                    : "Reminder title..."
-              }
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              autoFocus
-            />
-          </div>
+          <Input
+            id="title"
+            placeholder={
+              type === "note"
+                ? "Note title (optional — first line of content used otherwise)"
+                : type === "url"
+                  ? "Bookmark name..."
+                  : "Reminder title..."
+            }
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            autoFocus
+            className="text-lg font-semibold border-0 px-0 shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/50"
+          />
 
           {type === "url" && (
             <div className="space-y-2">
@@ -489,71 +519,115 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
             )}
           </div>
 
-          <div className="space-y-2">
-            <Label>Tags</Label>
-            <div className="flex gap-2">
-              <Input
-                placeholder="Add tag..."
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleAddTag();
-                  }
-                }}
-              />
-              <Button type="button" variant="secondary" onClick={handleAddTag}>
-                Add
-              </Button>
-            </div>
-            {tags.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1">
-                {tags.map((tag) => (
-                  <Badge key={tag} variant="secondary" className="gap-1">
-                    {tag}
-                    <button
-                      onClick={() => handleRemoveTag(tag)}
-                      className="ml-0.5 hover:text-destructive"
+          {/* Collapsible Details: folder + tags */}
+          <div className="rounded-md border">
+            <button
+              type="button"
+              onClick={() => setDetailsOpen((v) => !v)}
+              className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+              aria-expanded={detailsOpen}
+            >
+              <span className="flex items-center gap-2">
+                Details
+                {(folderId || tags.length > 0) && (
+                  <span className="text-[10px] rounded-full bg-muted px-1.5 py-0.5">
+                    {[folderId ? "folder" : null, tags.length > 0 ? `${tags.length} tag${tags.length > 1 ? "s" : ""}` : null]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                )}
+              </span>
+              <ChevronDown className={cn("h-4 w-4 transition-transform", detailsOpen && "rotate-180")} />
+            </button>
+            {detailsOpen && (
+              <div className="border-t px-3 py-3 space-y-3">
+                {folders.length > 0 && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Folder</Label>
+                    <Select
+                      value={folderId || "none"}
+                      onValueChange={(v) => setFolderId(v === "none" ? undefined : v)}
                     >
-                      <X className="h-2.5 w-2.5" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-            )}
-            {allTags.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-[10px] text-muted-foreground">Suggestions</p>
-                <div className="flex flex-wrap gap-1">
-                  {allTags
-                    .filter((t) => !tags.includes(t) && (!tagInput || t.toLowerCase().includes(tagInput.toLowerCase())))
-                    .slice(0, 8)
-                    .map((tag) => (
-                      <button
-                        key={tag}
-                        type="button"
-                        onClick={() => {
-                          if (!tags.includes(tag)) setTags([...tags, tag]);
-                          setTagInput("");
-                        }}
-                        className="rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                      >
-                        + {tag}
-                      </button>
-                    ))}
+                      <SelectTrigger>
+                        <SelectValue placeholder="No folder" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No folder</SelectItem>
+                        {folders.map((folder) => (
+                          <SelectItem key={folder.clientId} value={folder.clientId}>
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="h-2.5 w-2.5 rounded-sm shrink-0"
+                                style={{ backgroundColor: folder.color || "#6b7280" }}
+                              />
+                              {folder.name}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Tags</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Add tag..."
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleAddTag();
+                        }
+                      }}
+                    />
+                    <Button type="button" variant="secondary" onClick={handleAddTag}>
+                      Add
+                    </Button>
+                  </div>
+                  {tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {tags.map((tag) => (
+                        <Badge key={tag} variant="secondary" className="gap-1">
+                          {tag}
+                          <button
+                            onClick={() => handleRemoveTag(tag)}
+                            className="ml-0.5 hover:text-destructive"
+                          >
+                            <X className="h-2.5 w-2.5" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  {allTags.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-muted-foreground">Suggestions</p>
+                      <div className="flex flex-wrap gap-1">
+                        {allTags
+                          .filter((t) => !tags.includes(t) && (!tagInput || t.toLowerCase().includes(tagInput.toLowerCase())))
+                          .slice(0, 8)
+                          .map((tag) => (
+                            <button
+                              key={tag}
+                              type="button"
+                              onClick={() => {
+                                if (!tags.includes(tag)) setTags([...tags, tag]);
+                                setTagInput("");
+                              }}
+                              className="rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button onClick={handleSubmit} disabled={!title.trim()}>
-              {editingItem ? "Save Changes" : "Create"}
-            </Button>
           </div>
         </div>
       </DialogContent>

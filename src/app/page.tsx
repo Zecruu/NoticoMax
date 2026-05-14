@@ -340,6 +340,7 @@ export default function Dashboard() {
         }}
         onSave={handleSave}
         onUpdate={handleUpdate}
+        onDelete={handleDelete}
         editingItem={editingItem}
         folders={folders}
         defaultFolderId={activeFolder}
