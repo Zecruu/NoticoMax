@@ -107,8 +107,8 @@ const dmgSize = dmgBuf.length;
 // come first under `files:`) — the DMG is still listed for direct download
 // of the first-install artifact.
 let zipEntry = null;
-const zips = fs.readdirSync(DIST_DIR).filter((f) => f.endsWith(".zip"));
-const zip = zips.find((f) => f.includes(`-${pkgVersion}-mac.zip`)) ?? zips.find((f) => f.includes(`-${pkgVersion}.zip`)) ?? zips[0];
+const zips = fs.readdirSync(DIST_DIR).filter((f) => f.endsWith(".zip") && f.includes(`-${pkgVersion}-`));
+const zip = zips[0];
 if (zip) {
   const zipBuf = fs.readFileSync(path.join(DIST_DIR, zip));
   zipEntry = { url: zip, sha512: hashOf(zipBuf), size: zipBuf.length };
