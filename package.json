@@ -1,6 +1,6 @@
 {
   "name": "notico-max",
-  "version": "2.5.2",
+  "version": "2.5.3",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -29,7 +29,9 @@
     "protocols": [
       {
         "name": "NoticoMax Protocol",
-        "schemes": ["noticomax"]
+        "schemes": [
+          "noticomax"
+        ]
       }
     ],
     "publish": [
