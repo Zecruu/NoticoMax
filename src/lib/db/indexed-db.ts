@@ -86,22 +86,30 @@ export interface LocalQuiz {
 export interface LocalBudgetCategory {
   id?: number;
   clientId: string;
+  serverId?: string;
   name: string;
   color: string;
   monthlyLimit: number;
+  deviceId?: string;
+  deleted: boolean;
+  deletedAt?: string;
   createdAt: string;
   updatedAt: string;
-  deleted: boolean;
 }
 
 export interface LocalBudgetTransaction {
   id?: number;
   clientId: string;
+  serverId?: string;
   categoryId: string;
   amount: number;
   note?: string;
   date: string;
+  deviceId?: string;
+  deleted: boolean;
+  deletedAt?: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 export type GoalScope = "today" | "month" | "year";
@@ -141,7 +149,7 @@ export interface LocalLocation {
 export interface SyncQueueEntry {
   id?: number;
   action: "create" | "update" | "delete";
-  entityType: "item" | "folder" | "location";
+  entityType: "item" | "folder" | "location" | "budget_category" | "budget_transaction" | "budget_settings";
   clientId: string;
   data?: Record<string, unknown>;
   timestamp: string;
@@ -227,6 +235,33 @@ class NoticoDatabase extends Dexie {
       locations: "++id, clientId, serverId, name, updatedAt, pinned, deleted, deviceId",
       syncQueue: "++id, clientId, action, entityType, timestamp",
     });
+
+    // v9 — budget categories & transactions become sync-aware (serverId,
+    // deviceId, updatedAt, deleted on transactions). Existing rows are
+    // migrated: any row missing the new fields gets sensible defaults so
+    // a returning device upgrade doesn't lose history.
+    this.version(9)
+      .stores({
+        items: "++id, clientId, serverId, type, title, updatedAt, pinned, deleted, folderId, deviceId",
+        folders: "++id, clientId, serverId, name, deleted",
+        studySets: "++id, clientId, name, deleted",
+        quizzes: "++id, clientId, name, deleted",
+        budgetCategories: "++id, clientId, serverId, name, updatedAt, deleted, deviceId",
+        budgetTransactions: "++id, clientId, serverId, categoryId, date, updatedAt, deleted, deviceId",
+        goals: "++id, clientId, scope, periodKey, completed, createdAt",
+        locations: "++id, clientId, serverId, name, updatedAt, pinned, deleted, deviceId",
+        syncQueue: "++id, clientId, action, entityType, timestamp",
+      })
+      .upgrade(async (tx) => {
+        const nowIso = new Date().toISOString();
+        await tx.table("budgetTransactions").toCollection().modify((t: LocalBudgetTransaction) => {
+          if (t.deleted === undefined) t.deleted = false;
+          if (!t.updatedAt) t.updatedAt = t.createdAt || nowIso;
+        });
+        await tx.table("budgetCategories").toCollection().modify((c: LocalBudgetCategory) => {
+          if (c.deleted === undefined) c.deleted = false;
+        });
+      });
   }
 }
 

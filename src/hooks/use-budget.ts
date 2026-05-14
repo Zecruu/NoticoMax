@@ -6,7 +6,15 @@ import db, {
   type LocalBudgetCategory,
   type LocalBudgetTransaction,
 } from "@/lib/db/indexed-db";
+import {
+  createBudgetCategory,
+  deleteBudgetCategory,
+  createBudgetTransaction,
+  deleteBudgetTransaction,
+  setMonthlyIncome as setMonthlyIncomeSynced,
+} from "@/lib/sync/sync-engine";
 
+// Must match the key used by sync-engine so cross-device sync stays consistent.
 const INCOME_KEY = "noticomax_budget_monthly_income";
 
 export function getCurrentMonthKey(d: Date = new Date()): string {
@@ -25,7 +33,6 @@ export function formatMonthKey(monthKey: string): string {
   });
 }
 
-/** Returns prior YYYY-MM string. */
 function shiftMonth(monthKey: string, delta: number): string {
   const [y, m] = monthKey.split("-").map(Number);
   const d = new Date(y, m - 1 + delta, 1);
@@ -36,7 +43,6 @@ export interface BudgetCategoryWithTotals extends LocalBudgetCategory {
   spentInMonth: number;
   remaining: number;
   percent: number;
-  /** Backwards-compat alias for old call sites. */
   spentThisMonth: number;
 }
 
@@ -50,17 +56,34 @@ export interface MonthSummary {
 export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
   const [monthlyIncome, setMonthlyIncomeState] = useState<number>(0);
 
+  // Hydrate from localStorage on mount, and stay in sync with realtime
+  // updates from other devices (sync-engine writes to the same key).
   useEffect(() => {
-    const stored = localStorage.getItem(INCOME_KEY);
-    if (stored) {
-      const n = Number(stored);
-      if (!Number.isNaN(n)) setMonthlyIncomeState(n);
-    }
+    const read = () => {
+      const stored = localStorage.getItem(INCOME_KEY);
+      if (stored) {
+        const n = Number(stored);
+        if (!Number.isNaN(n)) setMonthlyIncomeState(n);
+      }
+    };
+    read();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === INCOME_KEY) read();
+    };
+    window.addEventListener("storage", onStorage);
+    // Realtime callbacks in sync-engine write to localStorage but don't fire
+    // a `storage` event in the same tab, so also poll on visibility change.
+    const onVis = () => { if (document.visibilityState === "visible") read(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, []);
 
   const setMonthlyIncome = useCallback((amount: number) => {
     setMonthlyIncomeState(amount);
-    localStorage.setItem(INCOME_KEY, String(amount));
+    void setMonthlyIncomeSynced(amount);
   }, []);
 
   const categories = useLiveQuery(
@@ -70,7 +93,7 @@ export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
   );
 
   const transactions = useLiveQuery(
-    () => db.budgetTransactions.toArray(),
+    () => db.budgetTransactions.toArray().then((r) => r.filter((t) => !t.deleted)),
     [],
     [] as LocalBudgetTransaction[],
   );
@@ -99,7 +122,6 @@ export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
   const unallocated = monthlyIncome - totalBudgeted;
   const incomeRemaining = monthlyIncome - totalSpent;
 
-  /** Every month that has at least one transaction, newest first, plus the current month. */
   const availableMonths = useMemo(() => {
     const set = new Set<string>();
     set.add(getCurrentMonthKey());
@@ -107,7 +129,6 @@ export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
     return Array.from(set).sort().reverse();
   }, [transactions]);
 
-  /** Per-month rollup: spent + top-spending category. */
   const monthSummaries: MonthSummary[] = useMemo(() => {
     const byMonth = new Map<string, Map<string, number>>();
     for (const tx of transactions ?? []) {
@@ -141,7 +162,6 @@ export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
     });
   }, [availableMonths, transactions, categories]);
 
-  /** All-time stats across every transaction we've ever logged. */
   const allTime = useMemo(() => {
     let total = 0;
     const byCategory = new Map<string, number>();
@@ -173,51 +193,40 @@ export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
     [transactions, viewMonthKey],
   );
 
-  const addCategory = useCallback(async (input: { name: string; color: string; monthlyLimit: number }) => {
-    const now = new Date().toISOString();
-    const cat: LocalBudgetCategory = {
-      clientId: crypto.randomUUID(),
-      name: input.name,
-      color: input.color,
-      monthlyLimit: input.monthlyLimit,
-      createdAt: now,
-      updatedAt: now,
-      deleted: false,
-    };
-    await db.budgetCategories.add(cat);
-  }, []);
+  const addCategory = useCallback(
+    async (input: { name: string; color: string; monthlyLimit: number }) => {
+      await createBudgetCategory(input);
+    },
+    [],
+  );
 
   const updateCategory = useCallback(async (clientId: string, patch: Partial<LocalBudgetCategory>) => {
+    // Edit isn't surfaced in the UI yet; keep a no-sync local modify so
+    // existing callers (if any) don't break. Add a sync-engine update path
+    // when an edit flow lands.
     await db.budgetCategories
       .where("clientId").equals(clientId)
       .modify({ ...patch, updatedAt: new Date().toISOString() });
   }, []);
 
   const deleteCategory = useCallback(async (clientId: string) => {
-    await db.budgetCategories.where("clientId").equals(clientId).delete();
-    await db.budgetTransactions.where("categoryId").equals(clientId).delete();
+    await deleteBudgetCategory(clientId);
   }, []);
 
-  const addTransaction = useCallback(async (input: {
-    categoryId: string;
-    amount: number;
-    note?: string;
-    date?: string;
-  }) => {
-    const now = new Date().toISOString();
-    const tx: LocalBudgetTransaction = {
-      clientId: crypto.randomUUID(),
-      categoryId: input.categoryId,
-      amount: input.amount,
-      note: input.note,
-      date: input.date ?? now,
-      createdAt: now,
-    };
-    await db.budgetTransactions.add(tx);
-  }, []);
+  const addTransaction = useCallback(
+    async (input: { categoryId: string; amount: number; note?: string; date?: string }) => {
+      await createBudgetTransaction({
+        categoryId: input.categoryId,
+        amount: input.amount,
+        note: input.note,
+        date: input.date ?? new Date().toISOString(),
+      });
+    },
+    [],
+  );
 
   const deleteTransaction = useCallback(async (clientId: string) => {
-    await db.budgetTransactions.where("clientId").equals(clientId).delete();
+    await deleteBudgetTransaction(clientId);
   }, []);
 
   return {

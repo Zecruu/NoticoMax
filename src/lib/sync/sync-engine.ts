@@ -1,4 +1,10 @@
-import db, { type LocalItem, type LocalFolder, type LocalLocation } from "@/lib/db/indexed-db";
+import db, {
+  type LocalItem,
+  type LocalFolder,
+  type LocalLocation,
+  type LocalBudgetCategory,
+  type LocalBudgetTransaction,
+} from "@/lib/db/indexed-db";
 import { v4 as uuidv4 } from "uuid";
 import {
   scheduleReminderNotification,
@@ -201,6 +207,101 @@ function supabaseToLocalLocation(row: SupabaseLocation): LocalLocation {
     tags: row.tags ?? [],
     pinned: row.pinned ?? false,
     color: row.color ?? undefined,
+    deviceId: row.device_id ?? undefined,
+    deleted: row.deleted ?? false,
+    deletedAt: row.deleted_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+// ─── BUDGET (categories, transactions, monthly-income settings) ───
+
+interface SupabaseBudgetCategory {
+  client_id: string;
+  user_id: string;
+  name: string;
+  color: string;
+  monthly_limit: number;
+  device_id: string | null;
+  deleted: boolean;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SupabaseBudgetTransaction {
+  client_id: string;
+  user_id: string;
+  category_id: string;
+  amount: number;
+  note: string | null;
+  date: string;
+  device_id: string | null;
+  deleted: boolean;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SupabaseBudgetSettings {
+  user_id: string;
+  monthly_income: number;
+  updated_at: string;
+}
+
+function localToSupabaseBudgetCategory(c: LocalBudgetCategory, userId: string): Partial<SupabaseBudgetCategory> {
+  return {
+    client_id: c.clientId,
+    user_id: userId,
+    name: c.name,
+    color: c.color,
+    monthly_limit: c.monthlyLimit,
+    device_id: c.deviceId ?? null,
+    deleted: c.deleted ?? false,
+    deleted_at: c.deletedAt ?? null,
+    created_at: c.createdAt,
+    updated_at: c.updatedAt,
+  };
+}
+
+function supabaseToLocalBudgetCategory(row: SupabaseBudgetCategory): LocalBudgetCategory {
+  return {
+    clientId: row.client_id,
+    name: row.name,
+    color: row.color,
+    monthlyLimit: Number(row.monthly_limit),
+    deviceId: row.device_id ?? undefined,
+    deleted: row.deleted ?? false,
+    deletedAt: row.deleted_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function localToSupabaseBudgetTransaction(t: LocalBudgetTransaction, userId: string): Partial<SupabaseBudgetTransaction> {
+  return {
+    client_id: t.clientId,
+    user_id: userId,
+    category_id: t.categoryId,
+    amount: t.amount,
+    note: t.note ?? null,
+    date: t.date,
+    device_id: t.deviceId ?? null,
+    deleted: t.deleted ?? false,
+    deleted_at: t.deletedAt ?? null,
+    created_at: t.createdAt,
+    updated_at: t.updatedAt,
+  };
+}
+
+function supabaseToLocalBudgetTransaction(row: SupabaseBudgetTransaction): LocalBudgetTransaction {
+  return {
+    clientId: row.client_id,
+    categoryId: row.category_id,
+    amount: Number(row.amount),
+    note: row.note ?? undefined,
+    date: row.date,
     deviceId: row.device_id ?? undefined,
     deleted: row.deleted ?? false,
     deletedAt: row.deleted_at ?? undefined,
@@ -577,6 +678,149 @@ export async function getLocations(searchQuery?: string): Promise<LocalLocation[
   return locations;
 }
 
+// ─── BUDGET OPERATIONS ───
+
+export async function createBudgetCategory(
+  input: { name: string; color: string; monthlyLimit: number } & { clientId?: string; createdAt?: string },
+): Promise<LocalBudgetCategory> {
+  const now = new Date().toISOString();
+  const clientId = input.clientId ?? uuidv4();
+  const deviceId = getDeviceId();
+
+  const local: LocalBudgetCategory = {
+    clientId,
+    name: input.name,
+    color: input.color,
+    monthlyLimit: input.monthlyLimit,
+    deviceId,
+    deleted: false,
+    createdAt: input.createdAt ?? now,
+    updatedAt: now,
+  };
+
+  saveDeviceNameMapping(deviceId, getDeviceName());
+  await db.budgetCategories.add(local);
+
+  await db.syncQueue.add({
+    action: "create",
+    entityType: "budget_category",
+    clientId,
+    data: local as unknown as Record<string, unknown>,
+    timestamp: now,
+  });
+
+  triggerSync();
+  return local;
+}
+
+export async function deleteBudgetCategory(clientId: string): Promise<void> {
+  const now = new Date().toISOString();
+
+  await db.budgetCategories.where("clientId").equals(clientId).modify((c) => {
+    c.deleted = true;
+    c.deletedAt = now;
+    c.updatedAt = now;
+  });
+  // Also tombstone every transaction for that category so the running totals
+  // don't include orphan rows on other devices.
+  await db.budgetTransactions.where("categoryId").equals(clientId).modify((t) => {
+    t.deleted = true;
+    t.deletedAt = now;
+    t.updatedAt = now;
+  });
+
+  await db.syncQueue.add({
+    action: "delete",
+    entityType: "budget_category",
+    clientId,
+    timestamp: now,
+  });
+
+  triggerSync();
+}
+
+export async function createBudgetTransaction(
+  input: { categoryId: string; amount: number; note?: string; date: string } & { clientId?: string },
+): Promise<LocalBudgetTransaction> {
+  const now = new Date().toISOString();
+  const clientId = input.clientId ?? uuidv4();
+  const deviceId = getDeviceId();
+
+  const local: LocalBudgetTransaction = {
+    clientId,
+    categoryId: input.categoryId,
+    amount: input.amount,
+    note: input.note,
+    date: input.date,
+    deviceId,
+    deleted: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  saveDeviceNameMapping(deviceId, getDeviceName());
+  await db.budgetTransactions.add(local);
+
+  await db.syncQueue.add({
+    action: "create",
+    entityType: "budget_transaction",
+    clientId,
+    data: local as unknown as Record<string, unknown>,
+    timestamp: now,
+  });
+
+  triggerSync();
+  return local;
+}
+
+export async function deleteBudgetTransaction(clientId: string): Promise<void> {
+  const now = new Date().toISOString();
+
+  await db.budgetTransactions.where("clientId").equals(clientId).modify((t) => {
+    t.deleted = true;
+    t.deletedAt = now;
+    t.updatedAt = now;
+  });
+
+  await db.syncQueue.add({
+    action: "delete",
+    entityType: "budget_transaction",
+    clientId,
+    timestamp: now,
+  });
+
+  triggerSync();
+}
+
+// Must match use-budget.ts so reads + writes hit the same key.
+const MONTHLY_INCOME_KEY = "noticomax_budget_monthly_income";
+const MONTHLY_INCOME_QUEUE_CLIENT_ID = "monthly_income";
+
+export function getMonthlyIncomeLocal(): number {
+  if (typeof window === "undefined") return 0;
+  const v = localStorage.getItem(MONTHLY_INCOME_KEY);
+  if (!v) return 0;
+  const n = Number(v);
+  return Number.isNaN(n) ? 0 : n;
+}
+
+export async function setMonthlyIncome(amount: number): Promise<void> {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(MONTHLY_INCOME_KEY, String(amount));
+  }
+  const now = new Date().toISOString();
+  // The settings row is a singleton per user — use a fixed clientId so the
+  // sync queue deduplicates writes from the same device.
+  await db.syncQueue.add({
+    action: "update",
+    entityType: "budget_settings",
+    clientId: MONTHLY_INCOME_QUEUE_CLIENT_ID,
+    data: { monthly_income: amount, updated_at: now },
+    timestamp: now,
+  });
+  triggerSync();
+}
+
 // ─── SYNC TO SUPABASE ───
 
 let syncInProgress = false;
@@ -603,9 +847,15 @@ export async function performSync(): Promise<boolean> {
     const itemOps = new Map<string, (typeof queue)[0]>();
     const folderOps = new Map<string, (typeof queue)[0]>();
     const locationOps = new Map<string, (typeof queue)[0]>();
+    const budgetCategoryOps = new Map<string, (typeof queue)[0]>();
+    const budgetTransactionOps = new Map<string, (typeof queue)[0]>();
+    let budgetSettingsOp: (typeof queue)[0] | null = null;
     for (const entry of queue) {
       if (entry.entityType === "folder") folderOps.set(entry.clientId, entry);
       else if (entry.entityType === "location") locationOps.set(entry.clientId, entry);
+      else if (entry.entityType === "budget_category") budgetCategoryOps.set(entry.clientId, entry);
+      else if (entry.entityType === "budget_transaction") budgetTransactionOps.set(entry.clientId, entry);
+      else if (entry.entityType === "budget_settings") budgetSettingsOp = entry;
       else itemOps.set(entry.clientId, entry);
     }
 
@@ -655,6 +905,58 @@ export async function performSync(): Promise<boolean> {
             .from("locations")
             .upsert(localToSupabaseLocation(loc, userId), { onConflict: "client_id" });
         }
+      }
+    }
+
+    // Budget categories first (transactions FK them via category_id).
+    for (const op of budgetCategoryOps.values()) {
+      if (op.action === "delete") {
+        await supabase
+          .from("budget_categories")
+          .update({ deleted: true, deleted_at: op.timestamp, updated_at: op.timestamp })
+          .eq("client_id", op.clientId);
+        // Cascade tombstone to transactions server-side.
+        await supabase
+          .from("budget_transactions")
+          .update({ deleted: true, deleted_at: op.timestamp, updated_at: op.timestamp })
+          .eq("category_id", op.clientId);
+      } else {
+        const cat = await db.budgetCategories.where("clientId").equals(op.clientId).first();
+        if (cat) {
+          await supabase
+            .from("budget_categories")
+            .upsert(localToSupabaseBudgetCategory(cat, userId), { onConflict: "client_id" });
+        }
+      }
+    }
+
+    for (const op of budgetTransactionOps.values()) {
+      if (op.action === "delete") {
+        await supabase
+          .from("budget_transactions")
+          .update({ deleted: true, deleted_at: op.timestamp, updated_at: op.timestamp })
+          .eq("client_id", op.clientId);
+      } else {
+        const txn = await db.budgetTransactions.where("clientId").equals(op.clientId).first();
+        if (txn) {
+          await supabase
+            .from("budget_transactions")
+            .upsert(localToSupabaseBudgetTransaction(txn, userId), { onConflict: "client_id" });
+        }
+      }
+    }
+
+    if (budgetSettingsOp) {
+      const data = budgetSettingsOp.data as { monthly_income?: number; updated_at?: string } | undefined;
+      const incomeValue = data?.monthly_income;
+      const updatedAt = data?.updated_at ?? budgetSettingsOp.timestamp;
+      if (typeof incomeValue === "number") {
+        await supabase
+          .from("budget_settings")
+          .upsert(
+            { user_id: userId, monthly_income: incomeValue, updated_at: updatedAt },
+            { onConflict: "user_id" },
+          );
       }
     }
 
@@ -736,6 +1038,63 @@ async function pullChanges(userId: string): Promise<void> {
       } else {
         await db.locations.add(mapped);
       }
+    }
+  }
+
+  let bcQuery = supabase.from("budget_categories").select("*").eq("user_id", userId);
+  if (lastSync) bcQuery = bcQuery.gt("updated_at", lastSync);
+  const { data: budgetCats } = await bcQuery;
+  if (budgetCats) {
+    for (const row of budgetCats as SupabaseBudgetCategory[]) {
+      const mapped = supabaseToLocalBudgetCategory(row);
+      const existing = await db.budgetCategories.where("clientId").equals(mapped.clientId).first();
+      if (existing) {
+        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
+        if (hasPending === 0) {
+          await db.budgetCategories.where("clientId").equals(mapped.clientId).modify((c) => {
+            Object.assign(c, mapped);
+          });
+        }
+      } else {
+        await db.budgetCategories.add(mapped);
+      }
+    }
+  }
+
+  let btQuery = supabase.from("budget_transactions").select("*").eq("user_id", userId);
+  if (lastSync) btQuery = btQuery.gt("updated_at", lastSync);
+  const { data: budgetTxns } = await btQuery;
+  if (budgetTxns) {
+    for (const row of budgetTxns as SupabaseBudgetTransaction[]) {
+      const mapped = supabaseToLocalBudgetTransaction(row);
+      const existing = await db.budgetTransactions.where("clientId").equals(mapped.clientId).first();
+      if (existing) {
+        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
+        if (hasPending === 0) {
+          await db.budgetTransactions.where("clientId").equals(mapped.clientId).modify((t) => {
+            Object.assign(t, mapped);
+          });
+        }
+      } else {
+        await db.budgetTransactions.add(mapped);
+      }
+    }
+  }
+
+  // Settings is a singleton — always pull the latest and write to localStorage so
+  // useBudget picks it up on next render.
+  const { data: settings } = await supabase
+    .from("budget_settings")
+    .select("monthly_income, updated_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (settings && typeof window !== "undefined") {
+    const pending = await db.syncQueue
+      .where("entityType")
+      .equals("budget_settings")
+      .count();
+    if (pending === 0) {
+      localStorage.setItem(MONTHLY_INCOME_KEY, String(Number(settings.monthly_income) || 0));
     }
   }
 }
@@ -848,6 +1207,61 @@ async function setupRealtime() {
           } else {
             await db.locations.add(mapped);
           }
+        }
+        if (onSyncComplete) onSyncComplete();
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "budget_categories", filter: `user_id=eq.${userId}` },
+      async (payload: { new: unknown; old: unknown }) => {
+        const row = (payload.new ?? payload.old) as SupabaseBudgetCategory | undefined;
+        if (!row) return;
+        const mapped = supabaseToLocalBudgetCategory(row);
+        const existing = await db.budgetCategories.where("clientId").equals(mapped.clientId).first();
+        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
+        if (hasPending === 0) {
+          if (existing) {
+            await db.budgetCategories.where("clientId").equals(mapped.clientId).modify((c) => {
+              Object.assign(c, mapped);
+            });
+          } else {
+            await db.budgetCategories.add(mapped);
+          }
+        }
+        if (onSyncComplete) onSyncComplete();
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "budget_transactions", filter: `user_id=eq.${userId}` },
+      async (payload: { new: unknown; old: unknown }) => {
+        const row = (payload.new ?? payload.old) as SupabaseBudgetTransaction | undefined;
+        if (!row) return;
+        const mapped = supabaseToLocalBudgetTransaction(row);
+        const existing = await db.budgetTransactions.where("clientId").equals(mapped.clientId).first();
+        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
+        if (hasPending === 0) {
+          if (existing) {
+            await db.budgetTransactions.where("clientId").equals(mapped.clientId).modify((t) => {
+              Object.assign(t, mapped);
+            });
+          } else {
+            await db.budgetTransactions.add(mapped);
+          }
+        }
+        if (onSyncComplete) onSyncComplete();
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "budget_settings", filter: `user_id=eq.${userId}` },
+      async (payload: { new: unknown; old: unknown }) => {
+        const row = (payload.new ?? payload.old) as SupabaseBudgetSettings | undefined;
+        if (!row) return;
+        const pending = await db.syncQueue.where("entityType").equals("budget_settings").count();
+        if (pending === 0 && typeof window !== "undefined") {
+          localStorage.setItem(MONTHLY_INCOME_KEY, String(Number(row.monthly_income) || 0));
         }
         if (onSyncComplete) onSyncComplete();
       }
