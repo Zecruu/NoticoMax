@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Link2, Bell, X, Eye, Pencil, List, ListOrdered, ALargeSmall } from "lucide-react";
+import { FileText, Link2, Bell, X, Eye, Pencil, List, ListOrdered, ALargeSmall, ListChecks } from "lucide-react";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 
 interface ItemDialogProps {
@@ -49,7 +49,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
   const [pinned, setPinned] = useState(false);
   const [folderId, setFolderId] = useState<string | undefined>(undefined);
   const [previewing, setPreviewing] = useState(false);
-  const [activeListMode, setActiveListMode] = useState<"bullet" | "numbered" | "lettered" | null>(null);
+  const [activeListMode, setActiveListMode] = useState<"bullet" | "numbered" | "lettered" | "checklist" | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleContentKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -65,7 +65,8 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
     const lineStart = text.lastIndexOf("\n", start - 1) + 1;
     const line = text.slice(lineStart, start);
 
-    // Detect list prefix on current line
+    // Detect list prefix on current line — check task list FIRST since "- [ ] x" also matches "- " bullet
+    const taskMatch = line.match(/^(- \[[ xX]\] )(.*)/);
     const bulletMatch = line.match(/^(- )(.*)/);
     const numberedMatch = line.match(/^(\d+)\. (.*)/);
     const letteredMatch = line.match(/^([a-z])\. (.*)/);
@@ -73,7 +74,10 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
     let nextPrefix = "";
     let isEmpty = false;
 
-    if (numberedMatch) {
+    if (taskMatch) {
+      isEmpty = taskMatch[2].trim() === "";
+      nextPrefix = "- [ ] ";
+    } else if (numberedMatch) {
       isEmpty = numberedMatch[2].trim() === "";
       nextPrefix = `${parseInt(numberedMatch[1]) + 1}. `;
     } else if (letteredMatch) {
@@ -110,7 +114,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
     }
   }, []);
 
-  const insertListPrefix = useCallback((mode: "bullet" | "numbered" | "lettered") => {
+  const insertListPrefix = useCallback((mode: "bullet" | "numbered" | "lettered" | "checklist") => {
     const ta = textareaRef.current;
     if (!ta) return;
 
@@ -126,9 +130,11 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
     const selectedBlock = text.slice(lineStart, blockEnd);
     const lines = selectedBlock.split("\n");
 
-    // Check if non-empty lines already have this prefix (for toggling off)
+    // Check if non-empty lines already have this prefix (for toggling off).
+    // Checklist must be tested BEFORE bullet since "- [ ] x" also matches /^- /.
     const prefixPatterns = {
-      bullet: /^- /,
+      checklist: /^- \[[ xX]\] /,
+      bullet: /^- (?!\[[ xX]\] )/,
       numbered: /^\d+\. /,
       lettered: /^[a-z]\. /,
     };
@@ -144,10 +150,12 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
       setActiveListMode(null);
     } else {
       // Strip any existing list prefix first, then add new one
-      const stripAll = /^(?:- |\d+\. |[a-z]\. )/;
+      const stripAll = /^(?:- \[[ xX]\] |- |\d+\. |[a-z]\. )/;
       newLines = lines.map((line, i) => {
         const stripped = line.replace(stripAll, "");
         switch (mode) {
+          case "checklist":
+            return `- [ ] ${stripped}`;
           case "bullet":
             return `- ${stripped}`;
           case "numbered":
@@ -239,16 +247,37 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
     onClose();
   };
 
+  const toggleTaskAtIndex = useCallback((index: number) => {
+    let count = 0;
+    const next = content.replace(
+      /^(\s*[-*+]\s+\[)([ xX])(\])/gm,
+      (m, pre, mark, post) => {
+        if (count++ !== index) return m;
+        return pre + (mark === " " ? "x" : " ") + post;
+      },
+    );
+    setContent(next);
+  }, [content]);
+
+  const handleTextareaInput = useCallback(() => {
+    // Keep the active textarea visible above the iOS keyboard as it grows / caret moves.
+    const ta = textareaRef.current;
+    if (!ta) return;
+    requestAnimationFrame(() => {
+      try { ta.scrollIntoView({ block: "nearest" }); } catch {}
+    });
+  }, []);
+
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {editingItem ? "Edit Item" : "New Item"}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-4 pb-[var(--keyboard-height,0px)]">
           {!editingItem && (
             <Tabs value={type} onValueChange={(v) => setType(v as ItemType)}>
               <TabsList className="w-full">
@@ -394,6 +423,17 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
                 <button
                   type="button"
                   onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => insertListPrefix("checklist")}
+                  className={`flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors ${
+                    activeListMode === "checklist" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
+                  title="Checklist (tap circles to tick)"
+                >
+                  <ListChecks className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => insertListPrefix("bullet")}
                   className={`flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors ${
                     activeListMode === "bullet" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -427,8 +467,8 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
               </div>
             )}
             {previewing && type === "note" ? (
-              <div className="min-h-[150px] max-h-[300px] overflow-auto rounded-md border bg-background p-3">
-                <MarkdownRenderer content={content} />
+              <div className="min-h-[150px] max-h-[60dvh] overflow-auto rounded-md border bg-background p-3">
+                <MarkdownRenderer content={content} onToggleTask={toggleTaskAtIndex} />
               </div>
             ) : (
               <Textarea
@@ -441,6 +481,8 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, editingItem, folde
                 }
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
+                onInput={type === "note" ? handleTextareaInput : undefined}
+                onFocus={type === "note" ? handleTextareaInput : undefined}
                 onKeyDown={type === "note" ? handleContentKeyDown : undefined}
                 rows={type === "note" ? 6 : 3}
               />

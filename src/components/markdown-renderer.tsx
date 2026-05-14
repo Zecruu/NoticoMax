@@ -10,9 +10,14 @@ import "highlight.js/styles/github-dark.css";
 interface MarkdownRendererProps {
   content: string;
   compact?: boolean;
+  onToggleTask?: (index: number) => void;
 }
 
-export function MarkdownRenderer({ content, compact }: MarkdownRendererProps) {
+export function MarkdownRenderer({ content, compact, onToggleTask }: MarkdownRendererProps) {
+  // Counter resets each render; remark-gfm renders task checkboxes in source order,
+  // so the Nth <input type="checkbox"> maps to the Nth `- [ ]` in the source text.
+  let taskIndex = 0;
+
   return (
     <div className={compact ? "markdown-compact" : "markdown-full"}>
       <ReactMarkdown
@@ -21,6 +26,24 @@ export function MarkdownRenderer({ content, compact }: MarkdownRendererProps) {
         components={{
           pre({ children }) {
             return <CodeBlockWrapper>{children}</CodeBlockWrapper>;
+          },
+          input(props: ComponentPropsWithoutRef<"input">) {
+            if (props.type === "checkbox") {
+              const idx = taskIndex++;
+              return (
+                <input
+                  {...props}
+                  disabled={!onToggleTask}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onToggleTask) onToggleTask(idx);
+                  }}
+                  onChange={() => {}}
+                  className="mr-2 h-4 w-4 cursor-pointer align-middle accent-primary"
+                />
+              );
+            }
+            return <input {...props} />;
           },
           code(props: ComponentPropsWithoutRef<"code">) {
             const { children, className, ...rest } = props;
