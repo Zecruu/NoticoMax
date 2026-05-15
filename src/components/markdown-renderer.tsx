@@ -42,17 +42,17 @@ export function MarkdownRenderer({ content, compact, onToggleTask }: MarkdownRen
                     if (onToggleTask) onToggleTask(idx);
                   }}
                   className={
-                    "task-checkbox inline-flex items-center justify-center align-middle mr-2 -mt-0.5 " +
-                    (interactive ? "cursor-pointer" : "cursor-default") +
-                    " transition-colors"
+                    "task-checkbox inline-flex items-center justify-center align-middle mr-2 -mt-0.5 p-0.5 -m-0.5 " +
+                    (interactive ? "cursor-pointer active:scale-95" : "cursor-default") +
+                    " transition-transform"
                   }
                   aria-label={checked ? "Mark incomplete" : "Mark complete"}
                   aria-pressed={checked}
                 >
                   {checked ? (
-                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    <CheckCircle2 className="h-6 w-6 text-green-500" />
                   ) : (
-                    <Circle className="h-4 w-4 text-muted-foreground" />
+                    <Circle className="h-6 w-6 text-muted-foreground" />
                   )}
                 </button>
               );
