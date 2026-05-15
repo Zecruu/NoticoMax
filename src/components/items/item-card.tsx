@@ -76,11 +76,10 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
   return (
     <Card
       className={cn(
-        "group relative transition-all hover:shadow-md cursor-pointer",
+        "group relative transition-all hover:shadow-md",
         item.pinned && "ring-1 ring-primary/20",
         isOverdue && "ring-1 ring-destructive/30"
       )}
-      onClick={() => onEdit(item)}
     >
       <CardHeader className="flex flex-row items-start gap-3 space-y-0 pb-2">
         <div className="flex-1 min-w-0">
@@ -130,6 +129,19 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
           <Button
             variant="ghost"
             size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit(item);
+            }}
+            aria-label="Edit"
+            title="Edit"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             className="h-7 w-7 text-muted-foreground hover:text-destructive"
             onClick={(e) => {
               e.stopPropagation();
@@ -147,7 +159,7 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
             >
               <MoreVertical className="h-3.5 w-3.5" />
             </Button>
