@@ -61,18 +61,46 @@ function parseEnv(filePath) {
   return vars;
 }
 
+// Every target whose .appex / .app ends up inside the final .ipa must carry
+// matching CFBundleVersion strings — App Store Connect rejects extensions
+// whose build number doesn't match the parent app. As of 2.5.2 that's the App
+// target (Debug + Release) and the ShareExtension target (Debug + Release), so
+// we expect 4 occurrences in pbxproj. If a future iOS target gets added (e.g.
+// a watchOS app or another extension) without setting CURRENT_PROJECT_VERSION,
+// this count will diverge and the warning here is the early signal.
+const EXPECTED_VERSION_OCCURRENCES = 4;
+
 function bumpBuildNumber() {
   // Read CURRENT_PROJECT_VERSION from pbxproj, increment, write back.
   // Done in plain text since we want to avoid a Ruby dep here.
   const pbx = path.join(IOS_PROJECT, "project.pbxproj");
   let content = fs.readFileSync(pbx, "utf-8");
-  const match = content.match(/CURRENT_PROJECT_VERSION = (\d+);/);
-  if (!match) throw new Error("CURRENT_PROJECT_VERSION not found in pbxproj");
-  const current = parseInt(match[1], 10);
+  const matches = content.match(/CURRENT_PROJECT_VERSION = (\d+);/g) || [];
+  if (matches.length === 0) throw new Error("CURRENT_PROJECT_VERSION not found in pbxproj");
+
+  // Read the lowest current value as the source of truth (handles the edge
+  // case where targets drifted apart — we re-sync them all to current+1).
+  const values = matches.map((m) => parseInt(m.match(/(\d+)/)[1], 10));
+  const current = Math.min(...values);
   const next = current + 1;
   content = content.replace(/CURRENT_PROJECT_VERSION = \d+;/g, `CURRENT_PROJECT_VERSION = ${next};`);
   fs.writeFileSync(pbx, content);
-  console.log(`build-ios: bumped CURRENT_PROJECT_VERSION ${current} -> ${next}`);
+
+  console.log(`build-ios: bumped CURRENT_PROJECT_VERSION ${current} -> ${next} (${matches.length} occurrences)`);
+  if (matches.length !== EXPECTED_VERSION_OCCURRENCES) {
+    console.warn(
+      `build-ios: WARNING — expected ${EXPECTED_VERSION_OCCURRENCES} CURRENT_PROJECT_VERSION lines in pbxproj, found ${matches.length}.`,
+    );
+    console.warn(
+      `build-ios:   A new target was likely added without CURRENT_PROJECT_VERSION, or one was removed.`,
+    );
+    console.warn(
+      `build-ios:   Apple will reject the upload if extension build numbers don't match the parent app.`,
+    );
+    console.warn(
+      `build-ios:   Audit pbxproj build configs and update EXPECTED_VERSION_OCCURRENCES in scripts/build-ios.js once resolved.`,
+    );
+  }
   return next;
 }
 
