@@ -163,6 +163,15 @@ export default function Dashboard() {
     [editItem]
   );
 
+  // Silent content update (no toast) — used when tapping checklist circles
+  // in the card view. A toast every tap would be annoying for a 10-item list.
+  const handleContentUpdate = useCallback(
+    async (clientId: string, content: string) => {
+      await editItem(clientId, { content });
+    },
+    [editItem]
+  );
+
   const handleDelete = useCallback(
     async (clientId: string) => {
       await removeItem(clientId);
@@ -308,6 +317,7 @@ export default function Dashboard() {
               onDelete={handleDelete}
               onTogglePin={handleTogglePin}
               onToggleComplete={handleToggleComplete}
+              onUpdateContent={handleContentUpdate}
               activeFilter={activeFilter}
               activeFolder={activeFolder}
               onCreateWithType={handleCreateWithType}

@@ -38,6 +38,7 @@ interface ItemCardProps {
   onDelete: (clientId: string) => void;
   onTogglePin: (clientId: string, pinned: boolean) => void;
   onToggleComplete?: (clientId: string, completed: boolean) => void;
+  onUpdateContent?: (clientId: string, content: string) => void;
 }
 
 const typeConfig: Record<string, { icon: typeof FileText; label: string; color: string }> = {
@@ -48,9 +49,23 @@ const typeConfig: Record<string, { icon: typeof FileText; label: string; color: 
   credential: { icon: Key, label: "Login", color: "bg-orange-500/10 text-orange-600 dark:text-orange-400" },
 };
 
-export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggleComplete }: ItemCardProps) {
+export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggleComplete, onUpdateContent }: ItemCardProps) {
   const config = typeConfig[item.type];
   const TypeIcon = config.icon;
+
+  const handleToggleTask = onUpdateContent
+    ? (index: number) => {
+        let count = 0;
+        const next = item.content.replace(
+          /^(\s*[-*+]\s+\[)([ xX])(\])/gm,
+          (m, pre, mark, post) => {
+            if (count++ !== index) return m;
+            return pre + (mark === " " ? "x" : " ") + post;
+          },
+        );
+        if (next !== item.content) onUpdateContent(item.clientId, next);
+      }
+    : undefined;
 
   const isOverdue =
     item.type === "reminder" &&
@@ -228,8 +243,13 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
         )}
 
         {item.content && (
-          <div className="text-xs text-muted-foreground line-clamp-3 overflow-hidden">
-            <MarkdownRenderer content={item.content} compact />
+          <div
+            className={cn(
+              "text-xs text-muted-foreground overflow-hidden",
+              !/^\s*[-*+]\s+\[[ xX]\]/m.test(item.content) && "line-clamp-3",
+            )}
+          >
+            <MarkdownRenderer content={item.content} compact onToggleTask={handleToggleTask} />
           </div>
         )}
 

@@ -15,6 +15,7 @@ interface ItemListProps {
   onDelete: (clientId: string) => void;
   onTogglePin: (clientId: string, pinned: boolean) => void;
   onToggleComplete: (clientId: string, completed: boolean) => void;
+  onUpdateContent?: (clientId: string, content: string) => void;
   activeFilter: string;
   activeFolder: string | null;
   onCreateWithType?: (type: "note" | "url" | "reminder") => void;
@@ -50,6 +51,7 @@ export function ItemList({
   onDelete,
   onTogglePin,
   onToggleComplete,
+  onUpdateContent,
   activeFilter,
   activeFolder,
   onCreateWithType,
@@ -182,6 +184,7 @@ export function ItemList({
                     onDelete={onDelete}
                     onTogglePin={onTogglePin}
                     onToggleComplete={onToggleComplete}
+                    onUpdateContent={onUpdateContent}
                   />
                 ))}
               </div>
@@ -199,6 +202,7 @@ export function ItemList({
               onDelete={onDelete}
               onTogglePin={onTogglePin}
               onToggleComplete={onToggleComplete}
+              onUpdateContent={onUpdateContent}
             />
           ))}
         </div>

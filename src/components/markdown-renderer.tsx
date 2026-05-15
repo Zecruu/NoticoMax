@@ -3,7 +3,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { Copy, Check } from "lucide-react";
+import { Copy, Check, Circle, CheckCircle2 } from "lucide-react";
 import { useState, type ComponentPropsWithoutRef } from "react";
 import "highlight.js/styles/github-dark.css";
 
@@ -30,17 +30,31 @@ export function MarkdownRenderer({ content, compact, onToggleTask }: MarkdownRen
           input(props: ComponentPropsWithoutRef<"input">) {
             if (props.type === "checkbox") {
               const idx = taskIndex++;
+              const checked = !!props.checked;
+              const interactive = !!onToggleTask;
               return (
-                <input
-                  {...props}
-                  disabled={!onToggleTask}
+                <button
+                  type="button"
+                  disabled={!interactive}
                   onClick={(e) => {
                     e.stopPropagation();
+                    e.preventDefault();
                     if (onToggleTask) onToggleTask(idx);
                   }}
-                  onChange={() => {}}
-                  className="mr-2 h-4 w-4 cursor-pointer align-middle accent-primary"
-                />
+                  className={
+                    "task-checkbox inline-flex items-center justify-center align-middle mr-2 -mt-0.5 " +
+                    (interactive ? "cursor-pointer" : "cursor-default") +
+                    " transition-colors"
+                  }
+                  aria-label={checked ? "Mark incomplete" : "Mark complete"}
+                  aria-pressed={checked}
+                >
+                  {checked ? (
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  ) : (
+                    <Circle className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </button>
               );
             }
             return <input {...props} />;
