@@ -174,7 +174,7 @@ export function ItemList({
                 </span>
                 <div className="flex-1 h-px bg-border" />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="flex flex-col gap-1.5">
                 {group.items.map((item) => (
                   <ItemCard
                     key={item.clientId}
@@ -192,7 +192,7 @@ export function ItemList({
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="flex flex-col gap-1.5">
           {items.map((item) => (
             <ItemCard
               key={item.clientId}
