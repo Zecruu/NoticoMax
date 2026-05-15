@@ -33,13 +33,31 @@ export async function getCurrentCoords(): Promise<Coordinates> {
   });
 }
 
+import { isIOS } from "./platform";
+
 /**
- * Universal "open in maps" URL. Google Maps' web URL works everywhere:
- * - iOS Safari prompts to open in Google Maps app or Apple Maps
- * - Android opens Google Maps natively
- * - Desktop opens maps.google.com
+ * "Open in maps" URL. On Apple devices we use the maps.apple.com universal
+ * link, which jumps straight into the Apple Maps app on iOS / iPadOS /
+ * macOS and falls back to the maps.apple.com web view on anything else.
+ * Everywhere else we use Google Maps (Android opens the app natively;
+ * desktop opens maps.google.com).
  */
+function isAppleDevice(): boolean {
+  if (isIOS()) return true; // Capacitor iOS app
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  // iPhone / iPad / iPod web (Safari, in-app browsers)
+  if (/iPad|iPhone|iPod/.test(ua)) return true;
+  // iPadOS reports as MacIntel + touch; macOS Safari proper has no touch points.
+  // Either way, the universal link works on macOS too — open Apple Maps app.
+  if (typeof navigator.platform === "string" && navigator.platform.startsWith("Mac")) return true;
+  return false;
+}
+
 export function mapsUrl(lat: number, lng: number): string {
+  if (isAppleDevice()) {
+    return `https://maps.apple.com/?q=${lat},${lng}`;
+  }
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 }
 
