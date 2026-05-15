@@ -9,7 +9,7 @@ import {
   Plus,
   LayoutDashboard,
   FolderOpen,
-  BookOpen,
+  Wallet,
   MoreHorizontal,
   Pencil,
   Palette,
@@ -53,7 +53,7 @@ const navItems = [
   { label: "Notes", value: "note", icon: FileText },
   { label: "New", value: "new", icon: Plus },
   { label: "URLs", value: "url", icon: Link2 },
-  { label: "Study", value: "study", icon: BookOpen },
+  { label: "Budget", value: "budget", icon: Wallet },
 ];
 
 interface MobileNavProps {
@@ -148,7 +148,10 @@ export function MobileNav({
         {navItems.map((item) => {
           const Icon = item.icon;
           const isNew = item.value === "new";
-          const isStudy = item.value === "study";
+          // Any nav entry that maps to a top-level view (not a type filter)
+          // routes through onViewChange instead of onFilterChange.
+          const VIEW_NAV_VALUES = new Set(["budget", "study", "goals", "locations", "calendar"]);
+          const isView = VIEW_NAV_VALUES.has(item.value);
 
           return (
             <button
@@ -156,9 +159,9 @@ export function MobileNav({
               onClick={() => {
                 if (isNew) {
                   onCreateNew();
-                } else if (isStudy) {
+                } else if (isView) {
                   onFolderChange(null);
-                  onViewChange?.("study");
+                  onViewChange?.(item.value);
                 } else {
                   onFolderChange(null);
                   onFilterChange(item.value);
@@ -169,9 +172,9 @@ export function MobileNav({
                 "flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] transition-colors",
                 isNew
                   ? "text-primary"
-                  : isStudy && activeView === "study"
+                  : isView && activeView === item.value
                     ? "text-primary"
-                    : !isNew && !isStudy && !activeFolder && activeFilter === item.value && activeView !== "study"
+                    : !isNew && !isView && !activeFolder && activeFilter === item.value && activeView === "list"
                       ? "text-primary"
                       : "text-muted-foreground"
               )}
