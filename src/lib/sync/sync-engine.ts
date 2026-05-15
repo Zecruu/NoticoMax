@@ -4,6 +4,8 @@ import db, {
   type LocalLocation,
   type LocalBudgetCategory,
   type LocalBudgetTransaction,
+  type LocalGoal,
+  type GoalScope,
 } from "@/lib/db/indexed-db";
 import { v4 as uuidv4 } from "uuid";
 import {
@@ -302,6 +304,56 @@ function supabaseToLocalBudgetTransaction(row: SupabaseBudgetTransaction): Local
     amount: Number(row.amount),
     note: row.note ?? undefined,
     date: row.date,
+    deviceId: row.device_id ?? undefined,
+    deleted: row.deleted ?? false,
+    deletedAt: row.deleted_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+// ─── GOAL (single table, scope-keyed by period) ───
+
+interface SupabaseGoal {
+  client_id: string;
+  user_id: string;
+  title: string;
+  scope: "today" | "month" | "year";
+  period_key: string;
+  completed: boolean;
+  completed_at: string | null;
+  device_id: string | null;
+  deleted: boolean;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function localToSupabaseGoal(g: LocalGoal, userId: string): Partial<SupabaseGoal> {
+  return {
+    client_id: g.clientId,
+    user_id: userId,
+    title: g.title,
+    scope: g.scope,
+    period_key: g.periodKey,
+    completed: g.completed ?? false,
+    completed_at: g.completedAt ?? null,
+    device_id: g.deviceId ?? null,
+    deleted: g.deleted ?? false,
+    deleted_at: g.deletedAt ?? null,
+    created_at: g.createdAt,
+    updated_at: g.updatedAt,
+  };
+}
+
+function supabaseToLocalGoal(row: SupabaseGoal): LocalGoal {
+  return {
+    clientId: row.client_id,
+    title: row.title,
+    scope: row.scope as GoalScope,
+    periodKey: row.period_key,
+    completed: row.completed ?? false,
+    completedAt: row.completed_at ?? undefined,
     deviceId: row.device_id ?? undefined,
     deleted: row.deleted ?? false,
     deletedAt: row.deleted_at ?? undefined,
@@ -821,6 +873,88 @@ export async function setMonthlyIncome(amount: number): Promise<void> {
   triggerSync();
 }
 
+// ─── GOAL OPERATIONS ───
+
+export async function createGoal(
+  input: { title: string; scope: GoalScope; periodKey: string } & { clientId?: string; createdAt?: string; completed?: boolean; completedAt?: string },
+): Promise<LocalGoal> {
+  const now = new Date().toISOString();
+  const clientId = input.clientId ?? uuidv4();
+  const deviceId = getDeviceId();
+
+  const local: LocalGoal = {
+    clientId,
+    title: input.title,
+    scope: input.scope,
+    periodKey: input.periodKey,
+    completed: input.completed ?? false,
+    completedAt: input.completedAt,
+    deviceId,
+    deleted: false,
+    createdAt: input.createdAt ?? now,
+    updatedAt: now,
+  };
+
+  saveDeviceNameMapping(deviceId, getDeviceName());
+  await db.goals.add(local);
+
+  await db.syncQueue.add({
+    action: "create",
+    entityType: "goal",
+    clientId,
+    data: local as unknown as Record<string, unknown>,
+    timestamp: now,
+  });
+
+  triggerSync();
+  return local;
+}
+
+export async function toggleGoal(clientId: string, currentlyCompleted: boolean): Promise<void> {
+  const now = new Date().toISOString();
+  const nextCompleted = !currentlyCompleted;
+  const nextCompletedAt = nextCompleted ? now : undefined;
+
+  await db.goals.where("clientId").equals(clientId).modify((g) => {
+    g.completed = nextCompleted;
+    g.completedAt = nextCompletedAt;
+    g.updatedAt = now;
+  });
+
+  await db.syncQueue.add({
+    action: "update",
+    entityType: "goal",
+    clientId,
+    data: {
+      completed: nextCompleted,
+      completed_at: nextCompletedAt ?? null,
+      updated_at: now,
+    },
+    timestamp: now,
+  });
+
+  triggerSync();
+}
+
+export async function deleteGoal(clientId: string): Promise<void> {
+  const now = new Date().toISOString();
+
+  await db.goals.where("clientId").equals(clientId).modify((g) => {
+    g.deleted = true;
+    g.deletedAt = now;
+    g.updatedAt = now;
+  });
+
+  await db.syncQueue.add({
+    action: "delete",
+    entityType: "goal",
+    clientId,
+    timestamp: now,
+  });
+
+  triggerSync();
+}
+
 // ─── SYNC TO SUPABASE ───
 
 let syncInProgress = false;
@@ -849,6 +983,7 @@ export async function performSync(): Promise<boolean> {
     const locationOps = new Map<string, (typeof queue)[0]>();
     const budgetCategoryOps = new Map<string, (typeof queue)[0]>();
     const budgetTransactionOps = new Map<string, (typeof queue)[0]>();
+    const goalOps = new Map<string, (typeof queue)[0]>();
     let budgetSettingsOp: (typeof queue)[0] | null = null;
     for (const entry of queue) {
       if (entry.entityType === "folder") folderOps.set(entry.clientId, entry);
@@ -856,6 +991,7 @@ export async function performSync(): Promise<boolean> {
       else if (entry.entityType === "budget_category") budgetCategoryOps.set(entry.clientId, entry);
       else if (entry.entityType === "budget_transaction") budgetTransactionOps.set(entry.clientId, entry);
       else if (entry.entityType === "budget_settings") budgetSettingsOp = entry;
+      else if (entry.entityType === "goal") goalOps.set(entry.clientId, entry);
       else itemOps.set(entry.clientId, entry);
     }
 
@@ -957,6 +1093,22 @@ export async function performSync(): Promise<boolean> {
             { user_id: userId, monthly_income: incomeValue, updated_at: updatedAt },
             { onConflict: "user_id" },
           );
+      }
+    }
+
+    for (const op of goalOps.values()) {
+      if (op.action === "delete") {
+        await supabase
+          .from("goals")
+          .update({ deleted: true, deleted_at: op.timestamp, updated_at: op.timestamp })
+          .eq("client_id", op.clientId);
+      } else {
+        const goal = await db.goals.where("clientId").equals(op.clientId).first();
+        if (goal) {
+          await supabase
+            .from("goals")
+            .upsert(localToSupabaseGoal(goal, userId), { onConflict: "client_id" });
+        }
       }
     }
 
@@ -1095,6 +1247,26 @@ async function pullChanges(userId: string): Promise<void> {
       .count();
     if (pending === 0) {
       localStorage.setItem(MONTHLY_INCOME_KEY, String(Number(settings.monthly_income) || 0));
+    }
+  }
+
+  let goalsQuery = supabase.from("goals").select("*").eq("user_id", userId);
+  if (lastSync) goalsQuery = goalsQuery.gt("updated_at", lastSync);
+  const { data: goals } = await goalsQuery;
+  if (goals) {
+    for (const row of goals as SupabaseGoal[]) {
+      const mapped = supabaseToLocalGoal(row);
+      const existing = await db.goals.where("clientId").equals(mapped.clientId).first();
+      if (existing) {
+        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
+        if (hasPending === 0) {
+          await db.goals.where("clientId").equals(mapped.clientId).modify((g) => {
+            Object.assign(g, mapped);
+          });
+        }
+      } else {
+        await db.goals.add(mapped);
+      }
     }
   }
 }
@@ -1262,6 +1434,27 @@ async function setupRealtime() {
         const pending = await db.syncQueue.where("entityType").equals("budget_settings").count();
         if (pending === 0 && typeof window !== "undefined") {
           localStorage.setItem(MONTHLY_INCOME_KEY, String(Number(row.monthly_income) || 0));
+        }
+        if (onSyncComplete) onSyncComplete();
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "goals", filter: `user_id=eq.${userId}` },
+      async (payload: { new: unknown; old: unknown }) => {
+        const row = (payload.new ?? payload.old) as SupabaseGoal | undefined;
+        if (!row) return;
+        const mapped = supabaseToLocalGoal(row);
+        const existing = await db.goals.where("clientId").equals(mapped.clientId).first();
+        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
+        if (hasPending === 0) {
+          if (existing) {
+            await db.goals.where("clientId").equals(mapped.clientId).modify((g) => {
+              Object.assign(g, mapped);
+            });
+          } else {
+            await db.goals.add(mapped);
+          }
         }
         if (onSyncComplete) onSyncComplete();
       }

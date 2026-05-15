@@ -117,12 +117,16 @@ export type GoalScope = "today" | "month" | "year";
 export interface LocalGoal {
   id?: number;
   clientId: string;
+  serverId?: string;
   title: string;
   scope: GoalScope;
   /** YYYY-MM-DD (today), YYYY-MM (month), YYYY (year) — the period this goal targets. */
   periodKey: string;
   completed: boolean;
   completedAt?: string;
+  deviceId?: string;
+  deleted: boolean;
+  deletedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -149,7 +153,7 @@ export interface LocalLocation {
 export interface SyncQueueEntry {
   id?: number;
   action: "create" | "update" | "delete";
-  entityType: "item" | "folder" | "location" | "budget_category" | "budget_transaction" | "budget_settings";
+  entityType: "item" | "folder" | "location" | "budget_category" | "budget_transaction" | "budget_settings" | "goal";
   clientId: string;
   data?: Record<string, unknown>;
   timestamp: string;
@@ -260,6 +264,27 @@ class NoticoDatabase extends Dexie {
         });
         await tx.table("budgetCategories").toCollection().modify((c: LocalBudgetCategory) => {
           if (c.deleted === undefined) c.deleted = false;
+        });
+      });
+
+    // v10 — goals become sync-aware. Adds serverId, deviceId, deleted, deletedAt;
+    // existing local goals get backfilled with deleted=false so they survive the
+    // schema bump.
+    this.version(10)
+      .stores({
+        items: "++id, clientId, serverId, type, title, updatedAt, pinned, deleted, folderId, deviceId",
+        folders: "++id, clientId, serverId, name, deleted",
+        studySets: "++id, clientId, name, deleted",
+        quizzes: "++id, clientId, name, deleted",
+        budgetCategories: "++id, clientId, serverId, name, updatedAt, deleted, deviceId",
+        budgetTransactions: "++id, clientId, serverId, categoryId, date, updatedAt, deleted, deviceId",
+        goals: "++id, clientId, serverId, scope, periodKey, completed, updatedAt, deleted, deviceId",
+        locations: "++id, clientId, serverId, name, updatedAt, pinned, deleted, deviceId",
+        syncQueue: "++id, clientId, action, entityType, timestamp",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("goals").toCollection().modify((g: LocalGoal) => {
+          if (g.deleted === undefined) g.deleted = false;
         });
       });
   }

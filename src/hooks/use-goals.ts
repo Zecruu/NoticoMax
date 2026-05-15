@@ -3,6 +3,11 @@
 import { useCallback } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import db, { type LocalGoal, type GoalScope } from "@/lib/db/indexed-db";
+import {
+  createGoal as createGoalSynced,
+  toggleGoal as toggleGoalSynced,
+  deleteGoal as deleteGoalSynced,
+} from "@/lib/sync/sync-engine";
 
 export function getPeriodKey(scope: GoalScope, d: Date = new Date()): string {
   const y = d.getFullYear();
@@ -31,38 +36,27 @@ export function formatPeriodKey(scope: GoalScope, periodKey: string): string {
 
 export function useGoals() {
   const goals = useLiveQuery(
-    () => db.goals.toArray().then((rows) => rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt))),
+    () => db.goals
+      .toArray()
+      .then((rows) => rows.filter((g) => !g.deleted).sort((a, b) => b.createdAt.localeCompare(a.createdAt))),
     [],
     [] as LocalGoal[],
   );
 
   const addGoal = useCallback(async (input: { title: string; scope: GoalScope }) => {
-    const now = new Date().toISOString();
-    const goal: LocalGoal = {
-      clientId: crypto.randomUUID(),
+    await createGoalSynced({
       title: input.title,
       scope: input.scope,
       periodKey: getPeriodKey(input.scope),
-      completed: false,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await db.goals.add(goal);
+    });
   }, []);
 
   const toggleGoal = useCallback(async (clientId: string, completed: boolean) => {
-    const now = new Date().toISOString();
-    await db.goals
-      .where("clientId").equals(clientId)
-      .modify({
-        completed: !completed,
-        completedAt: !completed ? now : undefined,
-        updatedAt: now,
-      });
+    await toggleGoalSynced(clientId, completed);
   }, []);
 
   const deleteGoal = useCallback(async (clientId: string) => {
-    await db.goals.where("clientId").equals(clientId).delete();
+    await deleteGoalSynced(clientId);
   }, []);
 
   return {
