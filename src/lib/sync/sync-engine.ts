@@ -4,6 +4,7 @@ import db, {
   type LocalLocation,
   type LocalBudgetCategory,
   type LocalBudgetTransaction,
+  type LocalBudgetCategoryOverride,
   type LocalGoal,
   type GoalScope,
 } from "@/lib/db/indexed-db";
@@ -304,6 +305,53 @@ function supabaseToLocalBudgetTransaction(row: SupabaseBudgetTransaction): Local
     amount: Number(row.amount),
     note: row.note ?? undefined,
     date: row.date,
+    deviceId: row.device_id ?? undefined,
+    deleted: row.deleted ?? false,
+    deletedAt: row.deleted_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+// ─── BUDGET CATEGORY OVERRIDES (per-month limit overrides) ───
+
+interface SupabaseBudgetCategoryOverride {
+  client_id: string;
+  user_id: string;
+  category_id: string;
+  month_key: string;
+  monthly_limit: number;
+  device_id: string | null;
+  deleted: boolean;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function localToSupabaseBudgetCategoryOverride(
+  o: LocalBudgetCategoryOverride,
+  userId: string,
+): Partial<SupabaseBudgetCategoryOverride> {
+  return {
+    client_id: o.clientId,
+    user_id: userId,
+    category_id: o.categoryId,
+    month_key: o.monthKey,
+    monthly_limit: o.monthlyLimit,
+    device_id: o.deviceId ?? null,
+    deleted: o.deleted ?? false,
+    deleted_at: o.deletedAt ?? null,
+    created_at: o.createdAt,
+    updated_at: o.updatedAt,
+  };
+}
+
+function supabaseToLocalBudgetCategoryOverride(row: SupabaseBudgetCategoryOverride): LocalBudgetCategoryOverride {
+  return {
+    clientId: row.client_id,
+    categoryId: row.category_id,
+    monthKey: row.month_key,
+    monthlyLimit: Number(row.monthly_limit),
     deviceId: row.device_id ?? undefined,
     deleted: row.deleted ?? false,
     deletedAt: row.deleted_at ?? undefined,
@@ -873,6 +921,83 @@ export async function setMonthlyIncome(amount: number): Promise<void> {
   triggerSync();
 }
 
+// Set the per-month limit override for a category. Upserts by
+// (categoryId, monthKey); passing null/undefined for `amount` tombstones
+// any existing override so the category falls back to its default limit.
+export async function setBudgetCategoryOverride(
+  categoryId: string,
+  monthKey: string,
+  amount: number | null,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const existing = await db.budgetCategoryOverrides
+    .where("[categoryId+monthKey]")
+    .equals([categoryId, monthKey])
+    .first();
+
+  if (amount == null || amount === 0) {
+    // Clear: tombstone if it exists, otherwise nothing to do.
+    if (!existing || existing.deleted) return;
+    await db.budgetCategoryOverrides
+      .where("clientId").equals(existing.clientId)
+      .modify((o) => {
+        o.deleted = true;
+        o.deletedAt = now;
+        o.updatedAt = now;
+      });
+    await db.syncQueue.add({
+      action: "delete",
+      entityType: "budget_category_override",
+      clientId: existing.clientId,
+      timestamp: now,
+    });
+    triggerSync();
+    return;
+  }
+
+  const deviceId = getDeviceId();
+  saveDeviceNameMapping(deviceId, getDeviceName());
+
+  if (existing) {
+    await db.budgetCategoryOverrides
+      .where("clientId").equals(existing.clientId)
+      .modify((o) => {
+        o.monthlyLimit = amount;
+        o.deleted = false;
+        o.deletedAt = undefined;
+        o.deviceId = deviceId;
+        o.updatedAt = now;
+      });
+    await db.syncQueue.add({
+      action: "update",
+      entityType: "budget_category_override",
+      clientId: existing.clientId,
+      data: { monthly_limit: amount, deleted: false, updated_at: now },
+      timestamp: now,
+    });
+  } else {
+    const local: LocalBudgetCategoryOverride = {
+      clientId: uuidv4(),
+      categoryId,
+      monthKey,
+      monthlyLimit: amount,
+      deviceId,
+      deleted: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await db.budgetCategoryOverrides.add(local);
+    await db.syncQueue.add({
+      action: "create",
+      entityType: "budget_category_override",
+      clientId: local.clientId,
+      data: local as unknown as Record<string, unknown>,
+      timestamp: now,
+    });
+  }
+  triggerSync();
+}
+
 // ─── GOAL OPERATIONS ───
 
 export async function createGoal(
@@ -983,6 +1108,7 @@ export async function performSync(): Promise<boolean> {
     const locationOps = new Map<string, (typeof queue)[0]>();
     const budgetCategoryOps = new Map<string, (typeof queue)[0]>();
     const budgetTransactionOps = new Map<string, (typeof queue)[0]>();
+    const budgetOverrideOps = new Map<string, (typeof queue)[0]>();
     const goalOps = new Map<string, (typeof queue)[0]>();
     let budgetSettingsOp: (typeof queue)[0] | null = null;
     for (const entry of queue) {
@@ -990,6 +1116,7 @@ export async function performSync(): Promise<boolean> {
       else if (entry.entityType === "location") locationOps.set(entry.clientId, entry);
       else if (entry.entityType === "budget_category") budgetCategoryOps.set(entry.clientId, entry);
       else if (entry.entityType === "budget_transaction") budgetTransactionOps.set(entry.clientId, entry);
+      else if (entry.entityType === "budget_category_override") budgetOverrideOps.set(entry.clientId, entry);
       else if (entry.entityType === "budget_settings") budgetSettingsOp = entry;
       else if (entry.entityType === "goal") goalOps.set(entry.clientId, entry);
       else itemOps.set(entry.clientId, entry);
@@ -1078,6 +1205,22 @@ export async function performSync(): Promise<boolean> {
           await supabase
             .from("budget_transactions")
             .upsert(localToSupabaseBudgetTransaction(txn, userId), { onConflict: "client_id" });
+        }
+      }
+    }
+
+    for (const op of budgetOverrideOps.values()) {
+      if (op.action === "delete") {
+        await supabase
+          .from("budget_category_overrides")
+          .update({ deleted: true, deleted_at: op.timestamp, updated_at: op.timestamp })
+          .eq("client_id", op.clientId);
+      } else {
+        const ov = await db.budgetCategoryOverrides.where("clientId").equals(op.clientId).first();
+        if (ov) {
+          await supabase
+            .from("budget_category_overrides")
+            .upsert(localToSupabaseBudgetCategoryOverride(ov, userId), { onConflict: "client_id" });
         }
       }
     }
@@ -1229,6 +1372,26 @@ async function pullChanges(userId: string): Promise<void> {
         }
       } else {
         await db.budgetTransactions.add(mapped);
+      }
+    }
+  }
+
+  let bovQuery = supabase.from("budget_category_overrides").select("*").eq("user_id", userId);
+  if (lastSync) bovQuery = bovQuery.gt("updated_at", lastSync);
+  const { data: budgetOverrides } = await bovQuery;
+  if (budgetOverrides) {
+    for (const row of budgetOverrides as SupabaseBudgetCategoryOverride[]) {
+      const mapped = supabaseToLocalBudgetCategoryOverride(row);
+      const existing = await db.budgetCategoryOverrides.where("clientId").equals(mapped.clientId).first();
+      if (existing) {
+        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
+        if (hasPending === 0) {
+          await db.budgetCategoryOverrides.where("clientId").equals(mapped.clientId).modify((o) => {
+            Object.assign(o, mapped);
+          });
+        }
+      } else {
+        await db.budgetCategoryOverrides.add(mapped);
       }
     }
   }
@@ -1420,6 +1583,27 @@ async function setupRealtime() {
             });
           } else {
             await db.budgetTransactions.add(mapped);
+          }
+        }
+        if (onSyncComplete) onSyncComplete();
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "budget_category_overrides", filter: `user_id=eq.${userId}` },
+      async (payload: { new: unknown; old: unknown }) => {
+        const row = (payload.new ?? payload.old) as SupabaseBudgetCategoryOverride | undefined;
+        if (!row) return;
+        const mapped = supabaseToLocalBudgetCategoryOverride(row);
+        const existing = await db.budgetCategoryOverrides.where("clientId").equals(mapped.clientId).first();
+        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
+        if (hasPending === 0) {
+          if (existing) {
+            await db.budgetCategoryOverrides.where("clientId").equals(mapped.clientId).modify((o) => {
+              Object.assign(o, mapped);
+            });
+          } else {
+            await db.budgetCategoryOverrides.add(mapped);
           }
         }
         if (onSyncComplete) onSyncComplete();

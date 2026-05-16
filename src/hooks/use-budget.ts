@@ -12,6 +12,7 @@ import {
   createBudgetTransaction,
   deleteBudgetTransaction,
   setMonthlyIncome as setMonthlyIncomeSynced,
+  setBudgetCategoryOverride,
 } from "@/lib/sync/sync-engine";
 
 // Must match the key used by sync-engine so cross-device sync stays consistent.
@@ -44,6 +45,10 @@ export interface BudgetCategoryWithTotals extends LocalBudgetCategory {
   remaining: number;
   percent: number;
   spentThisMonth: number;
+  /** monthlyLimit with any per-month override applied for the viewed month. */
+  effectiveLimit: number;
+  /** True when the viewed month uses a custom limit, not the category default. */
+  hasOverride: boolean;
 }
 
 export interface MonthSummary {
@@ -98,6 +103,23 @@ export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
     [] as LocalBudgetTransaction[],
   );
 
+  // Per-month limit overrides for the viewed month. Re-runs whenever the
+  // viewed month changes (Dexie's useLiveQuery captures viewMonthKey in deps).
+  const overridesForMonth = useLiveQuery(
+    async () => {
+      const all = await db.budgetCategoryOverrides.toArray();
+      const map = new Map<string, number>();
+      for (const o of all) {
+        if (o.deleted) continue;
+        if (o.monthKey !== viewMonthKey) continue;
+        map.set(o.categoryId, o.monthlyLimit);
+      }
+      return map;
+    },
+    [viewMonthKey],
+    new Map<string, number>(),
+  );
+
   const txByCategoryAndMonth = useMemo(() => {
     const map = new Map<string, LocalBudgetTransaction[]>();
     for (const tx of transactions ?? []) {
@@ -112,12 +134,22 @@ export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
   const categoriesWithTotals: BudgetCategoryWithTotals[] = (categories ?? []).map((cat) => {
     const txs = txByCategoryAndMonth.get(`${cat.clientId}|${viewMonthKey}`) ?? [];
     const spent = txs.reduce((sum, t) => sum + t.amount, 0);
-    const remaining = cat.monthlyLimit - spent;
-    const percent = cat.monthlyLimit > 0 ? (spent / cat.monthlyLimit) * 100 : 0;
-    return { ...cat, spentInMonth: spent, spentThisMonth: spent, remaining, percent };
+    const override = overridesForMonth?.get(cat.clientId);
+    const effectiveLimit = typeof override === "number" ? override : cat.monthlyLimit;
+    const remaining = effectiveLimit - spent;
+    const percent = effectiveLimit > 0 ? (spent / effectiveLimit) * 100 : 0;
+    return {
+      ...cat,
+      spentInMonth: spent,
+      spentThisMonth: spent,
+      remaining,
+      percent,
+      effectiveLimit,
+      hasOverride: typeof override === "number",
+    };
   });
 
-  const totalBudgeted = categoriesWithTotals.reduce((s, c) => s + c.monthlyLimit, 0);
+  const totalBudgeted = categoriesWithTotals.reduce((s, c) => s + c.effectiveLimit, 0);
   const totalSpent = categoriesWithTotals.reduce((s, c) => s + c.spentInMonth, 0);
   const unallocated = monthlyIncome - totalBudgeted;
   const incomeRemaining = monthlyIncome - totalSpent;
@@ -229,6 +261,13 @@ export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
     await deleteBudgetTransaction(clientId);
   }, []);
 
+  const setCategoryLimitForMonth = useCallback(
+    async (categoryId: string, amount: number | null) => {
+      await setBudgetCategoryOverride(categoryId, viewMonthKey, amount);
+    },
+    [viewMonthKey],
+  );
+
   return {
     viewMonthKey,
     isCurrentMonth: viewMonthKey === getCurrentMonthKey(),
@@ -249,6 +288,7 @@ export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
     deleteCategory,
     addTransaction,
     deleteTransaction,
+    setCategoryLimitForMonth,
     shiftMonth,
   };
 }

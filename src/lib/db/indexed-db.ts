@@ -112,6 +112,21 @@ export interface LocalBudgetTransaction {
   updatedAt: string;
 }
 
+export interface LocalBudgetCategoryOverride {
+  id?: number;
+  clientId: string;
+  serverId?: string;
+  categoryId: string;
+  /** "YYYY-MM" */
+  monthKey: string;
+  monthlyLimit: number;
+  deviceId?: string;
+  deleted: boolean;
+  deletedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type GoalScope = "today" | "month" | "year";
 
 export interface LocalGoal {
@@ -153,7 +168,7 @@ export interface LocalLocation {
 export interface SyncQueueEntry {
   id?: number;
   action: "create" | "update" | "delete";
-  entityType: "item" | "folder" | "location" | "budget_category" | "budget_transaction" | "budget_settings" | "goal";
+  entityType: "item" | "folder" | "location" | "budget_category" | "budget_transaction" | "budget_settings" | "budget_category_override" | "goal";
   clientId: string;
   data?: Record<string, unknown>;
   timestamp: string;
@@ -166,6 +181,7 @@ class NoticoDatabase extends Dexie {
   quizzes!: EntityTable<LocalQuiz, "id">;
   budgetCategories!: EntityTable<LocalBudgetCategory, "id">;
   budgetTransactions!: EntityTable<LocalBudgetTransaction, "id">;
+  budgetCategoryOverrides!: EntityTable<LocalBudgetCategoryOverride, "id">;
   goals!: EntityTable<LocalGoal, "id">;
   locations!: EntityTable<LocalLocation, "id">;
   syncQueue!: EntityTable<SyncQueueEntry, "id">;
@@ -287,6 +303,20 @@ class NoticoDatabase extends Dexie {
           if (g.deleted === undefined) g.deleted = false;
         });
       });
+
+    // v11 — per-month category limit overrides. Fresh store, no migration.
+    this.version(11).stores({
+      items: "++id, clientId, serverId, type, title, updatedAt, pinned, deleted, folderId, deviceId",
+      folders: "++id, clientId, serverId, name, deleted",
+      studySets: "++id, clientId, name, deleted",
+      quizzes: "++id, clientId, name, deleted",
+      budgetCategories: "++id, clientId, serverId, name, updatedAt, deleted, deviceId",
+      budgetTransactions: "++id, clientId, serverId, categoryId, date, updatedAt, deleted, deviceId",
+      budgetCategoryOverrides: "++id, clientId, serverId, categoryId, monthKey, [categoryId+monthKey], updatedAt, deleted, deviceId",
+      goals: "++id, clientId, serverId, scope, periodKey, completed, updatedAt, deleted, deviceId",
+      locations: "++id, clientId, serverId, name, updatedAt, pinned, deleted, deviceId",
+      syncQueue: "++id, clientId, action, entityType, timestamp",
+    });
   }
 }
 
@@ -310,6 +340,7 @@ export async function wipeLocalDB(): Promise<void> {
     db.quizzes.clear(),
     db.budgetCategories.clear(),
     db.budgetTransactions.clear(),
+    db.budgetCategoryOverrides.clear(),
     db.goals.clear(),
     db.locations.clear(),
     db.syncQueue.clear(),

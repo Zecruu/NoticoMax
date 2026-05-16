@@ -29,6 +29,8 @@ import {
   ChevronRight,
   History,
   Crown,
+  Pencil,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
@@ -67,6 +69,7 @@ export function BudgetView() {
     deleteCategory,
     addTransaction,
     deleteTransaction,
+    setCategoryLimitForMonth,
     shiftMonth,
   } = useBudget(viewMonthKey);
 
@@ -83,6 +86,9 @@ export function BudgetView() {
   const [spendingCategory, setSpendingCategory] = useState<BudgetCategoryWithTotals | null>(null);
   const [spendAmount, setSpendAmount] = useState("");
   const [spendNote, setSpendNote] = useState("");
+
+  const [limitEditingCategory, setLimitEditingCategory] = useState<BudgetCategoryWithTotals | null>(null);
+  const [limitInput, setLimitInput] = useState("");
 
   const handleSaveIncome = () => {
     const n = Number(incomeInput);
@@ -108,6 +114,30 @@ export function BudgetView() {
     setNewCatColor(PRESET_COLORS[0]);
     setCreatingCategory(false);
     toast.success("Category added");
+  };
+
+  const openLimitEditor = (cat: BudgetCategoryWithTotals) => {
+    setLimitEditingCategory(cat);
+    setLimitInput(cat.hasOverride ? String(cat.effectiveLimit) : "");
+  };
+
+  const handleSaveLimit = async () => {
+    if (!limitEditingCategory) return;
+    const trimmed = limitInput.trim();
+    if (trimmed === "") {
+      await setCategoryLimitForMonth(limitEditingCategory.clientId, null);
+      toast.success("Reverted to default limit");
+    } else {
+      const n = Number(trimmed);
+      if (Number.isNaN(n) || n < 0) {
+        toast.error("Enter a positive amount or leave blank to revert");
+        return;
+      }
+      await setCategoryLimitForMonth(limitEditingCategory.clientId, n);
+      toast.success(`Limit for ${formatMonthKey(viewMonthKey)}: ${formatMoney(n)}`);
+    }
+    setLimitEditingCategory(null);
+    setLimitInput("");
   };
 
   const handleAddSpending = async () => {
@@ -338,10 +368,25 @@ export function BudgetView() {
                       <div className="flex items-center gap-2 min-w-0">
                         <div className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: cat.color }} />
                         <h3 className="font-medium truncate">{cat.name}</h3>
+                        {cat.hasOverride && (
+                          <span className="rounded-full bg-primary/15 text-primary px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider shrink-0">
+                            Custom
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-1">
                         <Button size="sm" variant="outline" className="h-7" onClick={() => setSpendingCategory(cat)}>
                           Log Spend
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                          onClick={() => openLimitEditor(cat)}
+                          title="Edit limit for this month"
+                          aria-label="Edit limit for this month"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
                         </Button>
                         <Button
                           size="icon"
@@ -360,7 +405,7 @@ export function BudgetView() {
 
                     <div className="flex items-baseline justify-between text-sm mb-1.5">
                       <span className="tabular-nums">
-                        {formatMoney(cat.spentInMonth)} / {formatMoney(cat.monthlyLimit)}
+                        {formatMoney(cat.spentInMonth)} / {formatMoney(cat.effectiveLimit)}
                       </span>
                       <span className={cn("tabular-nums font-medium", overspent ? "text-destructive" : "text-muted-foreground")}>
                         {overspent ? `${formatMoney(cat.remaining)} over` : `${formatMoney(cat.remaining)} left`}
@@ -521,6 +566,59 @@ export function BudgetView() {
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setSpendingCategory(null)}>Cancel</Button>
             <Button onClick={handleAddSpending}>Log Spend</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Per-month limit override dialog */}
+      <Dialog open={!!limitEditingCategory} onOpenChange={(o) => !o && setLimitEditingCategory(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Limit for {formatMonthKey(viewMonthKey)}</DialogTitle>
+            <DialogDescription>
+              {limitEditingCategory && (
+                <>
+                  Set a custom limit for <strong>{limitEditingCategory.name}</strong> this month only. The default ({formatMoney(limitEditingCategory.monthlyLimit)}) keeps applying to every other month. Leave blank to revert.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="limit-amt">Limit for this month ($)</Label>
+              <Input
+                id="limit-amt"
+                type="number"
+                inputMode="decimal"
+                placeholder={limitEditingCategory ? String(limitEditingCategory.monthlyLimit) : ""}
+                value={limitInput}
+                onChange={(e) => setLimitInput(e.target.value)}
+                autoFocus
+              />
+              <p className="text-[11px] text-muted-foreground">Default: {limitEditingCategory ? formatMoney(limitEditingCategory.monthlyLimit) : ""}</p>
+            </div>
+          </div>
+          <div className="flex justify-between gap-2">
+            {limitEditingCategory?.hasOverride ? (
+              <Button
+                variant="ghost"
+                className="gap-1.5 text-muted-foreground"
+                onClick={async () => {
+                  if (!limitEditingCategory) return;
+                  await setCategoryLimitForMonth(limitEditingCategory.clientId, null);
+                  toast.success("Reverted to default limit");
+                  setLimitEditingCategory(null);
+                  setLimitInput("");
+                }}
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Revert
+              </Button>
+            ) : <span />}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setLimitEditingCategory(null)}>Cancel</Button>
+              <Button onClick={handleSaveLimit}>Save</Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
