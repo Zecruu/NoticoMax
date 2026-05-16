@@ -46,6 +46,10 @@ function formatMoney(n: number): string {
 export function BudgetView() {
   const [viewMonthKey, setViewMonthKey] = useState<string>(getCurrentMonthKey());
 
+  // True when the user is looking ahead — e.g. it's May and they're viewing
+  // June. Used to relabel "spent" → "planned" so the screen reads as planning.
+  const isFutureMonth = viewMonthKey > getCurrentMonthKey();
+
   const {
     isCurrentMonth,
     availableMonths,
@@ -170,7 +174,14 @@ export function BudgetView() {
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <div className="text-center">
-          <p className="text-sm font-medium">{formatMonthKey(viewMonthKey)}</p>
+          <div className="flex items-center justify-center gap-1.5">
+            <p className="text-sm font-medium">{formatMonthKey(viewMonthKey)}</p>
+            {isFutureMonth && (
+              <span className="rounded-full bg-primary/15 text-primary px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider">
+                Upcoming
+              </span>
+            )}
+          </div>
           {!isCurrentMonth && (
             <button
               onClick={() => setViewMonthKey(getCurrentMonthKey())}
@@ -185,7 +196,6 @@ export function BudgetView() {
           size="icon"
           onClick={() => setViewMonthKey(shiftMonth(viewMonthKey, 1))}
           aria-label="Next month"
-          disabled={isCurrentMonth}
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
@@ -272,7 +282,9 @@ export function BudgetView() {
           </Card>
           <Card>
             <CardContent className="pt-4">
-              <p className="text-xs uppercase text-muted-foreground tracking-wider">Spent {isCurrentMonth ? "this month" : "in month"}</p>
+              <p className="text-xs uppercase text-muted-foreground tracking-wider">
+                {isFutureMonth ? "Planned" : `Spent ${isCurrentMonth ? "this month" : "in month"}`}
+              </p>
               <p className="text-xl font-semibold tabular-nums flex items-center gap-1">
                 <TrendingDown className="h-4 w-4 text-destructive" />
                 {formatMoney(totalSpent)}
