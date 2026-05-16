@@ -21,6 +21,7 @@ import {
   Share2,
   CheckCircle2,
   Circle,
+  Copy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
@@ -69,7 +70,50 @@ function firstLinePreview(content: string): string {
   return line ?? "";
 }
 
+// What "Copy" yields per item type. URLs hand back the link; everything
+// else prefers content, falling back to title when content is empty.
+function copyPayloadFor(item: LocalItem): string {
+  if (item.type === "url" && item.url) return item.url;
+  const trimmed = item.content.trim();
+  return trimmed || item.title;
+}
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* falls through to legacy path */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggleComplete, onUpdateContent }: ItemCardProps) {
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const payload = copyPayloadFor(item);
+    if (!payload) return;
+    const ok = await copyToClipboard(payload);
+    if (ok) {
+      const kind = item.type === "url" ? "URL" : "Note";
+      toast.success(`${kind} copied`);
+    } else {
+      toast.error("Copy failed");
+    }
+  };
+
   const handleToggleTask = onUpdateContent
     ? (index: number) => {
         let count = 0;
@@ -225,6 +269,16 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
           >
             <Pencil className="h-3.5 w-3.5" />
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={handleCopy}
+            aria-label="Copy"
+            title={item.type === "url" ? "Copy URL" : "Copy note"}
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
               <Button
@@ -266,6 +320,10 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
                   {item.reminderCompleted ? "Mark incomplete" : "Mark complete"}
                 </DropdownMenuItem>
               )}
+              <DropdownMenuItem onClick={handleCopy}>
+                <Copy className="h-3.5 w-3.5 mr-2" />
+                {item.type === "url" ? "Copy URL" : "Copy"}
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={async (e) => {
                   e.stopPropagation();
