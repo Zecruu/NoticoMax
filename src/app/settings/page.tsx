@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle, LogOut, User, Monitor, Trash2, Wand2, Terminal, Eye, EyeOff } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { exportData, importData } from "@/lib/import-export";
+import { HouseholdsCard } from "@/components/settings/households-card";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -586,6 +587,8 @@ export default function SettingsPage() {
         </Card>
 
         {/* Account */}
+        <HouseholdsCard />
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Account</CardTitle>
