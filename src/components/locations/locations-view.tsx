@@ -265,14 +265,14 @@ export function LocationsView() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit Location" : "New Location"}</DialogTitle>
             <DialogDescription>
               Pin a favorite spot, or grab your current coordinates with one tap.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-3 pb-[var(--keyboard-height,0px)]">
             <div className="space-y-1.5">
               <Label htmlFor="loc-name">Name</Label>
               <Input
@@ -336,7 +336,7 @@ export function LocationsView() {
               />
             </div>
           </div>
-          <div className="flex justify-end gap-2">
+          <div className="sticky bottom-0 -mx-6 -mb-6 px-6 py-3 flex justify-end gap-2 bg-background/95 backdrop-blur border-t supports-[backdrop-filter]:bg-background/80">
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleSave}>{editing ? "Save Changes" : "Save Location"}</Button>
           </div>
