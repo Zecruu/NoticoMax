@@ -35,12 +35,18 @@ export interface LocalItem {
   updatedAt: string;
 }
 
+export type FolderShareMode = "all" | "select";
+
 export interface LocalFolder {
   id?: number;
   clientId: string;
   serverId?: string;
   name: string;
   color?: string;
+  /** When set, the folder belongs to this household and is shared per `shareMode`. */
+  householdId?: string;
+  /** Defaults to "all" when household_id is set — preserves Ship 1b behavior. */
+  shareMode?: FolderShareMode;
   deleted: boolean;
   createdAt: string;
   updatedAt: string;

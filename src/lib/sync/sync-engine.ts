@@ -87,6 +87,8 @@ interface SupabaseFolder {
   user_id: string;
   name: string;
   color: string | null;
+  household_id: string | null;
+  share_mode: "all" | "select" | null;
   deleted: boolean;
   deleted_at: string | null;
   created_at: string;
@@ -162,6 +164,8 @@ function localToSupabaseFolder(folder: LocalFolder, userId: string): Partial<Sup
     user_id: userId,
     name: folder.name,
     color: folder.color ?? null,
+    household_id: folder.householdId ?? null,
+    share_mode: folder.shareMode ?? "all",
     deleted: folder.deleted ?? false,
     created_at: folder.createdAt,
     updated_at: folder.updatedAt,
@@ -173,6 +177,8 @@ function supabaseToLocalFolder(row: SupabaseFolder): LocalFolder {
     clientId: row.client_id,
     name: row.name,
     color: row.color ?? undefined,
+    householdId: row.household_id ?? undefined,
+    shareMode: (row.share_mode as LocalFolder["shareMode"]) ?? undefined,
     deleted: row.deleted ?? false,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
