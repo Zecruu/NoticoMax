@@ -9,6 +9,7 @@ import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { exportData, importData } from "@/lib/import-export";
 import { HouseholdsCard } from "@/components/settings/households-card";
+import { ClaudeTokensCard } from "@/components/settings/claude-tokens-card";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -775,33 +776,10 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Sync your Claude Code skills across computers. Use the session token below to connect Claude Code to your NoticoMax account.
+                Sync your Claude Code skills across computers. Generate an API token below and paste it when prompted by the <code className="bg-muted px-1 rounded text-xs">/noticomax</code> skill.
               </p>
 
-              <div>
-                <p className="text-xs text-muted-foreground mb-1.5">Session Token</p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono truncate">
-                    {localStorage.getItem("noticomax_session")
-                      ? `${localStorage.getItem("noticomax_session")!.slice(0, 12)}...${localStorage.getItem("noticomax_session")!.slice(-6)}`
-                      : "Not available"}
-                  </code>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => {
-                      const token = localStorage.getItem("noticomax_session");
-                      if (token) {
-                        navigator.clipboard.writeText(token);
-                        toast.success("Session token copied");
-                      }
-                    }}
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
+              <ClaudeTokensCard />
 
               <div>
                 <p className="text-xs text-muted-foreground mb-1.5">Quick Setup (run on a new computer)</p>
@@ -852,7 +830,7 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Sync your Codex CLI prompts (<code className="bg-muted px-1 rounded text-xs">~/.codex/prompts/*.md</code>) across computers using the same NoticoMax session token.
+                Sync your Codex CLI prompts (<code className="bg-muted px-1 rounded text-xs">~/.codex/prompts/*.md</code>) across computers using one of your NoticoMax API tokens above.
               </p>
 
               <div>

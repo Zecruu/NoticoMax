@@ -45,10 +45,10 @@ Skill name filter: \`$1\`
 
 ### Step 0: Load config
 
-Read \`~/.noticomax-claude\` to get the session token and API URL.
+Read \`~/.noticomax-claude\` to get the API token and API URL.
 
-- If the file doesn't exist, ask the user for their NoticoMax session token
-- Tell them they can get it by opening browser dev tools on noticomax.com and running: \`localStorage.getItem("noticomax_session")\`
+- If the file doesn't exist, ask the user for their NoticoMax Claude Code API token
+- Tell them how to generate one: sign in at noticomax.com → **Settings → Claude Code Integration → Generate**. The token starts with \`sk_nm_\` and is shown once.
 - Save the config to \`~/.noticomax-claude\` as \`{ "sessionToken": "<token>", "apiUrl": "https://www.noticomax.com" }\`
 - Use the \`apiUrl\` from config for all API calls (default: \`https://www.noticomax.com\`)
 
@@ -143,7 +143,7 @@ This prompt was installed at \`~/.codex/prompts/noticomax.md\`. Invoke it from C
 
 Read \`~/.noticomax-codex\`. If it doesn't exist:
 
-- Ask the user for their NoticoMax session token (they can get it from noticomax.com via browser dev tools: \`localStorage.getItem("noticomax_session")\`).
+- Ask the user for their NoticoMax Claude Code API token (sign in at noticomax.com → **Settings → Claude Code Integration → Generate**; the token starts with \`sk_nm_\`).
 - Save \`{ "sessionToken": "<token>", "apiUrl": "https://www.noticomax.com" }\` to \`~/.noticomax-codex\`.
 
 Use the \`apiUrl\` from config (default: \`https://www.noticomax.com\`) for all API calls.

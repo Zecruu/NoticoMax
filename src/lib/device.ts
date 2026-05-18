@@ -31,8 +31,10 @@ export function getDeviceName(): string {
 }
 
 /**
- * Rename the current device. Persists locally and (if the user is signed in)
- * syncs to the server so the new name shows up on their other devices.
+ * Rename the current device. Persists locally. (Server-side sync of device
+ * names was wired against a Mongo-era endpoint that no longer exists; for now
+ * the name lives only in localStorage and gets surfaced to other devices via
+ * the device IDs the sync engine already attaches to each item.)
  */
 export function setDeviceName(name: string): void {
   if (typeof window === "undefined") return;
@@ -40,28 +42,6 @@ export function setDeviceName(name: string): void {
   localStorage.setItem(DEVICE_NAME_KEY, trimmed);
   const id = getDeviceId();
   saveDeviceNameMapping(id, trimmed);
-  // Best-effort server sync. No-op if logged out.
-  void pushDeviceNameToServer(id, trimmed);
-}
-
-const SESSION_KEY = "noticomax_session";
-
-async function pushDeviceNameToServer(deviceId: string, name: string): Promise<void> {
-  if (typeof window === "undefined") return;
-  const sessionToken = localStorage.getItem(SESSION_KEY);
-  if (!sessionToken) return;
-  try {
-    await fetch("/api/user/device-names", {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${sessionToken}`,
-      },
-      body: JSON.stringify({ deviceId, name }),
-    });
-  } catch {
-    // best-effort; will retry naturally on next setDeviceName
-  }
 }
 
 /**

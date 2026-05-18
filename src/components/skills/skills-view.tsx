@@ -21,6 +21,16 @@ import {
 } from "lucide-react";
 import { toast } from "@/lib/native-toast";
 import { Badge } from "@/components/ui/badge";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+
+async function getAccessToken(): Promise<string | null> {
+  try {
+    const { data } = await getSupabaseBrowserClient().auth.getSession();
+    return data.session?.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
 
 interface SupportingFile {
   filename: string;
@@ -76,16 +86,19 @@ export function SkillsView({ tool = "claude" }: SkillsViewProps = {}) {
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [showContent, setShowContent] = useState<Set<string>>(new Set());
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const fetchSkills = useCallback(async () => {
     setLoading(true);
     try {
-      const sessionToken = localStorage.getItem("noticomax_session");
+      const sessionToken = await getAccessToken();
       if (!sessionToken) {
+        setIsLoggedIn(false);
         setSkills([]);
         setLoading(false);
         return;
       }
+      setIsLoggedIn(true);
 
       const params = new URLSearchParams();
       if (searchQuery) params.set("search", searchQuery);
@@ -130,7 +143,7 @@ export function SkillsView({ tool = "claude" }: SkillsViewProps = {}) {
 
   const handleDelete = async (skillId: string, name: string) => {
     try {
-      const sessionToken = localStorage.getItem("noticomax_session");
+      const sessionToken = await getAccessToken();
       if (!sessionToken) return;
 
       const res = await fetch(`/api/skills/${skillId}`, {
@@ -173,8 +186,6 @@ export function SkillsView({ tool = "claude" }: SkillsViewProps = {}) {
       return next;
     });
   };
-
-  const isLoggedIn = !!localStorage.getItem("noticomax_session");
 
   return (
     <div className="mx-auto max-w-3xl p-4 md:p-6 space-y-4">
