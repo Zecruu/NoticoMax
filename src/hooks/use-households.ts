@@ -9,15 +9,30 @@ export interface HouseholdMember {
   joinedAt: string;
 }
 
+export interface PendingRequest {
+  token: string;
+  userId: string;
+  email: string | null;
+  expiresAt: string;
+  createdAt: string;
+}
+
 export interface Household {
   id: string;
   name: string;
   ownerUserId: string;
   createdAt: string;
+  familyCode: string;
+  maxSeats: number;
+  currentSeats: number;
+  subscriptionPlan: "free" | "family" | "family_plus";
   role: "owner" | "member";
   members: HouseholdMember[];
+  /** Empty array for non-owners. */
+  pendingRequests: PendingRequest[];
 }
 
+/** Pending email invite addressed TO the current user (Ship 1a path). */
 export interface PendingInvite {
   token: string;
   householdId: string;
@@ -34,9 +49,32 @@ export interface UseHouseholdsResult {
   error: string | null;
   refresh: () => Promise<void>;
   createHousehold: (name: string) => Promise<{ success: true } | { success: false; error: string }>;
-  invite: (householdId: string, email: string) => Promise<{ success: true } | { success: false; error: string }>;
-  respond: (token: string, action: "accept" | "decline") => Promise<{ success: true } | { success: false; error: string }>;
-  leave: (householdId: string, deleteIfOwner?: boolean) => Promise<{ success: true } | { success: false; error: string }>;
+  /** Request to join a household by family code (member-initiated). */
+  requestByCode: (
+    code: string,
+  ) => Promise<
+    | {
+        success: true;
+        alreadyMember?: boolean;
+        pending?: boolean;
+        householdName: string;
+      }
+    | { success: false; error: string }
+  >;
+  /** Owner approves or declines a member's join request. */
+  approveRequest: (
+    token: string,
+    action: "approve" | "decline",
+  ) => Promise<{ success: true } | { success: false; error: string }>;
+  /** Ship 1a email-invite response (kept so any in-flight email invites still work). */
+  respond: (
+    token: string,
+    action: "accept" | "decline",
+  ) => Promise<{ success: true } | { success: false; error: string }>;
+  leave: (
+    householdId: string,
+    deleteIfOwner?: boolean,
+  ) => Promise<{ success: true } | { success: false; error: string }>;
 }
 
 export function useHouseholds(): UseHouseholdsResult {
@@ -51,7 +89,6 @@ export function useHouseholds(): UseHouseholdsResult {
     try {
       const res = await fetch("/api/households", { credentials: "include" });
       if (res.status === 401) {
-        // Not logged in — show empty state, no error toast
         setHouseholds([]);
         setPendingInvites([]);
         return;
@@ -87,19 +124,41 @@ export function useHouseholds(): UseHouseholdsResult {
     [refresh],
   );
 
-  const invite = useCallback(
-    async (householdId: string, email: string) => {
-      const res = await fetch("/api/households/invite", {
+  const requestByCode = useCallback(
+    async (code: string) => {
+      const res = await fetch("/api/households/by-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ householdId, email }),
+        body: JSON.stringify({ code }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) return { success: false as const, error: data.error || "Failed to invite" };
+      if (!res.ok) return { success: false as const, error: data.error || "Failed to request" };
+      await refresh();
+      return {
+        success: true as const,
+        alreadyMember: !!data.alreadyMember,
+        pending: !!data.pending,
+        householdName: data.householdName as string,
+      };
+    },
+    [refresh],
+  );
+
+  const approveRequest = useCallback(
+    async (token: string, action: "approve" | "decline") => {
+      const res = await fetch("/api/households/approve-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ token, action }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { success: false as const, error: data.error || "Failed to update request" };
+      await refresh();
       return { success: true as const };
     },
-    [],
+    [refresh],
   );
 
   const respond = useCallback(
@@ -141,7 +200,8 @@ export function useHouseholds(): UseHouseholdsResult {
     error,
     refresh,
     createHousehold,
-    invite,
+    requestByCode,
+    approveRequest,
     respond,
     leave,
   };

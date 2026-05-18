@@ -22,10 +22,25 @@ export async function GET() {
 
   const householdIds = (myMemberships ?? []).map((m) => m.household_id);
 
-  // Fetch household + all member rows in two parallel queries
-  const [{ data: households }, { data: allMembers }, { data: invites }] = await Promise.all([
+  // Households owned by the caller — needed so we can fetch pending join
+  // requests for them (only the owner sees / acts on requests).
+  const ownedHouseholdIds = householdIds.filter((hid) => {
+    const m = (myMemberships ?? []).find((mm) => mm.household_id === hid);
+    return m?.role === "owner";
+  });
+
+  // Fetch household + all member rows + pending invites + pending requests in parallel.
+  const [
+    { data: households },
+    { data: allMembers },
+    { data: invites },
+    { data: pendingRequests },
+  ] = await Promise.all([
     householdIds.length
-      ? supabase.from("households").select("id, name, owner_user_id, created_at").in("id", householdIds)
+      ? supabase
+          .from("households")
+          .select("id, name, owner_user_id, created_at, family_code, max_seats, subscription_plan")
+          .in("id", householdIds)
       : Promise.resolve({ data: [] }),
     householdIds.length
       ? supabase.from("household_members").select("household_id, user_id, role, joined_at").in("household_id", householdIds)
@@ -35,37 +50,67 @@ export async function GET() {
       .select("token, household_id, invited_email, invited_by, status, expires_at, created_at")
       .eq("invited_user_id", userId)
       .eq("status", "pending"),
+    ownedHouseholdIds.length
+      ? supabase
+          .from("household_invites")
+          .select("token, household_id, invited_user_id, invited_by, status, expires_at, created_at")
+          .in("household_id", ownedHouseholdIds)
+          .eq("status", "requested")
+      : Promise.resolve({ data: [] }),
   ]);
 
-  // Resolve member email + names via auth.admin.listUsers (one call, filter client-side).
-  // For a v1 we just show the email; first name customization comes later.
+  // Resolve member + requester emails via one auth.admin.listUsers call.
   const memberUserIds = Array.from(new Set((allMembers ?? []).map((m) => m.user_id)));
+  const requesterUserIds = Array.from(new Set((pendingRequests ?? []).map((r) => r.invited_user_id)));
+  const lookupUserIds = Array.from(new Set([...memberUserIds, ...requesterUserIds]));
   let userById: Record<string, { email: string | null }> = {};
-  if (memberUserIds.length) {
+  if (lookupUserIds.length) {
     const admin = getSupabaseAdminClient();
     const { data: list } = await admin.auth.admin.listUsers({ perPage: 1000 });
     userById = Object.fromEntries(
       list.users
-        .filter((u) => memberUserIds.includes(u.id))
+        .filter((u) => lookupUserIds.includes(u.id))
         .map((u) => [u.id, { email: u.email ?? null }]),
     );
   }
 
-  const enrichedHouseholds = (households ?? []).map((h) => ({
-    id: h.id,
-    name: h.name,
-    ownerUserId: h.owner_user_id,
-    createdAt: h.created_at,
-    role: (myMemberships ?? []).find((m) => m.household_id === h.id)?.role ?? "member",
-    members: (allMembers ?? [])
+  const enrichedHouseholds = (households ?? []).map((h) => {
+    const myRole = (myMemberships ?? []).find((m) => m.household_id === h.id)?.role ?? "member";
+    const members = (allMembers ?? [])
       .filter((m) => m.household_id === h.id)
       .map((m) => ({
         userId: m.user_id,
         email: userById[m.user_id]?.email ?? null,
         role: m.role,
         joinedAt: m.joined_at,
-      })),
-  }));
+      }));
+    // Pending requests are only visible to owners — for non-owners we return []
+    const requests =
+      myRole === "owner"
+        ? (pendingRequests ?? [])
+            .filter((r) => r.household_id === h.id)
+            .map((r) => ({
+              token: r.token,
+              userId: r.invited_user_id,
+              email: userById[r.invited_user_id]?.email ?? null,
+              expiresAt: r.expires_at,
+              createdAt: r.created_at,
+            }))
+        : [];
+    return {
+      id: h.id,
+      name: h.name,
+      ownerUserId: h.owner_user_id,
+      createdAt: h.created_at,
+      familyCode: h.family_code,
+      maxSeats: h.max_seats,
+      currentSeats: members.length,
+      subscriptionPlan: h.subscription_plan,
+      role: myRole,
+      members,
+      pendingRequests: requests,
+    };
+  });
 
   // Pending invites also need the inviter's email + household name
   const inviterIds = Array.from(new Set((invites ?? []).map((i) => i.invited_by)));
@@ -126,10 +171,11 @@ export async function POST(request: NextRequest) {
   // (intentional — only the server should add members).
   const admin = getSupabaseAdminClient();
 
+  // family_code + max_seats + subscription_plan default via DB trigger / column defaults.
   const { data: household, error: hErr } = await admin
     .from("households")
     .insert({ name, owner_user_id: userId })
-    .select("id, name, owner_user_id, created_at")
+    .select("id, name, owner_user_id, created_at, family_code, max_seats, subscription_plan")
     .single();
   if (hErr || !household) {
     return NextResponse.json({ error: hErr?.message || "Failed to create" }, { status: 500 });
@@ -149,7 +195,12 @@ export async function POST(request: NextRequest) {
     name: household.name,
     ownerUserId: household.owner_user_id,
     createdAt: household.created_at,
+    familyCode: household.family_code,
+    maxSeats: household.max_seats,
+    currentSeats: 1,
+    subscriptionPlan: household.subscription_plan,
     role: "owner",
     members: [{ userId, email: claims.claims.email as string, role: "owner", joinedAt: new Date().toISOString() }],
+    pendingRequests: [],
   });
 }
