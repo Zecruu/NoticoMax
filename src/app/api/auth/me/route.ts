@@ -20,7 +20,9 @@ export async function GET() {
 
   const { data: ent } = await supabase
     .from("entitlements")
-    .select("lifetime_pro, pro_expires_at, pro_source")
+    .select(
+      "lifetime_pro, pro_expires_at, pro_source, family_plan_active, extra_seats, storage_plan, storage_bytes_used",
+    )
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -40,6 +42,10 @@ export async function GET() {
       source: ent?.pro_source ?? null,
       expiresAt: ent?.pro_expires_at ?? null,
       lifetimePro,
+      familyPlanActive: ent?.family_plan_active === true,
+      extraSeats: ent?.extra_seats ?? 0,
+      storagePlan: ent?.storage_plan ?? "free",
+      storageBytesUsed: ent?.storage_bytes_used ?? 0,
     },
   });
 }

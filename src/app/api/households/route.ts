@@ -171,10 +171,33 @@ export async function POST(request: NextRequest) {
   // (intentional — only the server should add members).
   const admin = getSupabaseAdminClient();
 
+  // Gate: creator must have an active Family Plan (or lifetime Pro grandfathered in).
+  // Lifetime Pro users get Family for free since they pre-date the SKU.
+  const { data: ent } = await admin
+    .from("entitlements")
+    .select("family_plan_active, lifetime_pro, extra_seats")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!ent?.family_plan_active && !ent?.lifetime_pro) {
+    return NextResponse.json(
+      { error: "Family Plan required to create a family. Upgrade in Settings → Subscription.", upgradeRequired: true },
+      { status: 402 },
+    );
+  }
+  const ownerExtraSeats = ent?.extra_seats ?? 0;
+
   // family_code + max_seats + subscription_plan default via DB trigger / column defaults.
+  // If the owner has purchased extra seats, apply them now (5 base + extras).
+  const initialMaxSeats = 5 + ownerExtraSeats;
+  const initialPlan = ent?.lifetime_pro ? "family" : "family";
   const { data: household, error: hErr } = await admin
     .from("households")
-    .insert({ name, owner_user_id: userId })
+    .insert({
+      name,
+      owner_user_id: userId,
+      max_seats: initialMaxSeats,
+      subscription_plan: initialPlan,
+    })
     .select("id, name, owner_user_id, created_at, family_code, max_seats, subscription_plan")
     .single();
   if (hErr || !household) {

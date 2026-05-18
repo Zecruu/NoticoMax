@@ -9,6 +9,7 @@ import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { exportData, importData } from "@/lib/import-export";
 import { HouseholdsCard } from "@/components/settings/households-card";
+import { StorageCard } from "@/components/settings/storage-card";
 import { ClaudeTokensCard } from "@/components/settings/claude-tokens-card";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
@@ -587,8 +588,9 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Account */}
+        {/* Family + Storage */}
         <HouseholdsCard />
+        <StorageCard />
 
         <Card>
           <CardHeader>

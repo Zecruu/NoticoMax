@@ -3,6 +3,15 @@
 import { useState, useEffect, useCallback } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
+export type StoragePlan =
+  | "free"
+  | "personal_5gb"
+  | "personal_50gb"
+  | "personal_200gb"
+  | "family_20gb"
+  | "family_100gb"
+  | "family_500gb";
+
 export interface ComputedEntitlements {
   proActive: boolean;
   syncEnabled: boolean;
@@ -10,12 +19,24 @@ export interface ComputedEntitlements {
   source?: string | null;
   expiresAt?: string | null;
   lifetimePro?: boolean;
+  /** True when the user has an active Family Plan subscription. Required to create a household. */
+  familyPlanActive?: boolean;
+  /** Number of extra seats the user has purchased (each adds 1 to a household's max_seats). */
+  extraSeats?: number;
+  /** Active storage tier. Defaults to "free" (100 MB included with Pro). */
+  storagePlan?: StoragePlan;
+  /** Bytes consumed (updated by the file-upload service; placeholder until that ships). */
+  storageBytesUsed?: number;
 }
 
 const FREE_ENTITLEMENTS: ComputedEntitlements = {
   proActive: false,
   syncEnabled: false,
   adsRemoved: false,
+  familyPlanActive: false,
+  extraSeats: 0,
+  storagePlan: "free",
+  storageBytesUsed: 0,
 };
 
 const ENTITLEMENTS_KEY = "noticomax_entitlements";

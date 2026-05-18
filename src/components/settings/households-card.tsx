@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useHouseholds, type Household } from "@/hooks/use-households";
+import { useLicense } from "@/hooks/use-license";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +18,7 @@ import {
   Copy,
   UserPlus,
   Hash,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "@/lib/native-toast";
 
@@ -32,6 +34,10 @@ export function HouseholdsCard() {
     respond,
     leave,
   } = useHouseholds();
+  const { entitlements } = useLicense();
+
+  // Family Plan unlocks household creation. Lifetime Pro is grandfathered.
+  const canCreateFamily = !!entitlements.familyPlanActive || !!entitlements.lifetimePro;
 
   const [creatingName, setCreatingName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -40,6 +46,42 @@ export function HouseholdsCard() {
   const [joining, setJoining] = useState(false);
 
   const [actingRequestToken, setActingRequestToken] = useState<string | null>(null);
+  const [buyingSeatForHousehold, setBuyingSeatForHousehold] = useState<string | null>(null);
+
+  const buyExtraSeat = async (householdId: string) => {
+    setBuyingSeatForHousehold(householdId);
+    try {
+      // Dynamic-import so non-Capacitor environments don't try to load the SDK.
+      const { purchase } = await import("@/lib/iap/revenuecat-client");
+      const ok = await purchase("family_extra_seat_monthly");
+      if (ok) {
+        toast.success("Seat added — the webhook will bump your family in a moment");
+        await refresh();
+      } else {
+        toast.error("Purchase cancelled or failed");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't start purchase");
+    } finally {
+      setBuyingSeatForHousehold(null);
+    }
+  };
+
+  const startFamilyPlanUpgrade = async () => {
+    try {
+      const { presentPaywall } = await import("@/lib/iap/revenuecat-client");
+      const result = await presentPaywall();
+      if (result === "purchased") {
+        toast.success("Family Plan active — you can now create a family");
+      } else if (result === "cancelled") {
+        // No toast — user closed it intentionally
+      } else if (result !== "not_presented") {
+        toast.error("Couldn't open the paywall");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Paywall unavailable");
+    }
+  };
 
   const handleCreate = async () => {
     const name = creatingName.trim();
@@ -231,15 +273,26 @@ export function HouseholdsCard() {
                   </div>
                 )}
 
-                {/* Seat counter */}
-                <div className="flex items-center justify-between text-xs">
+                {/* Seat counter + buy-extra-seat button */}
+                <div className="flex items-center justify-between text-xs gap-2">
                   <span className="text-muted-foreground">
                     {h.currentSeats} of {h.maxSeats} seats used
                   </span>
-                  {h.role === "owner" && h.currentSeats >= h.maxSeats && (
-                    <span className="text-amber-600 dark:text-amber-400 font-medium">
-                      Full — add a seat to invite more
-                    </span>
+                  {h.role === "owner" && (
+                    <Button
+                      size="sm"
+                      variant={h.currentSeats >= h.maxSeats ? "default" : "ghost"}
+                      onClick={() => void buyExtraSeat(h.id)}
+                      disabled={buyingSeatForHousehold === h.id}
+                      className="gap-1 h-7 px-2 text-xs"
+                    >
+                      {buyingSeatForHousehold === h.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Plus className="h-3 w-3" />
+                      )}
+                      Add seat ($1/mo)
+                    </Button>
                   )}
                 </div>
 
@@ -340,31 +393,48 @@ export function HouseholdsCard() {
           </div>
         </div>
 
-        {/* Create new */}
+        {/* Create new — gated on Family Plan entitlement */}
         <div className="space-y-2 pt-2 border-t">
           <Label className="text-xs">Create a new family</Label>
-          <div className="flex gap-2">
-            <Input
-              placeholder="e.g. Demchak Family, Roommates"
-              value={creatingName}
-              onChange={(e) => setCreatingName(e.target.value)}
-              maxLength={60}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void handleCreate();
-                }
-              }}
-            />
-            <Button
-              onClick={() => void handleCreate()}
-              disabled={creating || !creatingName.trim()}
-              className="gap-1 shrink-0"
-            >
-              {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-              Create
-            </Button>
-          </div>
+          {canCreateFamily ? (
+            <div className="flex gap-2">
+              <Input
+                placeholder="e.g. Demchak Family, Roommates"
+                value={creatingName}
+                onChange={(e) => setCreatingName(e.target.value)}
+                maxLength={60}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleCreate();
+                  }
+                }}
+              />
+              <Button
+                onClick={() => void handleCreate()}
+                disabled={creating || !creatingName.trim()}
+                className="gap-1 shrink-0"
+              >
+                {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                Create
+              </Button>
+            </div>
+          ) : (
+            <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <span className="text-sm font-semibold">Family Plan — $5/mo</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Includes everything in Pro + a shared family folder (notes, reminders, lists,
+                passwords), 5 seats, and family cloud storage. Add more seats for $1/mo each.
+              </p>
+              <Button onClick={() => void startFamilyPlanUpgrade()} size="sm" className="gap-1.5 w-full">
+                <Sparkles className="h-3.5 w-3.5" />
+                Upgrade to Family Plan
+              </Button>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

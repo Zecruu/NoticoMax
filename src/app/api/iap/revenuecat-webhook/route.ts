@@ -23,8 +23,22 @@ interface RCWebhookPayload {
   event: RCEvent;
 }
 
-// Must match the RevenueCat dashboard entitlement identifier exactly.
+// Must match the RevenueCat dashboard entitlement identifiers exactly.
 const PRO_ENTITLEMENT_ID = "Pro";
+const FAMILY_ENTITLEMENT_ID = "Family";
+
+// Product IDs that bump capacity instead of granting an entitlement.
+// Configure these in the App Store Connect / RevenueCat dashboard with
+// matching identifiers and they'll be processed here.
+const EXTRA_SEAT_PRODUCT_IDS = new Set(["family_extra_seat_monthly"]);
+const STORAGE_PRODUCT_TO_PLAN: Record<string, string> = {
+  storage_personal_5gb:   "personal_5gb",
+  storage_personal_50gb:  "personal_50gb",
+  storage_personal_200gb: "personal_200gb",
+  storage_family_20gb:    "family_20gb",
+  storage_family_100gb:   "family_100gb",
+  storage_family_500gb:   "family_500gb",
+};
 
 // Supabase user IDs are UUIDs.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -78,12 +92,16 @@ export async function POST(request: NextRequest) {
   }
 
   const userId = event.app_user_id;
-  const grantsPro = (event.entitlement_ids ?? []).includes(PRO_ENTITLEMENT_ID);
+  const entIds = event.entitlement_ids ?? [];
+  const grantsPro = entIds.includes(PRO_ENTITLEMENT_ID);
+  const grantsFamily = entIds.includes(FAMILY_ENTITLEMENT_ID);
   const expiresAt = event.expiration_at_ms ? new Date(event.expiration_at_ms) : null;
   const proSource = event.store === "PLAY_STORE" ? "stripe" : "apple_iap";
+  const productId = event.product_id ?? "";
 
   const admin = getSupabaseAdminClient();
 
+  // Pro entitlement (existing behavior)
   if (grantsPro && expiresAt) {
     const { error } = await admin.from("entitlements").upsert(
       {
@@ -94,25 +112,107 @@ export async function POST(request: NextRequest) {
       { onConflict: "user_id" },
     );
     if (error) {
-      console.error("[revenuecat-webhook] upsert failed:", error);
+      console.error("[revenuecat-webhook] pro upsert failed:", error);
       return NextResponse.json({ error: "Database write failed" }, { status: 500 });
     }
-    console.log("[revenuecat-webhook] updated subscription", {
-      userId, type: event.type, expiresAt: expiresAt.toISOString(), env: event.environment,
-    });
   } else if (event.type === "EXPIRATION" || event.type === "CANCELLATION") {
     if (!grantsPro) {
-      // Clear pro_source so the next /api/auth/me reflects the lapse.
-      // Leave pro_expires_at as the historical timestamp.
       const { error } = await admin
         .from("entitlements")
         .update({ pro_source: null })
         .eq("user_id", userId)
         .eq("pro_source", "apple_iap");
       if (error) console.warn("[revenuecat-webhook] clear pro_source failed:", error);
-      console.log("[revenuecat-webhook] subscription ended", { userId, type: event.type });
     }
   }
+
+  // Family Plan entitlement — toggle family_plan_active based on the event.
+  // Active when the entitlement is currently granted; flipped off on
+  // EXPIRATION/CANCELLATION when no longer granted.
+  if (grantsFamily) {
+    const { error } = await admin
+      .from("entitlements")
+      .upsert(
+        { user_id: userId, family_plan_active: true },
+        { onConflict: "user_id" },
+      );
+    if (error) console.warn("[revenuecat-webhook] family upsert failed:", error);
+  } else if (event.type === "EXPIRATION" || event.type === "CANCELLATION") {
+    const { error } = await admin
+      .from("entitlements")
+      .update({ family_plan_active: false })
+      .eq("user_id", userId);
+    if (error) console.warn("[revenuecat-webhook] family lapse failed:", error);
+  }
+
+  // Extra seat purchase (subscription product, recurring) — bumps extra_seats.
+  // On initial purchase / renewal we set the floor; on cancel we leave the
+  // count alone until expiration (their last paid period still applies).
+  if (
+    EXTRA_SEAT_PRODUCT_IDS.has(productId) &&
+    (event.type === "INITIAL_PURCHASE" || event.type === "RENEWAL")
+  ) {
+    // Atomic increment by RPC would be cleaner, but a read-modify-write here is
+    // fine for the rare case of seat-purchase webhook races.
+    const { data: currentEnt } = await admin
+      .from("entitlements")
+      .select("extra_seats")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const currentSeats = currentEnt?.extra_seats ?? 0;
+    // Only INITIAL_PURCHASE adds a new seat; RENEWAL just keeps it active.
+    if (event.type === "INITIAL_PURCHASE") {
+      const { error } = await admin
+        .from("entitlements")
+        .upsert(
+          { user_id: userId, extra_seats: currentSeats + 1 },
+          { onConflict: "user_id" },
+        );
+      if (error) console.warn("[revenuecat-webhook] extra_seat bump failed:", error);
+    }
+  } else if (
+    EXTRA_SEAT_PRODUCT_IDS.has(productId) &&
+    (event.type === "EXPIRATION" || event.type === "CANCELLATION")
+  ) {
+    const { data: currentEnt } = await admin
+      .from("entitlements")
+      .select("extra_seats")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const currentSeats = currentEnt?.extra_seats ?? 0;
+    if (currentSeats > 0) {
+      const { error } = await admin
+        .from("entitlements")
+        .update({ extra_seats: currentSeats - 1 })
+        .eq("user_id", userId);
+      if (error) console.warn("[revenuecat-webhook] extra_seat decrement failed:", error);
+    }
+  }
+
+  // Storage plan products — overwrite storage_plan whenever the user has an
+  // active storage product (latest wins if they switch tiers).
+  if (STORAGE_PRODUCT_TO_PLAN[productId] && (event.type === "INITIAL_PURCHASE" || event.type === "PRODUCT_CHANGE" || event.type === "RENEWAL")) {
+    const plan = STORAGE_PRODUCT_TO_PLAN[productId];
+    const { error } = await admin
+      .from("entitlements")
+      .upsert({ user_id: userId, storage_plan: plan }, { onConflict: "user_id" });
+    if (error) console.warn("[revenuecat-webhook] storage_plan set failed:", error);
+  } else if (STORAGE_PRODUCT_TO_PLAN[productId] && (event.type === "EXPIRATION" || event.type === "CANCELLATION")) {
+    const { error } = await admin
+      .from("entitlements")
+      .update({ storage_plan: "free" })
+      .eq("user_id", userId);
+    if (error) console.warn("[revenuecat-webhook] storage_plan reset failed:", error);
+  }
+
+  console.log("[revenuecat-webhook] processed", {
+    userId,
+    type: event.type,
+    productId,
+    grantsPro,
+    grantsFamily,
+    env: event.environment,
+  });
 
   return NextResponse.json({ ok: true });
 }
