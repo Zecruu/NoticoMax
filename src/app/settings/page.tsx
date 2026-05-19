@@ -15,7 +15,8 @@ import { toast } from "@/lib/native-toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { isCapacitorNative, isIOS } from "@/lib/platform";
-import { getDeviceName, setDeviceName } from "@/lib/device";
+import { getDeviceName } from "@/lib/device";
+import { useSidebarPrefs } from "@/hooks/use-sidebar-prefs";
 import { checkBiometricAvailability } from "@/lib/capacitor/biometric-auth";
 import { presentPaywall, presentCustomerCenter } from "@/lib/iap/revenuecat-client";
 import { Sparkles, Settings as SettingsIcon } from "lucide-react";
@@ -125,8 +126,7 @@ export default function SettingsPage() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
-  const [currentDeviceName, setCurrentDeviceName] = useState("");
-  const [deviceNameInput, setDeviceNameInput] = useState("");
+  const sidebarPrefs = useSidebarPrefs();
 
   useEffect(() => {
     if (window.electronAPI?.isElectron) {
@@ -135,11 +135,9 @@ export default function SettingsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    const name = getDeviceName();
-    setCurrentDeviceName(name);
-    setDeviceNameInput(name);
-  }, []);
+  // getDeviceName is still referenced elsewhere in the app (sync conflict
+  // resolution); we just don't surface it in Settings anymore.
+  void getDeviceName;
 
   useEffect(() => {
     if (!isMobile) return;
@@ -547,43 +545,38 @@ export default function SettingsPage() {
           </Card>
         )}
 
-        {/* Device */}
+        {/* Sidebar preferences */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <Monitor className="h-4 w-4" />
-              Device
+              Sidebar
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Device Name</p>
-              <div className="flex gap-2">
-                <Input
-                  value={deviceNameInput}
-                  onChange={(e) => setDeviceNameInput(e.target.value)}
-                  placeholder="Enter device name"
-                  className="h-8 text-sm"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 shrink-0"
-                  disabled={!deviceNameInput.trim() || deviceNameInput.trim() === currentDeviceName}
-                  onClick={() => {
-                    const name = deviceNameInput.trim();
-                    if (!name) return;
-                    setDeviceName(name);
-                    setCurrentDeviceName(name);
-                    toast.success("Device renamed");
-                  }}
-                >
-                  Save
-                </Button>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5 pr-3">
+                <p className="text-sm font-medium">Show Developer section</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Reveals the Passwords, Env Variables, Skills and Codex Prompts entries. Most
+                  users can leave this off.
+                </p>
               </div>
-              <p className="text-[10px] text-muted-foreground mt-1">
-                This name identifies your device when syncing notes across multiple devices.
-              </p>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={sidebarPrefs.showDeveloper}
+                onClick={() => sidebarPrefs.setShowDeveloper(!sidebarPrefs.showDeveloper)}
+                className={`relative inline-flex h-6 w-10 items-center rounded-full transition-colors shrink-0 ${
+                  sidebarPrefs.showDeveloper ? "bg-primary" : "bg-input"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                    sidebarPrefs.showDeveloper ? "translate-x-5" : "translate-x-1"
+                  }`}
+                />
+              </button>
             </div>
           </CardContent>
         </Card>
@@ -735,37 +728,6 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Web Clipper */}
-        {isActivated && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Web Clipper</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Use your license key with the NOTICO MAX browser extension to save clips from any webpage.
-              </p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono truncate">
-                  {licenseKey}
-                </code>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0"
-                  onClick={() => {
-                    if (licenseKey) {
-                      navigator.clipboard.writeText(licenseKey);
-                      toast.success("License key copied");
-                    }
-                  }}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Claude Code Integration */}
         {isLoggedIn && (

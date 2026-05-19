@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { type LocalFolder } from "@/lib/db/indexed-db";
+import { useSidebarPrefs } from "@/hooks/use-sidebar-prefs";
 import {
   FileText,
   Link2,
@@ -115,6 +116,8 @@ export function Sidebar({
     developer: true,
     folders: true,
   });
+
+  const sidebarPrefs = useSidebarPrefs();
 
   // Split folders by ownership: shared folders (with householdId) render under
   // the Shared section; the rest render in the main Folders list.
@@ -376,7 +379,9 @@ export function Sidebar({
           </nav>
         )}
 
-        {/* Developer */}
+        {/* Developer — hidden unless the user enabled it in Settings → Sidebar */}
+        {sidebarPrefs.showDeveloper && (
+          <>
         <button
           onClick={() => toggleSection("developer")}
           className="flex w-full items-center gap-1 px-3 mt-4 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
@@ -443,6 +448,8 @@ export function Sidebar({
               <span className="flex-1 text-left">Env Variables</span>
             </button>
           </nav>
+        )}
+          </>
         )}
 
         {/* Shared — Family & Friends + folders linked to a household */}
