@@ -19,7 +19,10 @@ import {
   UserPlus,
   Hash,
   Sparkles,
+  Stethoscope,
 } from "lucide-react";
+import db from "@/lib/db/indexed-db";
+import { performSync } from "@/lib/sync/sync-engine";
 import { toast } from "@/lib/native-toast";
 
 export function HouseholdsCard() {
@@ -47,6 +50,57 @@ export function HouseholdsCard() {
 
   const [actingRequestToken, setActingRequestToken] = useState<string | null>(null);
   const [buyingSeatForHousehold, setBuyingSeatForHousehold] = useState<string | null>(null);
+  const [diagnosing, setDiagnosing] = useState(false);
+
+  const diagnose = async () => {
+    setDiagnosing(true);
+    try {
+      // Snapshot local state BEFORE sync
+      const before = await db.folders.toArray();
+      const beforeShared = before.filter((f) => !!f.householdId && !f.deleted);
+      const beforePersonal = before.filter((f) => !f.householdId && !f.deleted);
+
+      // Pull from server
+      await performSync();
+
+      // Snapshot AFTER
+      const after = await db.folders.toArray();
+      const afterShared = after.filter((f) => !!f.householdId && !f.deleted);
+      const afterPersonal = after.filter((f) => !f.householdId && !f.deleted);
+
+      // Also hit the debug API to see what the server SAYS we should have
+      let serverFolderCount = "?";
+      let serverSharedCount = "?";
+      let serverErr: string | undefined;
+      try {
+        const res = await fetch("/api/debug/folders", { credentials: "include" });
+        if (res.ok) {
+          const j = await res.json();
+          serverFolderCount = String(j.folders?.count ?? "?");
+          serverSharedCount = String(j.folders?.sharedCount ?? "?");
+          if (j.folders?.error) serverErr = j.folders.error;
+        } else {
+          serverErr = `HTTP ${res.status}`;
+        }
+      } catch (e) {
+        serverErr = e instanceof Error ? e.message : "fetch failed";
+      }
+
+      const lines = [
+        `LOCAL before sync: ${beforePersonal.length} personal + ${beforeShared.length} shared folder(s)`,
+        `LOCAL after sync:  ${afterPersonal.length} personal + ${afterShared.length} shared folder(s)`,
+        `SERVER says:       ${serverFolderCount} total, ${serverSharedCount} shared`,
+        serverErr ? `SERVER error:      ${serverErr}` : null,
+        afterShared.length > 0
+          ? `Shared folder ids: ${afterShared.map((f) => f.name).join(", ")}`
+          : "(no shared folders pulled)",
+      ].filter(Boolean).join("\n");
+
+      alert(lines);
+    } finally {
+      setDiagnosing(false);
+    }
+  };
 
   const buyExtraSeat = async (householdId: string) => {
     setBuyingSeatForHousehold(householdId);
@@ -163,9 +217,20 @@ export function HouseholdsCard() {
           <Users className="h-4 w-4" />
           Family
         </CardTitle>
-        <Button variant="ghost" size="sm" onClick={() => void refresh()} disabled={loading}>
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Refresh"}
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void diagnose()}
+            disabled={diagnosing}
+            title="Show sync state + force a pull from server"
+          >
+            {diagnosing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Stethoscope className="h-3.5 w-3.5" />}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => void refresh()} disabled={loading}>
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Refresh"}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-xs text-muted-foreground">
