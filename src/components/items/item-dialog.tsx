@@ -38,6 +38,15 @@ interface ItemDialogProps {
   allTags?: string[];
 }
 
+// Convert an ISO string from the DB into the value a <input type="datetime-local">
+// expects ("YYYY-MM-DDTHH:MM" in LOCAL time). Without this, the input would
+// show the UTC representation and shift the user's wall-clock time.
+function toLocalDatetimeValue(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingItem, folders, defaultFolderId, defaultType = "note", defaultReminderDate, allTags = [] }: ItemDialogProps) {
   const [type, setType] = useState<ItemType>("note");
   const [title, setTitle] = useState("");
@@ -189,9 +198,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
       setContent(editingItem.content);
       setUrl(editingItem.url || "");
       setReminderDate(
-        editingItem.reminderDate
-          ? new Date(editingItem.reminderDate).toISOString().slice(0, 16)
-          : ""
+        editingItem.reminderDate ? toLocalDatetimeValue(editingItem.reminderDate) : "",
       );
       setTags(editingItem.tags);
       setPinned(editingItem.pinned);
@@ -239,12 +246,22 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
   };
 
   const persist = (finalTitle: string) => {
+    // The datetime-local input value is in LOCAL wall-clock time with no
+    // timezone (e.g. "2026-07-04T01:00"). Postgres timestamptz interprets
+    // unqualified strings as UTC, which shifts the reminder by the user's
+    // offset (Jul 4 1 AM EDT would become Jul 3 9 PM when re-read). Parse it
+    // as local time and serialize as a true ISO with offset.
+    const reminderIso =
+      type === "reminder" && reminderDate
+        ? new Date(reminderDate).toISOString()
+        : undefined;
+
     const itemData = {
       type,
       title: finalTitle,
       content: content.trim(),
       url: type === "url" ? url.trim() : undefined,
-      reminderDate: type === "reminder" && reminderDate ? reminderDate : undefined,
+      reminderDate: reminderIso,
       reminderCompleted: editingItem?.reminderCompleted || false,
       recurrence: type === "reminder" ? recurrence : undefined,
       tags,
