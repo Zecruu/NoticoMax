@@ -98,6 +98,8 @@ export interface LocalBudgetCategory {
   name: string;
   color: string;
   monthlyLimit: number;
+  /** When set, this category is shared with every member of the household. */
+  householdId?: string;
   deviceId?: string;
   deleted: boolean;
   deletedAt?: string;
@@ -113,6 +115,8 @@ export interface LocalBudgetTransaction {
   amount: number;
   note?: string;
   date: string;
+  /** Inherited from the parent category. */
+  householdId?: string;
   deviceId?: string;
   deleted: boolean;
   deletedAt?: string;
@@ -166,6 +170,8 @@ export interface LocalLocation {
   tags: string[];
   pinned: boolean;
   color?: string;
+  /** When set, this location is shared with every member of the household. */
+  householdId?: string;
   deviceId?: string;
   deleted: boolean;
   deletedAt?: string;

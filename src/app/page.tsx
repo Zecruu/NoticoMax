@@ -20,6 +20,7 @@ import { BudgetView } from "@/components/budget/budget-view";
 import { GoalsView } from "@/components/goals/goals-view";
 import { LocationsView } from "@/components/locations/locations-view";
 import { FamilyView } from "@/components/family/family-view";
+import { FamilyFolderView } from "@/components/family/family-folder-view";
 import { useLicense } from "@/hooks/use-license";
 import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
@@ -311,6 +312,21 @@ export default function Dashboard() {
             <LocationsView />
           ) : activeView === "family" ? (
             <FamilyView />
+          ) : activeFolder && folders.find((f) => f.clientId === activeFolder)?.householdId ? (
+            (() => {
+              const sharedFolder = folders.find((f) => f.clientId === activeFolder)!;
+              return (
+                <FamilyFolderView
+                  folder={sharedFolder}
+                  onCreateItem={(type, folderId) => {
+                    setActiveFolder(folderId);
+                    handleCreateWithType(type);
+                  }}
+                  onEditItem={handleEdit}
+                  onOpenBudget={() => setActiveView("budget")}
+                />
+              );
+            })()
           ) : (
             <ItemList
               items={displayedItems}

@@ -107,6 +107,7 @@ interface SupabaseLocation {
   tags: string[];
   pinned: boolean;
   color: string | null;
+  household_id: string | null;
   device_id: string | null;
   deleted: boolean;
   deleted_at: string | null;
@@ -200,6 +201,7 @@ function localToSupabaseLocation(loc: LocalLocation, userId: string): Partial<Su
     tags: loc.tags ?? [],
     pinned: loc.pinned ?? false,
     color: loc.color ?? null,
+    household_id: loc.householdId ?? null,
     device_id: loc.deviceId ?? null,
     deleted: loc.deleted ?? false,
     deleted_at: loc.deletedAt ?? null,
@@ -219,6 +221,7 @@ function supabaseToLocalLocation(row: SupabaseLocation): LocalLocation {
     tags: row.tags ?? [],
     pinned: row.pinned ?? false,
     color: row.color ?? undefined,
+    householdId: row.household_id ?? undefined,
     deviceId: row.device_id ?? undefined,
     deleted: row.deleted ?? false,
     deletedAt: row.deleted_at ?? undefined,
@@ -235,6 +238,7 @@ interface SupabaseBudgetCategory {
   name: string;
   color: string;
   monthly_limit: number;
+  household_id: string | null;
   device_id: string | null;
   deleted: boolean;
   deleted_at: string | null;
@@ -249,6 +253,7 @@ interface SupabaseBudgetTransaction {
   amount: number;
   note: string | null;
   date: string;
+  household_id: string | null;
   device_id: string | null;
   deleted: boolean;
   deleted_at: string | null;
@@ -269,6 +274,7 @@ function localToSupabaseBudgetCategory(c: LocalBudgetCategory, userId: string): 
     name: c.name,
     color: c.color,
     monthly_limit: c.monthlyLimit,
+    household_id: c.householdId ?? null,
     device_id: c.deviceId ?? null,
     deleted: c.deleted ?? false,
     deleted_at: c.deletedAt ?? null,
@@ -283,6 +289,7 @@ function supabaseToLocalBudgetCategory(row: SupabaseBudgetCategory): LocalBudget
     name: row.name,
     color: row.color,
     monthlyLimit: Number(row.monthly_limit),
+    householdId: row.household_id ?? undefined,
     deviceId: row.device_id ?? undefined,
     deleted: row.deleted ?? false,
     deletedAt: row.deleted_at ?? undefined,
@@ -299,6 +306,7 @@ function localToSupabaseBudgetTransaction(t: LocalBudgetTransaction, userId: str
     amount: t.amount,
     note: t.note ?? null,
     date: t.date,
+    household_id: t.householdId ?? null,
     device_id: t.deviceId ?? null,
     deleted: t.deleted ?? false,
     deleted_at: t.deletedAt ?? null,
@@ -314,6 +322,7 @@ function supabaseToLocalBudgetTransaction(row: SupabaseBudgetTransaction): Local
     amount: Number(row.amount),
     note: row.note ?? undefined,
     date: row.date,
+    householdId: row.household_id ?? undefined,
     deviceId: row.device_id ?? undefined,
     deleted: row.deleted ?? false,
     deletedAt: row.deleted_at ?? undefined,
@@ -809,7 +818,7 @@ export async function getLocations(searchQuery?: string): Promise<LocalLocation[
 // ─── BUDGET OPERATIONS ───
 
 export async function createBudgetCategory(
-  input: { name: string; color: string; monthlyLimit: number } & { clientId?: string; createdAt?: string },
+  input: { name: string; color: string; monthlyLimit: number; householdId?: string } & { clientId?: string; createdAt?: string },
 ): Promise<LocalBudgetCategory> {
   const now = new Date().toISOString();
   const clientId = input.clientId ?? uuidv4();
@@ -820,6 +829,7 @@ export async function createBudgetCategory(
     name: input.name,
     color: input.color,
     monthlyLimit: input.monthlyLimit,
+    householdId: input.householdId,
     deviceId,
     deleted: false,
     createdAt: input.createdAt ?? now,
@@ -874,12 +884,17 @@ export async function createBudgetTransaction(
   const clientId = input.clientId ?? uuidv4();
   const deviceId = getDeviceId();
 
+  // Transactions inherit their parent category's householdId — if you spend
+  // against a family-shared category, the transaction is shared too.
+  const parentCat = await db.budgetCategories.where("clientId").equals(input.categoryId).first();
+
   const local: LocalBudgetTransaction = {
     clientId,
     categoryId: input.categoryId,
     amount: input.amount,
     note: input.note,
     date: input.date,
+    householdId: parentCat?.householdId,
     deviceId,
     deleted: false,
     createdAt: now,
