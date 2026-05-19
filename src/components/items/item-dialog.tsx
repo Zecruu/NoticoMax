@@ -321,19 +321,28 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
           >
             <X className="h-5 w-5" />
           </button>
-          <DialogTitle className="text-sm font-semibold truncate">
+          <DialogTitle className="text-sm font-semibold truncate flex-1 text-center px-2">
             {editingItem ? "Edit Item" : "New Item"}
           </DialogTitle>
-          <button
-            type="button"
-            onClick={handleDelete}
-            disabled={!editingItem || !onDelete}
-            className="inline-flex items-center justify-center h-9 w-9 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-            aria-label="Delete"
-            title={editingItem ? "Delete" : "Save first to delete"}
-          >
-            <Trash2 className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={!editingItem || !onDelete}
+              className="inline-flex items-center justify-center h-9 w-9 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Delete"
+              title={editingItem ? "Delete" : "Save first to delete"}
+            >
+              <Trash2 className="h-5 w-5" />
+            </button>
+            <Button
+              size="sm"
+              onClick={finalizeAndClose}
+              className="font-semibold h-9 px-4"
+            >
+              Save
+            </Button>
+          </div>
         </div>
 
         {/* Body */}
