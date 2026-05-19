@@ -98,6 +98,10 @@ export function useHouseholds(): UseHouseholdsResult {
       const data = await res.json();
       setHouseholds(data.households ?? []);
       setPendingInvites(data.pendingInvites ?? []);
+      // Also trigger a sync so any auto-created family folder lands in
+      // IndexedDB right after a household appears/changes. Cheap when nothing
+      // changed; essential after the first household create.
+      void performSync();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load households");
     } finally {
