@@ -17,6 +17,7 @@ import {
   Tag,
   Calendar,
   BookOpen,
+  HeartHandshake,
   Lock,
   Wand2,
   ChevronDown,
@@ -339,6 +340,23 @@ export function Sidebar({
             >
               <Wallet className="h-4 w-4" />
               <span className="flex-1 text-left">BudgetMaxxing</span>
+            </button>
+
+            <button
+              onClick={() => {
+                onFolderChange(null);
+                onViewChange?.("family");
+                onTagChange?.(null);
+              }}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                activeView === "family"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <HeartHandshake className="h-4 w-4" />
+              <span className="flex-1 text-left">Family & Friends</span>
             </button>
 
             <button

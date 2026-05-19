@@ -25,16 +25,19 @@ interface PlanTier {
   requiresFamily?: boolean;
 }
 
+// Pricing reflects Supabase Storage cost (~$0.021/GB/mo) + ~40-90% margin
+// depending on tier. 200GB+ tiers cost real money so margins are thinner
+// (~30% vs Apple's iCloud at $2.99 for 200GB / $9.99 for 2TB).
 const PERSONAL_TIERS: PlanTier[] = [
   { plan: "personal_5gb",   productId: "storage_personal_5gb",   label: "Personal 5 GB",   bytes: 5 * 1024 ** 3,   monthly: "$0.99" },
-  { plan: "personal_50gb",  productId: "storage_personal_50gb",  label: "Personal 50 GB",  bytes: 50 * 1024 ** 3,  monthly: "$1.99" },
-  { plan: "personal_200gb", productId: "storage_personal_200gb", label: "Personal 200 GB", bytes: 200 * 1024 ** 3, monthly: "$3.99" },
+  { plan: "personal_50gb",  productId: "storage_personal_50gb",  label: "Personal 50 GB",  bytes: 50 * 1024 ** 3,  monthly: "$2.99" },
+  { plan: "personal_200gb", productId: "storage_personal_200gb", label: "Personal 200 GB", bytes: 200 * 1024 ** 3, monthly: "$5.99" },
 ];
 
 const FAMILY_TIERS: PlanTier[] = [
-  { plan: "family_20gb",  productId: "storage_family_20gb",  label: "Family 20 GB",  bytes: 20 * 1024 ** 3,  monthly: "$2.99", requiresFamily: true },
-  { plan: "family_100gb", productId: "storage_family_100gb", label: "Family 100 GB", bytes: 100 * 1024 ** 3, monthly: "$4.99", requiresFamily: true },
-  { plan: "family_500gb", productId: "storage_family_500gb", label: "Family 500 GB", bytes: 500 * 1024 ** 3, monthly: "$9.99", requiresFamily: true },
+  { plan: "family_20gb",  productId: "storage_family_20gb",  label: "Family 20 GB",  bytes: 20 * 1024 ** 3,  monthly: "$2.99",  requiresFamily: true },
+  { plan: "family_100gb", productId: "storage_family_100gb", label: "Family 100 GB", bytes: 100 * 1024 ** 3, monthly: "$4.99",  requiresFamily: true },
+  { plan: "family_500gb", productId: "storage_family_500gb", label: "Family 500 GB", bytes: 500 * 1024 ** 3, monthly: "$14.99", requiresFamily: true },
 ];
 
 function formatBytes(bytes: number): string {

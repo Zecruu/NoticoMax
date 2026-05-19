@@ -19,6 +19,7 @@ import { SkillsView } from "@/components/skills/skills-view";
 import { BudgetView } from "@/components/budget/budget-view";
 import { GoalsView } from "@/components/goals/goals-view";
 import { LocationsView } from "@/components/locations/locations-view";
+import { FamilyView } from "@/components/family/family-view";
 import { useLicense } from "@/hooks/use-license";
 import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
@@ -308,6 +309,8 @@ export default function Dashboard() {
             <GoalsView />
           ) : activeView === "locations" ? (
             <LocationsView />
+          ) : activeView === "family" ? (
+            <FamilyView />
           ) : (
             <ItemList
               items={displayedItems}

@@ -213,6 +213,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: mErr.message }, { status: 500 });
   }
 
+  // Auto-create a default folder for the new household so the owner has
+  // something tangible to put shared notes/reminders/lists into right away.
+  // Name it after the household (e.g. "Demchak Family"). Share mode 'all' =
+  // every member can read & write by default — they can tighten later.
+  const folderColor = "#10B981"; // brand emerald
+  const { error: fErr } = await admin.from("folders").insert({
+    user_id: userId,
+    name,
+    color: folderColor,
+    household_id: household.id,
+    share_mode: "all",
+  });
+  if (fErr) {
+    // Don't roll back the household if the folder fails — it's a nice-to-have.
+    // Log so we notice if it starts failing systematically.
+    console.warn("[households] auto-folder failed:", fErr.message);
+  }
+
   return NextResponse.json({
     id: household.id,
     name: household.name,
