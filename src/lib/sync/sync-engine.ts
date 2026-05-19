@@ -1316,7 +1316,10 @@ async function pullChanges(userId: string): Promise<void> {
   const supabase = getSupabaseBrowserClient();
   const lastSync = getLastSync();
 
-  let itemsQuery = supabase.from("items").select("*").eq("user_id", userId);
+  // No user_id filter here — RLS already returns owned items + items the user
+  // can see through household membership. Filtering by user_id would exclude
+  // household-shared content owned by other members.
+  let itemsQuery = supabase.from("items").select("*");
   if (lastSync) itemsQuery = itemsQuery.gt("updated_at", lastSync);
   const { data: items } = await itemsQuery;
 
@@ -1337,7 +1340,7 @@ async function pullChanges(userId: string): Promise<void> {
     }
   }
 
-  let foldersQuery = supabase.from("folders").select("*").eq("user_id", userId);
+  let foldersQuery = supabase.from("folders").select("*");
   if (lastSync) foldersQuery = foldersQuery.gt("updated_at", lastSync);
   const { data: folders } = await foldersQuery;
 
@@ -1358,7 +1361,7 @@ async function pullChanges(userId: string): Promise<void> {
     }
   }
 
-  let locationsQuery = supabase.from("locations").select("*").eq("user_id", userId);
+  let locationsQuery = supabase.from("locations").select("*");
   if (lastSync) locationsQuery = locationsQuery.gt("updated_at", lastSync);
   const { data: locations } = await locationsQuery;
 
@@ -1379,7 +1382,7 @@ async function pullChanges(userId: string): Promise<void> {
     }
   }
 
-  let bcQuery = supabase.from("budget_categories").select("*").eq("user_id", userId);
+  let bcQuery = supabase.from("budget_categories").select("*");
   if (lastSync) bcQuery = bcQuery.gt("updated_at", lastSync);
   const { data: budgetCats } = await bcQuery;
   if (budgetCats) {
@@ -1399,7 +1402,7 @@ async function pullChanges(userId: string): Promise<void> {
     }
   }
 
-  let btQuery = supabase.from("budget_transactions").select("*").eq("user_id", userId);
+  let btQuery = supabase.from("budget_transactions").select("*");
   if (lastSync) btQuery = btQuery.gt("updated_at", lastSync);
   const { data: budgetTxns } = await btQuery;
   if (budgetTxns) {
@@ -1419,7 +1422,7 @@ async function pullChanges(userId: string): Promise<void> {
     }
   }
 
-  let bovQuery = supabase.from("budget_category_overrides").select("*").eq("user_id", userId);
+  let bovQuery = supabase.from("budget_category_overrides").select("*");
   if (lastSync) bovQuery = bovQuery.gt("updated_at", lastSync);
   const { data: budgetOverrides } = await bovQuery;
   if (budgetOverrides) {
