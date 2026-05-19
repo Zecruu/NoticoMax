@@ -376,6 +376,45 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
             className="text-lg font-semibold border-0 px-0 shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/50"
           />
 
+          {/* Folder picker — always visible. Choosing a family-shared folder
+              auto-shares the item with that household via inheritance. */}
+          {folders.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Label htmlFor="folder-select" className="text-xs text-muted-foreground shrink-0">
+                Save to
+              </Label>
+              <Select
+                value={folderId || "none"}
+                onValueChange={(v) => setFolderId(v === "none" ? undefined : v)}
+              >
+                <SelectTrigger id="folder-select" className="h-8 flex-1">
+                  <SelectValue placeholder="No folder" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    <span className="text-muted-foreground">No folder</span>
+                  </SelectItem>
+                  {folders.map((folder) => (
+                    <SelectItem key={folder.clientId} value={folder.clientId}>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="h-2.5 w-2.5 rounded-sm shrink-0"
+                          style={{ backgroundColor: folder.color || "#6b7280" }}
+                        />
+                        <span>{folder.name}</span>
+                        {folder.householdId && (
+                          <span className="text-[9px] rounded-full bg-primary/15 text-primary px-1 py-0.5 font-semibold uppercase tracking-wider">
+                            Family
+                          </span>
+                        )}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           {type === "url" && (
             <div className="space-y-2">
               <Label htmlFor="url">URL</Label>
@@ -541,34 +580,6 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
             </button>
             {detailsOpen && (
               <div className="border-t px-3 py-3 space-y-3">
-                {folders.length > 0 && (
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Folder</Label>
-                    <Select
-                      value={folderId || "none"}
-                      onValueChange={(v) => setFolderId(v === "none" ? undefined : v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="No folder" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No folder</SelectItem>
-                        {folders.map((folder) => (
-                          <SelectItem key={folder.clientId} value={folder.clientId}>
-                            <div className="flex items-center gap-2">
-                              <div
-                                className="h-2.5 w-2.5 rounded-sm shrink-0"
-                                style={{ backgroundColor: folder.color || "#6b7280" }}
-                              />
-                              {folder.name}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
                 <div className="space-y-1.5">
                   <Label className="text-xs">Tags</Label>
                   <div className="flex gap-2">
