@@ -28,6 +28,8 @@ export interface LocalItem {
   pinned: boolean;
   color?: string;
   folderId?: string;
+  /** Inherited from the parent folder when saved into a shared folder. */
+  householdId?: string;
   deviceId?: string;
   deleted: boolean;
   deletedAt?: string;

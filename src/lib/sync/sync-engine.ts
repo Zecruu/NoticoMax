@@ -75,6 +75,7 @@ interface SupabaseItem {
   pinned: boolean;
   color: string | null;
   folder_id: string | null;
+  household_id: string | null;
   device_id: string | null;
   deleted: boolean;
   deleted_at: string | null;
@@ -128,6 +129,7 @@ function localToSupabaseItem(item: LocalItem, userId: string): Partial<SupabaseI
     pinned: item.pinned ?? false,
     color: item.color ?? null,
     folder_id: item.folderId ?? null,
+    household_id: item.householdId ?? null,
     device_id: item.deviceId ?? null,
     deleted: item.deleted ?? false,
     deleted_at: item.deletedAt ?? null,
@@ -150,6 +152,7 @@ function supabaseToLocalItem(row: SupabaseItem): LocalItem {
     pinned: row.pinned ?? false,
     color: row.color ?? undefined,
     folderId: row.folder_id ?? undefined,
+    householdId: row.household_id ?? undefined,
     deviceId: row.device_id ?? undefined,
     deleted: row.deleted ?? false,
     deletedAt: row.deleted_at ?? undefined,
@@ -418,17 +421,28 @@ function supabaseToLocalGoal(row: SupabaseGoal): LocalGoal {
 
 // ─── ITEM OPERATIONS (write through IndexedDB → enqueue → flush) ───
 
+// Items inherit their parent folder's householdId so dropping a note into the
+// family folder automatically shares it. Re-resolved on every save so moving
+// an item out of a shared folder un-shares it.
+async function resolveHouseholdIdFromFolder(folderId: string | undefined): Promise<string | undefined> {
+  if (!folderId) return undefined;
+  const folder = await db.folders.where("clientId").equals(folderId).first();
+  return folder?.householdId ?? undefined;
+}
+
 export async function createItem(
   item: Omit<LocalItem, "id" | "clientId" | "createdAt" | "updatedAt" | "deleted">
 ): Promise<LocalItem> {
   const now = new Date().toISOString();
   const clientId = uuidv4();
   const deviceId = getDeviceId();
+  const householdId = item.householdId ?? (await resolveHouseholdIdFromFolder(item.folderId));
 
   const localItem: LocalItem = {
     ...item,
     clientId,
     deviceId,
+    householdId,
     deleted: false,
     createdAt: now,
     updatedAt: now,
@@ -466,7 +480,15 @@ export async function updateItem(
   const item = await db.items.where("clientId").equals(clientId).first();
   if (!item) return undefined;
 
-  const updatedData = { ...updates, updatedAt: now };
+  // If the folder changed (or this is the first save and householdId wasn't
+  // set explicitly), re-resolve the householdId from the destination folder.
+  // Moving a note into the family folder → shares it. Moving out → un-shares.
+  let householdIdPatch: { householdId?: string } = {};
+  if (updates.folderId !== undefined && updates.folderId !== item.folderId) {
+    householdIdPatch = { householdId: await resolveHouseholdIdFromFolder(updates.folderId) };
+  }
+
+  const updatedData = { ...updates, ...householdIdPatch, updatedAt: now };
   await db.items.where("clientId").equals(clientId).modify((i) => {
     Object.assign(i, updatedData);
   });
