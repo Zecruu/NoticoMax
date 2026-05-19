@@ -111,9 +111,15 @@ export function Sidebar({
   const [deletingFolder, setDeletingFolder] = useState<LocalFolder | null>(null);
   const [sectionsOpen, setSectionsOpen] = useState({
     general: true,
+    shared: true,
     developer: true,
     folders: true,
   });
+
+  // Split folders by ownership: shared folders (with householdId) render under
+  // the Shared section; the rest render in the main Folders list.
+  const personalFolders = folders.filter((f) => !f.householdId);
+  const sharedFolders = folders.filter((f) => !!f.householdId);
 
   const toggleSection = (key: keyof typeof sectionsOpen) =>
     setSectionsOpen((s) => ({ ...s, [key]: !s[key] }));
@@ -342,22 +348,6 @@ export function Sidebar({
               <span className="flex-1 text-left">BudgetMaxxing</span>
             </button>
 
-            <button
-              onClick={() => {
-                onFolderChange(null);
-                onViewChange?.("family");
-                onTagChange?.(null);
-              }}
-              className={cn(
-                "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                activeView === "family"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              )}
-            >
-              <HeartHandshake className="h-4 w-4" />
-              <span className="flex-1 text-left">Family & Friends</span>
-            </button>
 
             <button
               onClick={() => {
@@ -455,6 +445,81 @@ export function Sidebar({
           </nav>
         )}
 
+        {/* Shared — Family & Friends + folders linked to a household */}
+        <button
+          onClick={() => toggleSection("shared")}
+          className="flex w-full items-center gap-1 px-3 mt-4 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+        >
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 transition-transform",
+              !sectionsOpen.shared && "-rotate-90"
+            )}
+          />
+          Shared
+        </button>
+
+        {sectionsOpen.shared && (
+          <nav className="space-y-1">
+            <button
+              onClick={() => {
+                onFolderChange(null);
+                onViewChange?.("family");
+                onTagChange?.(null);
+              }}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                activeView === "family"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <HeartHandshake className="h-4 w-4" />
+              <span className="flex-1 text-left">Family & Friends</span>
+            </button>
+
+            {sharedFolders.map((folder) => (
+              <div
+                key={folder.clientId}
+                className={cn(
+                  "group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors cursor-pointer",
+                  activeFolder === folder.clientId
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+                onClick={() => {
+                  onFolderChange(folder.clientId);
+                  onFilterChange("all");
+                  onViewChange?.("list");
+                  onTagChange?.(null);
+                }}
+              >
+                <div
+                  className="h-3 w-3 rounded-sm shrink-0"
+                  style={{ backgroundColor: folder.color || "#10B981" }}
+                />
+                <span className="flex-1 text-left truncate">{folder.name}</span>
+                <span
+                  className={cn(
+                    "text-xs tabular-nums",
+                    activeFolder === folder.clientId
+                      ? "text-primary-foreground/70"
+                      : "text-muted-foreground"
+                  )}
+                >
+                  {folderItemCounts[folder.clientId] || 0}
+                </span>
+              </div>
+            ))}
+
+            {sharedFolders.length === 0 && (
+              <p className="px-3 py-1 text-[11px] text-muted-foreground/60">
+                Create a family above — its folder shows up here automatically.
+              </p>
+            )}
+          </nav>
+        )}
+
         {/* Folders */}
         <div className="flex items-center justify-between px-3 mt-4 mb-2">
           <button
@@ -504,7 +569,7 @@ export function Sidebar({
             </div>
           )}
 
-          {folders.map((folder) => (
+          {personalFolders.map((folder) => (
             <div
               key={folder.clientId}
               className={cn(
@@ -631,7 +696,7 @@ export function Sidebar({
             </div>
           ))}
 
-          {folders.length === 0 && !creating && (
+          {personalFolders.length === 0 && !creating && (
             <p className="px-3 py-2 text-xs text-muted-foreground/60">
               Click + to create a folder
             </p>
