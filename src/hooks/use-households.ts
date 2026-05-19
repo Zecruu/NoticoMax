@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { performSync } from "@/lib/sync/sync-engine";
 
 export interface HouseholdMember {
   userId: string;
@@ -119,6 +120,10 @@ export function useHouseholds(): UseHouseholdsResult {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return { success: false as const, error: data.error || "Failed to create" };
       await refresh();
+      // The server creates a default folder for the new household. Pull it
+      // into IndexedDB now so the user sees it immediately — otherwise it'd
+      // wait for realtime or the next visibility-change sync.
+      void performSync();
       return { success: true as const };
     },
     [refresh],
@@ -135,6 +140,9 @@ export function useHouseholds(): UseHouseholdsResult {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return { success: false as const, error: data.error || "Failed to request" };
       await refresh();
+      // If they were already a member (no-op success), pull shared content
+      // so the family folder + items show up on this device too.
+      if (data.alreadyMember) void performSync();
       return {
         success: true as const,
         alreadyMember: !!data.alreadyMember,
@@ -156,6 +164,10 @@ export function useHouseholds(): UseHouseholdsResult {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return { success: false as const, error: data.error || "Failed to update request" };
       await refresh();
+      // After approving, the new member's next visibility-change sync pulls
+      // shared content. On this admin device there's nothing new to pull,
+      // but trigger anyway in case other state changed.
+      void performSync();
       return { success: true as const };
     },
     [refresh],
