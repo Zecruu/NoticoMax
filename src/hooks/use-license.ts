@@ -71,13 +71,20 @@ interface MeResponse {
   entitlements?: ComputedEntitlements;
 }
 
-async function fetchMe(): Promise<MeResponse | null> {
+type FetchMeResult =
+  | { kind: "ok"; data: MeResponse }
+  | { kind: "unauthenticated" } // server says no — really log them out
+  | { kind: "network-error" }; // offline / timeout — keep cached state
+
+async function fetchMe(): Promise<FetchMeResult> {
   try {
     const res = await fetch("/api/auth/me", { credentials: "include" });
-    if (!res.ok) return null;
-    return (await res.json()) as MeResponse;
+    if (res.status === 401) return { kind: "unauthenticated" };
+    if (!res.ok) return { kind: "network-error" };
+    return { kind: "ok", data: (await res.json()) as MeResponse };
   } catch {
-    return null;
+    // Network failure (DNS, offline, timeout). Do NOT interpret as logged out.
+    return { kind: "network-error" };
   }
 }
 
@@ -88,38 +95,75 @@ export function useLicense() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [entitlements, setEntitlements] = useState<ComputedEntitlements>(FREE_ENTITLEMENTS);
 
-  // Refresh state from /api/auth/me; called on mount and on auth changes.
+  // Refresh state. Order matters for offline support:
+  //   1. Check the locally-cached Supabase session first. If we have one,
+  //      the user IS logged in for UI purposes even with no network — they
+  //      can read/edit everything in IndexedDB, and sync will resume when
+  //      the network comes back.
+  //   2. Try /api/auth/me ONLY if online. Use the result to refresh
+  //      entitlements. A 401 means the session is genuinely revoked → log
+  //      out. A network error means offline → keep the cached state.
   const refresh = useCallback(async () => {
-    const me = await fetchMe();
-    if (me?.authenticated && me.userId) {
-      await wipeIfUserChanged(me.userId);
-      setUserId(me.userId);
-      setEmail(me.email ?? null);
-      setIsLoggedIn(true);
-      const ent = me.entitlements ?? FREE_ENTITLEMENTS;
-      setEntitlements(ent);
-      try {
-        localStorage.setItem(ENTITLEMENTS_KEY, JSON.stringify(ent));
-      } catch {}
-      // Tell RevenueCat which Supabase user this device represents so a
-      // purchase webhook can be matched back to the right entitlements row.
-      // Anonymous purchases that happened before logIn are aliased to this
-      // userId by RC automatically.
-      import("@/lib/iap/revenuecat-client")
-        .then(({ identifyIAPUser }) => identifyIAPUser(me.userId!))
-        .catch(() => { /* iap optional */ });
-    } else {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+
+    // No local session at all → unambiguously logged out.
+    if (!session) {
       setUserId(null);
       setEmail(null);
       setIsLoggedIn(false);
       setEntitlements(FREE_ENTITLEMENTS);
-      try {
-        localStorage.removeItem(ENTITLEMENTS_KEY);
-      } catch {}
+      try { localStorage.removeItem(ENTITLEMENTS_KEY); } catch {}
+      import("@/lib/iap/revenuecat-client")
+        .then(({ resetIAPUser }) => resetIAPUser())
+        .catch(() => { /* iap optional */ });
+      return;
+    }
+
+    // We have a local session. Seed UI from it + cached entitlements right
+    // away so the app is usable instantly, even if /api/auth/me hangs or
+    // there's no network.
+    const cachedUserId = session.user.id;
+    const cachedEmail = session.user.email ?? null;
+    await wipeIfUserChanged(cachedUserId);
+    setUserId(cachedUserId);
+    setEmail(cachedEmail);
+    setIsLoggedIn(true);
+
+    let cachedEntitlements: ComputedEntitlements = FREE_ENTITLEMENTS;
+    try {
+      const raw = localStorage.getItem(ENTITLEMENTS_KEY);
+      if (raw) cachedEntitlements = JSON.parse(raw) as ComputedEntitlements;
+    } catch {}
+    setEntitlements(cachedEntitlements);
+
+    import("@/lib/iap/revenuecat-client")
+      .then(({ identifyIAPUser }) => identifyIAPUser(cachedUserId))
+      .catch(() => { /* iap optional */ });
+
+    // Skip the server hit when we know we're offline.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+
+    // Try to refresh from the server. Different outcomes:
+    //   ok: update entitlements + cache
+    //   unauthenticated (401): session was revoked server-side, log out
+    //   network-error: keep cached state — DON'T log out
+    const result = await fetchMe();
+    if (result.kind === "ok" && result.data.authenticated) {
+      const ent = result.data.entitlements ?? FREE_ENTITLEMENTS;
+      setEntitlements(ent);
+      try { localStorage.setItem(ENTITLEMENTS_KEY, JSON.stringify(ent)); } catch {}
+    } else if (result.kind === "unauthenticated") {
+      setUserId(null);
+      setEmail(null);
+      setIsLoggedIn(false);
+      setEntitlements(FREE_ENTITLEMENTS);
+      try { localStorage.removeItem(ENTITLEMENTS_KEY); } catch {}
       import("@/lib/iap/revenuecat-client")
         .then(({ resetIAPUser }) => resetIAPUser())
         .catch(() => { /* iap optional */ });
     }
+    // network-error → silently keep the cached UI state
   }, []);
 
   // Subscribe to Supabase auth state and seed initial state.
