@@ -11,6 +11,7 @@ import { exportData, importData } from "@/lib/import-export";
 import { HouseholdsCard } from "@/components/settings/households-card";
 import { StorageCard } from "@/components/settings/storage-card";
 import { ClaudeTokensCard } from "@/components/settings/claude-tokens-card";
+import { BootstrapCurl } from "@/components/settings/bootstrap-curl";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -745,28 +746,10 @@ export default function SettingsPage() {
 
               <ClaudeTokensCard />
 
-              <div>
-                <p className="text-xs text-muted-foreground mb-1.5">Quick Setup (run on a new computer)</p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono truncate">
-                    curl -s {typeof window !== "undefined" ? window.location.origin : "https://www.noticomax.com"}/api/skills/bootstrap -o ~/.claude/skills/noticomax/SKILL.md --create-dirs
-                  </code>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => {
-                      const origin = typeof window !== "undefined" ? window.location.origin : "https://www.noticomax.com";
-                      navigator.clipboard.writeText(
-                        `curl -s ${origin}/api/skills/bootstrap -o ~/.claude/skills/noticomax/SKILL.md --create-dirs`
-                      );
-                      toast.success("Setup command copied");
-                    }}
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
+              <BootstrapCurl
+                bootstrapPath="/api/skills/bootstrap"
+                outPath="~/.claude/skills/noticomax/SKILL.md"
+              />
 
               <div className="rounded-md border border-dashed p-3 space-y-1.5">
                 <p className="text-xs font-medium flex items-center gap-1.5">
@@ -797,28 +780,10 @@ export default function SettingsPage() {
                 Sync your Codex CLI prompts (<code className="bg-muted px-1 rounded text-xs">~/.codex/prompts/*.md</code>) across computers using one of your NoticoMax API tokens above.
               </p>
 
-              <div>
-                <p className="text-xs text-muted-foreground mb-1.5">Quick Setup (run on a new computer)</p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono truncate">
-                    curl -s {typeof window !== "undefined" ? window.location.origin : "https://www.noticomax.com"}/api/skills/bootstrap?tool=codex -o ~/.codex/prompts/noticomax.md --create-dirs
-                  </code>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => {
-                      const origin = typeof window !== "undefined" ? window.location.origin : "https://www.noticomax.com";
-                      navigator.clipboard.writeText(
-                        `curl -s ${origin}/api/skills/bootstrap?tool=codex -o ~/.codex/prompts/noticomax.md --create-dirs`
-                      );
-                      toast.success("Setup command copied");
-                    }}
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
+              <BootstrapCurl
+                bootstrapPath="/api/skills/bootstrap?tool=codex"
+                outPath="~/.codex/prompts/noticomax.md"
+              />
 
               <div className="rounded-md border border-dashed p-3 space-y-1.5">
                 <p className="text-xs font-medium flex items-center gap-1.5">
@@ -849,28 +814,10 @@ export default function SettingsPage() {
                 Let Claude Code (or Codex) save and retrieve env vars — AWS keys, API tokens, database URLs — from your NoticoMax account so you stop pasting them into prompts. Requires an API token with the <strong>envvars</strong> scope.
               </p>
 
-              <div>
-                <p className="text-xs text-muted-foreground mb-1.5">Quick Setup (run on a new computer)</p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono truncate">
-                    curl -s {typeof window !== "undefined" ? window.location.origin : "https://app.noticomax.com"}/api/skills/bootstrap?tool=env -o ~/.claude/skills/noticomax-env/SKILL.md --create-dirs
-                  </code>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => {
-                      const origin = typeof window !== "undefined" ? window.location.origin : "https://app.noticomax.com";
-                      navigator.clipboard.writeText(
-                        `curl -s ${origin}/api/skills/bootstrap?tool=env -o ~/.claude/skills/noticomax-env/SKILL.md --create-dirs`
-                      );
-                      toast.success("Setup command copied");
-                    }}
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
+              <BootstrapCurl
+                bootstrapPath="/api/skills/bootstrap?tool=env"
+                outPath="~/.claude/skills/noticomax-env/SKILL.md"
+              />
 
               <div className="rounded-md border border-dashed p-3 space-y-1.5">
                 <p className="text-xs font-medium flex items-center gap-1.5">
