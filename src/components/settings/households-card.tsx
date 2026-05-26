@@ -356,7 +356,7 @@ export function HouseholdsCard() {
                       ) : (
                         <Plus className="h-3 w-3" />
                       )}
-                      Add seat ($1/mo)
+                      Add seat ($0.99/mo)
                     </Button>
                   )}
                 </div>
@@ -488,11 +488,11 @@ export function HouseholdsCard() {
             <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-primary" />
-                <span className="text-sm font-semibold">Family Plan — $5/mo</span>
+                <span className="text-sm font-semibold">Family Plan — $4.99/mo</span>
               </div>
               <p className="text-xs text-muted-foreground">
                 Includes everything in Pro + a shared family folder (notes, reminders, lists,
-                passwords), 5 seats, and family cloud storage. Add more seats for $1/mo each.
+                passwords), 5 seats, and family cloud storage. Add more seats for $0.99/mo each.
               </p>
               <Button onClick={() => void startFamilyPlanUpgrade()} size="sm" className="gap-1.5 w-full">
                 <Sparkles className="h-3.5 w-3.5" />
