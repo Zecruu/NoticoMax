@@ -1,13 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// GET /api/skills/bootstrap          -> Claude Code SKILL.md (default)
+// GET /api/skills/bootstrap            -> Claude Code SKILL.md (default)
 // GET /api/skills/bootstrap?tool=codex -> Codex CLI prompt file
+// GET /api/skills/bootstrap?tool=env   -> /noticomax-env skill (env var sync)
 // No auth required — this is the entry point for first-time setup
 export async function GET(request: NextRequest) {
   const tool = new URL(request.url).searchParams.get("tool");
 
   if (tool === "codex") {
     return new NextResponse(codexPromptMd, {
+      headers: { "Content-Type": "text/markdown; charset=utf-8" },
+    });
+  }
+
+  if (tool === "env") {
+    return new NextResponse(envSkillMd, {
       headers: { "Content-Type": "text/markdown; charset=utf-8" },
     });
   }
@@ -202,4 +209,155 @@ All endpoints require \`Authorization: Bearer {sessionToken}\`.
 - Use \`curl\` for API calls.
 - Preserve the exact content of prompts — do not modify or reformat them.
 - If auth fails with 401, tell the user their session may have expired and they should re-login at noticomax.com.
+`;
+
+const envSkillMd = `---
+name: noticomax-env
+description: Push, pull, or look up environment variables (AWS keys, API tokens, etc.) stored in NoticoMax. Use whenever the user wants to save credentials to their NoticoMax account, retrieve a forgotten secret, or sync a .env file across machines.
+argument-hint: "[push|pull|list|get|rm] [KEY=value | KEY | --file .env | --project name]"
+allowed-tools: "Bash Read Write Glob Grep"
+---
+
+# Sync environment variables with NoticoMax
+
+## Overview
+
+This skill lets Claude Code save and retrieve environment variables and secrets
+(AWS IAM keys, API tokens, database URLs, etc.) from the user's NoticoMax
+account. The vars are stored in the user's NoticoMax cloud and are visible
+under **Settings → Secrets** in the web app.
+
+## How it works
+
+1. Read the API token + URL from \`~/.noticomax-claude\` (same config file
+   the \`/noticomax\` skill uses). Config: \`{ "sessionToken": "sk_nm_…", "apiUrl": "https://app.noticomax.com" }\`.
+2. The token MUST have the \`envvars\` scope. Tokens are scoped to specific
+   capabilities — a skills-only token will get a 403 here. The user creates
+   scoped tokens at **noticomax.com → Settings → Claude Code Integration → Generate**.
+3. Talk to the \`/api/envvars\` endpoints with \`Authorization: Bearer <token>\`.
+
+## Step 0: Load config
+
+Read \`~/.noticomax-claude\`. If it doesn't exist, or the token doesn't have
+the \`envvars\` scope yet, instruct the user:
+
+- Sign in at noticomax.com → **Settings → Claude Code Integration → Generate**
+- Check the **Env vars** scope (and optionally Skills too)
+- Save \`{ "sessionToken": "sk_nm_…", "apiUrl": "https://app.noticomax.com" }\` to \`~/.noticomax-claude\`
+- Token starts with \`sk_nm_\` and is shown once
+
+## Important security guidance
+
+This skill handles SECRETS. Behave conservatively:
+
+- **NEVER** dump env var values to chat output without the user asking. Use
+  masked previews (e.g. \`AKIA****6F2P\`) unless the user explicitly says "show".
+- **NEVER** commit a pulled \`.env\` file to git. After writing one, remind the
+  user to confirm \`.env\` is gitignored.
+- **NEVER** push values into NoticoMax that you read out of someone else's
+  shell history, a public repo, or any source other than the user typing it
+  in front of you OR a local file they pointed at.
+- If you see what looks like a stolen credential (a value the user didn't
+  intend to share), STOP and ask before storing it.
+
+## Action: push (default)
+
+Use when the user wants to save one or more env vars.
+
+Modes:
+- \`/noticomax-env push KEY=value [KEY2=value2 ...]\` — one or many inline
+- \`/noticomax-env push --file .env [--project <name>]\` — bulk import a .env file
+  - Parse with: each non-blank, non-comment line is \`KEY=value\`. Strip
+    surrounding quotes off the value if present.
+- A \`--project <name>\` flag groups vars together (default project: \`default\`).
+  Use the project name the user provided or infer from the current directory
+  basename if they didn't specify and you're doing a bulk push.
+
+For each key/value pair:
+
+\`\`\`bash
+curl -s -X POST "{apiUrl}/api/envvars" \\
+  -H "Authorization: Bearer {sessionToken}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"name":"KEY","value":"VALUE","project":"<project>"}'
+\`\`\`
+
+Report a one-line summary per var: \`KEY → saved (project: <project>)\` or
+\`KEY → updated\` (the API tells you which via \`created: true|false\`).
+
+## Action: pull
+
+Use when the user wants to retrieve env vars to use locally.
+
+\`/noticomax-env pull [--project <name>] [--out <path>]\`
+
+\`\`\`bash
+curl -s "{apiUrl}/api/envvars?project=<project>" \\
+  -H "Authorization: Bearer {sessionToken}"
+\`\`\`
+
+- If \`--out <path>\` given (e.g. \`.env\` or \`.env.local\`):
+  - Write lines as \`KEY=value\` (quote the value if it contains spaces or special chars).
+  - Add a leading comment: \`# Pulled from NoticoMax (project: <project>) on <ISO date>\`.
+  - After writing, check whether the path is gitignored: \`git check-ignore -q <path>\`. If not,
+    tell the user explicitly. Do NOT \`git add\` the file.
+- Otherwise: print masked names + a tiny preview, NOT the full values. Example:
+  \`AWS_ACCESS_KEY_ID = AKIA****6F2P\`. Tell the user how to get a specific value
+  (\`/noticomax-env get KEY\`).
+
+## Action: list
+
+\`/noticomax-env list [--project <name>]\`
+
+Same as pull-without-out, but always shows the masked preview list. Use for
+"what do I have stored?".
+
+## Action: get
+
+\`/noticomax-env get KEY [--project <name>] [--show]\`
+
+Look up a single var by name. Default: print masked value. With \`--show\`:
+print the raw value (only after the user explicitly asks).
+
+\`\`\`bash
+# Append &project=<project> only when --project was given
+curl -s "{apiUrl}/api/envvars?search=<KEY>" \\
+  -H "Authorization: Bearer {sessionToken}"
+\`\`\`
+
+## Action: rm
+
+\`/noticomax-env rm KEY [--project <name>]\`
+
+Soft-delete the var. Confirm with the user before running if they didn't
+explicitly use \`--yes\`. Find its \`clientId\` via the same GET, then:
+
+\`\`\`bash
+curl -s -X DELETE "{apiUrl}/api/envvars/<clientId>" \\
+  -H "Authorization: Bearer {sessionToken}"
+\`\`\`
+
+## Masking helper
+
+When you need to display a masked value:
+
+- Length ≥ 8: show first 4 chars + asterisks + last 4. \`AKIAIOSFODNN7EXAMPLE → AKIA****MPLE\`
+- Length 4-7: show first char + asterisks. \`abc123 → a*****\`
+- Length < 4: show \`****\` only.
+
+## API reference
+
+All endpoints require \`Authorization: Bearer <token>\` with scope \`envvars\`.
+Returns 401 for missing/bad token, 403 for missing scope.
+
+- \`GET /api/envvars\` — list (params: \`project\`, \`search\`)
+- \`POST /api/envvars\` — upsert by \`(user, name, project)\`. Body: \`{ name, value, project? }\`. Returns \`{ envvar, created }\`.
+- \`DELETE /api/envvars/{clientId}\` — soft delete.
+
+## Notes
+
+- Use \`curl\` for API calls.
+- The web app surfaces these under **Settings → Passwords → Env vars**.
+- Project tags are just the first entry in the item's \`tags\` array on the
+  server — no separate "project" entity exists.
 `;

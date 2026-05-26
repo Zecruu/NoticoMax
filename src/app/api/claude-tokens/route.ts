@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash, randomBytes } from "node:crypto";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { ALL_SCOPES, type Scope } from "@/lib/supabase/bearer-auth";
 
 export const runtime = "nodejs";
 
@@ -20,7 +21,7 @@ export async function GET() {
   const admin = getSupabaseAdminClient();
   const { data, error } = await admin
     .from("claude_api_tokens")
-    .select("id, name, last4, last_used_at, created_at")
+    .select("id, name, last4, scopes, last_used_at, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
@@ -32,20 +33,26 @@ export async function GET() {
 }
 
 // POST /api/claude-tokens — generate a new token. Returns the full token ONCE.
+// Body: { name?, scopes?: ('skills' | 'envvars')[] }. Default scopes: ['skills'].
 export async function POST(request: NextRequest) {
   const userId = await getUserId();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  let body: { name?: unknown } = {};
+  let body: { name?: unknown; scopes?: unknown } = {};
   try {
     body = await request.json();
   } catch {
-    // empty body is fine — we'll default the name
+    // empty body is fine — defaults below
   }
   const name =
     typeof body.name === "string" && body.name.trim()
       ? body.name.trim().slice(0, 80)
       : "Claude Code";
+
+  const requestedScopes = Array.isArray(body.scopes)
+    ? body.scopes.filter((s): s is Scope => ALL_SCOPES.includes(s as Scope))
+    : [];
+  const scopes: Scope[] = requestedScopes.length > 0 ? Array.from(new Set(requestedScopes)) : ["skills"];
 
   const token = "sk_nm_" + randomBytes(32).toString("hex");
   const tokenHash = createHash("sha256").update(token).digest("hex");
@@ -54,8 +61,8 @@ export async function POST(request: NextRequest) {
   const admin = getSupabaseAdminClient();
   const { data, error } = await admin
     .from("claude_api_tokens")
-    .insert({ user_id: userId, name, token_hash: tokenHash, last4 })
-    .select("id, name, last4, created_at")
+    .insert({ user_id: userId, name, token_hash: tokenHash, last4, scopes })
+    .select("id, name, last4, scopes, created_at")
     .single();
 
   if (error) {

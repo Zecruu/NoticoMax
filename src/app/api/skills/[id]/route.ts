@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
-import { requireBearerUser } from "@/lib/supabase/bearer-auth";
+import { requireBearerScope } from "@/lib/supabase/bearer-auth";
 
 export const runtime = "nodejs";
 
@@ -41,7 +41,7 @@ function rowToWire(r: SkillRow) {
 }
 
 export async function GET(request: NextRequest, ctx: RouteContext) {
-  const auth = await requireBearerUser(request);
+  const auth = await requireBearerScope(request, "skills");
   if (auth.error) return auth.error;
   const { id } = await ctx.params;
 
@@ -62,7 +62,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
 }
 
 export async function PUT(request: NextRequest, ctx: RouteContext) {
-  const auth = await requireBearerUser(request);
+  const auth = await requireBearerScope(request, "skills");
   if (auth.error) return auth.error;
   const { id } = await ctx.params;
 
@@ -105,7 +105,7 @@ export async function PUT(request: NextRequest, ctx: RouteContext) {
 }
 
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
-  const auth = await requireBearerUser(request);
+  const auth = await requireBearerScope(request, "skills");
   if (auth.error) return auth.error;
   const { id } = await ctx.params;
 

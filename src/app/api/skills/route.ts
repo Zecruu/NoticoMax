@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
-import { requireBearerUser } from "@/lib/supabase/bearer-auth";
+import { requireBearerScope } from "@/lib/supabase/bearer-auth";
 
 export const runtime = "nodejs";
 
@@ -46,7 +46,7 @@ function rowToWire(r: SkillRow) {
  *   - public=true: also include public skills from other users
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireBearerUser(request);
+  const auth = await requireBearerScope(request, "skills");
   if (auth.error) return auth.error;
 
   const { searchParams } = new URL(request.url);
@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
 
 /** POST /api/skills — upsert by (user_id, tool, name). */
 export async function POST(request: NextRequest) {
-  const auth = await requireBearerUser(request);
+  const auth = await requireBearerScope(request, "skills");
   if (auth.error) return auth.error;
 
   let body: Record<string, unknown>;
