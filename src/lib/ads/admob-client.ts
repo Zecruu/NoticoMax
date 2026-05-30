@@ -65,12 +65,17 @@ export async function showBannerAd(): Promise<void> {
 }
 
 export async function hideBannerAd(): Promise<void> {
-  if (!isCapacitorNative() || !bannerVisible) return;
+  if (!isCapacitorNative()) return;
+  // Always attempt removeBanner — the bannerVisible flag can fall out of sync
+  // with native state after a hot-reload or a missed render, and we'd rather
+  // call removeBanner against an already-hidden banner (no-op) than fail to
+  // hide an active ad on a Pro user. AdMob.removeBanner is idempotent.
   try {
     const { AdMob } = await import("@capacitor-community/admob");
     await AdMob.removeBanner();
-    bannerVisible = false;
   } catch (err) {
     console.warn("[admob] removeBanner failed:", err);
+  } finally {
+    bannerVisible = false;
   }
 }

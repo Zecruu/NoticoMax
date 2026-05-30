@@ -144,10 +144,43 @@ export function useLicense() {
     // Skip the server hit when we know we're offline.
     if (typeof navigator !== "undefined" && navigator.onLine === false) return;
 
-    // Try to refresh from the server. Different outcomes:
-    //   ok: update entitlements + cache
-    //   unauthenticated (401): session was revoked server-side, log out
-    //   network-error: keep cached state — DON'T log out
+    // Primary path: query entitlements directly via the Supabase client.
+    // This uses the bearer JWT (not cookies) so it survives any SSR/cookie
+    // quirk that would 401 /api/auth/me — the symptom that left a Pro user
+    // seeing ads because the client couldn't confirm their proActive state.
+    // Entitlements is RLS-locked to the row owner, so this is safe.
+    try {
+      const { data: ent, error } = await supabase
+        .from("entitlements")
+        .select("lifetime_pro,pro_expires_at,pro_source,family_plan_active,extra_seats,storage_plan,storage_bytes_used")
+        .eq("user_id", cachedUserId)
+        .maybeSingle();
+      if (!error) {
+        const lifetimePro = ent?.lifetime_pro === true;
+        const proActive =
+          lifetimePro ||
+          (ent?.pro_expires_at ? new Date(ent.pro_expires_at) > new Date() : false);
+        const computed: ComputedEntitlements = {
+          proActive,
+          syncEnabled: proActive,
+          adsRemoved: proActive,
+          source: ent?.pro_source ?? null,
+          expiresAt: ent?.pro_expires_at ?? null,
+          lifetimePro,
+          familyPlanActive: ent?.family_plan_active === true,
+          extraSeats: ent?.extra_seats ?? 0,
+          storagePlan: (ent?.storage_plan as ComputedEntitlements["storagePlan"]) ?? "free",
+          storageBytesUsed: ent?.storage_bytes_used ?? 0,
+        };
+        setEntitlements(computed);
+        try { localStorage.setItem(ENTITLEMENTS_KEY, JSON.stringify(computed)); } catch {}
+      }
+    } catch {
+      // fall through to the /api/auth/me path
+    }
+
+    // Secondary path: hit /api/auth/me. Overwrites the primary path's result
+    // on success, logs out on explicit 401, ignored on network-error.
     const result = await fetchMe();
     if (result.kind === "ok" && result.data.authenticated) {
       const ent = result.data.entitlements ?? FREE_ENTITLEMENTS;
@@ -163,7 +196,7 @@ export function useLicense() {
         .then(({ resetIAPUser }) => resetIAPUser())
         .catch(() => { /* iap optional */ });
     }
-    // network-error → silently keep the cached UI state
+    // network-error → silently keep whatever the primary path set
   }, []);
 
   // Subscribe to Supabase auth state and seed initial state.
