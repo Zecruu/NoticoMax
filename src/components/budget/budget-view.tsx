@@ -31,6 +31,8 @@ import {
   Crown,
   Pencil,
   RotateCcw,
+  Receipt,
+  ArrowDownToLine,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
@@ -90,6 +92,10 @@ export function BudgetView() {
   const [limitEditingCategory, setLimitEditingCategory] = useState<BudgetCategoryWithTotals | null>(null);
   const [limitInput, setLimitInput] = useState("");
 
+  // Quick-add bills input — accepts "label amount", "amount label", or just
+  // "amount". Auto-creates a "Bills" category on first use.
+  const [billInput, setBillInput] = useState("");
+
   const handleSaveIncome = () => {
     const n = Number(incomeInput);
     if (Number.isNaN(n) || n < 0) {
@@ -108,12 +114,80 @@ export function BudgetView() {
       toast.error("Enter a name and a positive amount");
       return;
     }
-    await addCategory({ name, color: newCatColor, monthlyLimit: limit });
+    // Per-month budgets: the category itself has monthlyLimit=0 (no forever
+    // default). The amount the user typed is stamped as an override for the
+    // viewed month only. Future months start at $0 until the user sets them
+    // (or taps "Carry over from last month").
+    const newClientId = await addCategory({ name, color: newCatColor, monthlyLimit: 0 });
+    await setCategoryLimitForMonth(newClientId, limit);
     setNewCatName("");
     setNewCatLimit("");
     setNewCatColor(PRESET_COLORS[0]);
     setCreatingCategory(false);
-    toast.success("Category added");
+    toast.success(`${name} budgeted for ${formatMonthKey(viewMonthKey)}`);
+  };
+
+  // Quick-add bills. Parses "gas 50", "50 gas", or just "50" (defaults note
+  // to "Bill"). Logs to a "Bills" category, auto-creating it on first use.
+  const findOrCreateBillsCategory = async (): Promise<string> => {
+    const existing = categories.find((c) => c.name.toLowerCase() === "bills");
+    if (existing) return existing.clientId;
+    return await addCategory({ name: "Bills", color: "#f97316", monthlyLimit: 0 });
+  };
+
+  const handleQuickAddBill = async () => {
+    const raw = billInput.trim();
+    if (!raw) return;
+    // Pull the first numeric token (with optional decimal). Everything else
+    // becomes the note. Order-agnostic so "gas 50" and "50 gas" both work.
+    const numMatch = raw.match(/(\d+(?:\.\d{1,2})?)/);
+    if (!numMatch) {
+      toast.error("Include an amount, e.g. \"gas 50\"");
+      return;
+    }
+    const amount = Number(numMatch[1]);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Amount must be positive");
+      return;
+    }
+    const note = raw.replace(numMatch[0], "").replace(/\$/g, "").trim() || "Bill";
+    const billsId = await findOrCreateBillsCategory();
+    const date = isCurrentMonth
+      ? new Date().toISOString()
+      : (() => {
+          const [y, m] = viewMonthKey.split("-").map(Number);
+          return new Date(y, m - 1, 15, 12, 0, 0).toISOString();
+        })();
+    await addTransaction({ categoryId: billsId, amount, note, date });
+    setBillInput("");
+    toast.success(`${formatMoney(amount)} · ${note}`);
+  };
+
+  // Copy this-month limits from the immediately prior month. Looks at the
+  // PREVIOUS month's effective limit per category — only fills categories
+  // that don't yet have an override in the current viewed month.
+  const handleCarryFromLastMonth = async () => {
+    const prevMonthKey = shiftMonth(viewMonthKey, -1);
+    const prevOverrides = await import("@/lib/db/indexed-db").then(async ({ default: db }) => {
+      const all = await db.budgetCategoryOverrides.toArray();
+      const map = new Map<string, number>();
+      for (const o of all) {
+        if (o.deleted || o.monthKey !== prevMonthKey) continue;
+        map.set(o.categoryId, o.monthlyLimit);
+      }
+      return map;
+    });
+    let count = 0;
+    for (const cat of categories) {
+      if (cat.hasOverride) continue;
+      const prevLimit = prevOverrides.get(cat.clientId) ?? cat.monthlyLimit;
+      if (prevLimit > 0) {
+        await setCategoryLimitForMonth(cat.clientId, prevLimit);
+        count++;
+      }
+    }
+    if (count > 0) toast.success(`Carried ${count} budget${count > 1 ? "s" : ""} from ${formatMonthKey(prevMonthKey)}`);
+    else toast.info("Nothing to carry from last month");
   };
 
   const openLimitEditor = (cat: BudgetCategoryWithTotals) => {
@@ -231,6 +305,34 @@ export function BudgetView() {
         </Button>
       </div>
 
+      {/* Quick-add bill — single input. "gas 50" or "50 gas" both work. */}
+      <Card>
+        <CardContent className="pt-4 pb-4">
+          <div className="flex items-center gap-2 mb-2 text-xs uppercase text-muted-foreground tracking-wider">
+            <Receipt className="h-3.5 w-3.5" />
+            Quick-add Bill
+          </div>
+          <div className="flex gap-2">
+            <Input
+              placeholder='e.g. "gas 50" or just "30"'
+              value={billInput}
+              onChange={(e) => setBillInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleQuickAddBill();
+                }
+              }}
+              inputMode="text"
+            />
+            <Button onClick={handleQuickAddBill} className="shrink-0 gap-1.5">
+              <Plus className="h-4 w-4" />
+              Log
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* All-time stats */}
       {allTime.monthsTracked > 0 && (
         <Card>
@@ -342,12 +444,26 @@ export function BudgetView() {
       )}
 
       <div>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 gap-2">
           <h2 className="text-lg font-semibold">Categories</h2>
-          <Button size="sm" onClick={() => setCreatingCategory(true)} className="gap-1.5">
-            <Plus className="h-4 w-4" />
-            New Category
-          </Button>
+          <div className="flex items-center gap-1.5">
+            {categories.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={handleCarryFromLastMonth}
+                title={`Use last month's limits in ${formatMonthKey(viewMonthKey)}`}
+              >
+                <ArrowDownToLine className="h-3.5 w-3.5" />
+                Carry from last month
+              </Button>
+            )}
+            <Button size="sm" onClick={() => setCreatingCategory(true)} className="gap-1.5">
+              <Plus className="h-4 w-4" />
+              New Category
+            </Button>
+          </div>
         </div>
 
         {categories.length === 0 ? (
@@ -480,7 +596,7 @@ export function BudgetView() {
           <DialogHeader>
             <DialogTitle>New Budget Category</DialogTitle>
             <DialogDescription>
-              Pick a name, monthly limit, and color. Spending logged in this category will count against the limit each month.
+              Pick a name and limit for <strong>{formatMonthKey(viewMonthKey)}</strong>. Limits are per-month — next month starts fresh (or tap &ldquo;Carry from last month&rdquo;).
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -494,7 +610,7 @@ export function BudgetView() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="cat-limit">Monthly limit ($)</Label>
+              <Label htmlFor="cat-limit">Limit for {formatMonthKey(viewMonthKey)} ($)</Label>
               <Input
                 id="cat-limit"
                 type="number"

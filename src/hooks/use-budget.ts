@@ -227,7 +227,8 @@ export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
 
   const addCategory = useCallback(
     async (input: { name: string; color: string; monthlyLimit: number }) => {
-      await createBudgetCategory(input);
+      const created = await createBudgetCategory(input);
+      return created.clientId;
     },
     [],
   );
