@@ -8,6 +8,7 @@ import {
   FileText,
   Link2,
   Bell,
+  Home,
   LayoutDashboard,
   Plus,
   Settings,
@@ -201,6 +202,23 @@ export function Sidebar({
 
         {sectionsOpen.general && (
           <nav className="space-y-1">
+            <button
+              onClick={() => {
+                onFolderChange(null);
+                onFilterChange("all");
+                onViewChange?.("dashboard");
+                onTagChange?.(null);
+              }}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                activeView === "dashboard"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <Home className="h-4 w-4" />
+              <span className="flex-1 text-left">Home</span>
+            </button>
             {navItems.map((item) => {
               const Icon = item.icon;
               const count =

@@ -7,6 +7,7 @@ import {
   FileText,
   Link2,
   Plus,
+  Home,
   LayoutDashboard,
   FolderOpen,
   Wallet,
@@ -49,7 +50,7 @@ const PRESET_COLORS = [
 ];
 
 const navItems = [
-  { label: "All", value: "all", icon: LayoutDashboard },
+  { label: "Home", value: "dashboard", icon: Home },
   { label: "Notes", value: "note", icon: FileText },
   { label: "New", value: "new", icon: Plus },
   { label: "URLs", value: "url", icon: Link2 },
@@ -150,7 +151,7 @@ export function MobileNav({
           const isNew = item.value === "new";
           // Any nav entry that maps to a top-level view (not a type filter)
           // routes through onViewChange instead of onFilterChange.
-          const VIEW_NAV_VALUES = new Set(["budget", "study", "goals", "locations", "calendar"]);
+          const VIEW_NAV_VALUES = new Set(["dashboard", "budget", "study", "goals", "locations", "calendar"]);
           const isView = VIEW_NAV_VALUES.has(item.value);
 
           return (
@@ -161,6 +162,10 @@ export function MobileNav({
                   onCreateNew();
                 } else if (isView) {
                   onFolderChange(null);
+                  // Going to a top-level view should reset any active filter,
+                  // otherwise dashboard counts inherit a stale "note"/"url"
+                  // filter from a prior list-view visit.
+                  if (item.value === "dashboard") onFilterChange("all");
                   onViewChange?.(item.value);
                 } else {
                   onFolderChange(null);

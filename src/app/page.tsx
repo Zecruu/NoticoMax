@@ -21,6 +21,7 @@ import { GoalsView } from "@/components/goals/goals-view";
 import { LocationsView } from "@/components/locations/locations-view";
 import { FamilyView } from "@/components/family/family-view";
 import { FamilyFolderView } from "@/components/family/family-folder-view";
+import { DashboardHome } from "@/components/dashboard/dashboard-home";
 import { useLicense } from "@/hooks/use-license";
 import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
@@ -29,7 +30,10 @@ import { toast } from "@/lib/native-toast";
 export default function Dashboard() {
   const [activeFilter, setActiveFilter] = useState("all");
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState("list");
+  // Initial view = the new dashboard tile grid. The user's previous view is
+  // intentionally NOT persisted: every fresh launch lands on the calm
+  // dashboard, not whichever sub-page they were last on.
+  const [activeView, setActiveView] = useState("dashboard");
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -39,7 +43,7 @@ export default function Dashboard() {
   const [skippedActivation, setSkippedActivation] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const { isActivated, isPro, isLoading, isLoggedIn, login, loginWithApple, register } = useLicense();
+  const { isActivated, isPro, isLoading, isLoggedIn, entitlements, login, loginWithApple, register } = useLicense();
 
   // Bottom banner ads for non-Pro users on native platforms only.
   // Pro removes ads (entitlements.adsRemoved). Web/Electron get no ads.
@@ -102,6 +106,18 @@ export default function Dashboard() {
   const reminderItems = useMemo(() => {
     return items.filter((item) => item.type === "reminder" && item.reminderDate);
   }, [items]);
+
+  // Reminders due in the next 7 days (and not yet completed). Powers the
+  // Calendar tile's count + the Reminders tile's "X upcoming" subline.
+  const upcomingReminderCount = useMemo(() => {
+    const now = Date.now();
+    const weekFromNow = now + 7 * 24 * 60 * 60 * 1000;
+    return reminderItems.filter((item) => {
+      if (item.reminderCompleted) return false;
+      const t = new Date(item.reminderDate!).getTime();
+      return t >= now && t <= weekFromNow;
+    }).length;
+  }, [reminderItems]);
 
   // Counts per folder
   const folderItemCounts = useMemo(() => {
@@ -280,7 +296,25 @@ export default function Dashboard() {
         />
 
         <main className="flex-1 overflow-auto pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
-          {activeView === "trash" ? (
+          {activeView === "dashboard" ? (
+            <DashboardHome
+              noteCount={itemCounts.note ?? 0}
+              urlCount={itemCounts.url ?? 0}
+              reminderCount={itemCounts.reminder ?? 0}
+              upcomingReminderCount={upcomingReminderCount}
+              onOpenNotes={() => { setActiveFilter("note"); setActiveView("list"); }}
+              onOpenUrls={() => { setActiveFilter("url"); setActiveView("list"); }}
+              onOpenReminders={() => { setActiveFilter("reminder"); setActiveView("list"); }}
+              onOpenCalendar={() => setActiveView("calendar")}
+              onOpenBudget={() => setActiveView("budget")}
+              onOpenGoals={() => setActiveView("goals")}
+              onOpenLocations={() => setActiveView("locations")}
+              onOpenPasswords={() => setActiveView("passwords")}
+              onOpenFamily={() => setActiveView("family")}
+              onCreateNew={handleCreateNew}
+              familyPlanActive={entitlements?.familyPlanActive}
+            />
+          ) : activeView === "trash" ? (
             <TrashView
               items={trashedItems}
               onRestore={restoreItem}
