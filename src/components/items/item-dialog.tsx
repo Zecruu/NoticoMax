@@ -387,58 +387,24 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
             </Tabs>
           )}
 
-          <Input
-            id="title"
-            placeholder={
-              type === "note"
-                ? "Note title (optional — first line of content used otherwise)"
-                : type === "url"
-                  ? "Bookmark name..."
-                  : "Reminder title..."
-            }
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            autoFocus
-            className="text-lg font-semibold border-0 px-0 shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/50"
-          />
-
-          {/* Folder picker — always visible. Choosing a family-shared folder
-              auto-shares the item with that household via inheritance. */}
-          {folders.length > 0 && (
-            <div className="flex items-center gap-2">
-              <Label htmlFor="folder-select" className="text-xs text-muted-foreground shrink-0">
-                Save to
-              </Label>
-              <Select
-                value={folderId || "none"}
-                onValueChange={(v) => setFolderId(v === "none" ? undefined : v)}
-              >
-                <SelectTrigger id="folder-select" className="h-8 flex-1">
-                  <SelectValue placeholder="No folder" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">
-                    <span className="text-muted-foreground">No folder</span>
-                  </SelectItem>
-                  {folders.map((folder) => (
-                    <SelectItem key={folder.clientId} value={folder.clientId}>
-                      <div className="flex items-center gap-2">
-                        <div
-                          className="h-2.5 w-2.5 rounded-sm shrink-0"
-                          style={{ backgroundColor: folder.color || "#6b7280" }}
-                        />
-                        <span>{folder.name}</span>
-                        {folder.householdId && (
-                          <span className="text-[9px] rounded-full bg-primary/15 text-primary px-1 py-0.5 font-semibold uppercase tracking-wider">
-                            Family
-                          </span>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          {/* Title — visually quiet; the body autoFocuses instead so users can
+              just start typing. Title can stay blank — it auto-derives from
+              the first line of content (see computeFinalTitle below). */}
+          {(type !== "note" || title || editingItem) && (
+            <Input
+              id="title"
+              placeholder={
+                type === "note"
+                  ? "Title (optional)"
+                  : type === "url"
+                    ? "Bookmark name..."
+                    : "Reminder title..."
+              }
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              autoFocus={type !== "note" && !editingItem}
+              className="text-lg font-semibold border-0 px-0 shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/40"
+            />
           )}
 
           {type === "url" && (
@@ -485,9 +451,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label htmlFor="content">
-                {type === "note" ? "Content" : "Description (optional)"}
-              </Label>
+              {type === "note" ? <span /> : <Label htmlFor="content">Description (optional)</Label>}
               {type === "note" && content && (
                 <div className="flex items-center gap-1 rounded-md border p-0.5">
                   <button
@@ -569,9 +533,10 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
               <Textarea
                 ref={type === "note" ? textareaRef : undefined}
                 id="content"
+                autoFocus={type === "note" && !editingItem}
                 placeholder={
                   type === "note"
-                    ? "Write your note... (supports markdown)"
+                    ? "Start typing…"
                     : "Add a description..."
                 }
                 value={content}
@@ -579,7 +544,10 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
                 onInput={type === "note" ? handleTextareaInput : undefined}
                 onFocus={type === "note" ? handleTextareaInput : undefined}
                 onKeyDown={type === "note" ? handleContentKeyDown : undefined}
-                rows={type === "note" ? 6 : 3}
+                rows={type === "note" ? 14 : 3}
+                className={cn(
+                  type === "note" && "min-h-[40dvh] text-base border-0 px-0 shadow-none focus-visible:ring-0 resize-none",
+                )}
               />
             )}
           </div>
@@ -606,6 +574,40 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
             </button>
             {detailsOpen && (
               <div className="border-t px-3 py-3 space-y-3">
+                {folders.length > 0 && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="folder-select" className="text-xs">Folder</Label>
+                    <Select
+                      value={folderId || "none"}
+                      onValueChange={(v) => setFolderId(v === "none" ? undefined : v)}
+                    >
+                      <SelectTrigger id="folder-select" className="h-8">
+                        <SelectValue placeholder="No folder" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">
+                          <span className="text-muted-foreground">No folder</span>
+                        </SelectItem>
+                        {folders.map((folder) => (
+                          <SelectItem key={folder.clientId} value={folder.clientId}>
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="h-2.5 w-2.5 rounded-sm shrink-0"
+                                style={{ backgroundColor: folder.color || "#6b7280" }}
+                              />
+                              <span>{folder.name}</span>
+                              {folder.householdId && (
+                                <span className="text-[9px] rounded-full bg-primary/15 text-primary px-1 py-0.5 font-semibold uppercase tracking-wider">
+                                  Family
+                                </span>
+                              )}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <Label className="text-xs">Tags</Label>
                   <div className="flex gap-2">

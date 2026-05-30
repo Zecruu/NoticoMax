@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { type LocalItem, type LocalFolder } from "@/lib/db/indexed-db";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +22,7 @@ import {
   CheckCircle2,
   Circle,
   Copy,
-  ChevronDown,
+  Maximize2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
@@ -103,10 +102,9 @@ async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggleComplete, onUpdateContent }: ItemCardProps) {
-  const [expanded, setExpanded] = useState(false);
-
-  // Show the expand chevron only when there's meaningful body content to reveal
-  // beyond the one-line preview (or beyond the inline checklist for task notes).
+  // The Maximize button shows only when there's meaningful body content beyond
+  // the one-line preview (or beyond the inline checklist for task notes). It
+  // opens the full-screen note editor (same target as the pencil).
   const hasExpandableContent =
     (item.content?.trim().length ?? 0) > 0 ||
     (item.type === "url" && (item.url?.length ?? 0) > 0);
@@ -263,16 +261,9 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
             </div>
           )}
 
-          {/* Expanded view — read-only full markdown render of item.content.
-              Toggled via the chevron in the right-action column. */}
-          {expanded && item.content?.trim() && !hasTaskList && (
-            <div className="mt-2 pt-2 border-t text-sm text-foreground/90">
-              <MarkdownRenderer content={item.content} />
-            </div>
-          )}
         </div>
 
-        {/* Right-side action column: expand + pencil + kebab */}
+        {/* Right-side action column: maximize (open full-screen editor) + pencil + kebab */}
         <div className="flex items-center gap-0.5 shrink-0 -mr-1">
           {hasExpandableContent && (
             <Button
@@ -281,13 +272,12 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
               className="h-7 w-7 text-muted-foreground hover:text-foreground"
               onClick={(e) => {
                 e.stopPropagation();
-                setExpanded((v) => !v);
+                onEdit(item);
               }}
-              aria-label={expanded ? "Collapse" : "Expand"}
-              title={expanded ? "Collapse" : "Expand"}
-              aria-expanded={expanded}
+              aria-label="Open full note"
+              title="Open full note"
             >
-              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} />
+              <Maximize2 className="h-3.5 w-3.5" />
             </Button>
           )}
           <Button
