@@ -158,6 +158,32 @@ export interface LocalGoal {
   updatedAt: string;
 }
 
+export interface LocalBill {
+  id?: number;
+  clientId: string;
+  serverId?: string;
+  name: string;
+  amount: number;
+  /** ISO date (YYYY-MM-DD or full timestamp). Optional — bills can be undated. */
+  dueDate?: string;
+  paid: boolean;
+  paidAt?: string;
+  /**
+   * client_id of the budget_transaction created when the bill was marked
+   * paid. Lets us undo the payment (delete the tx) if the user un-marks.
+   */
+  paidTransactionId?: string;
+  /** Budget category to log against on Mark Paid. Defaults to the "Bills" category. */
+  categoryId?: string;
+  /** Family-shared when set, mirroring items/folders/locations. */
+  householdId?: string;
+  deviceId?: string;
+  deleted: boolean;
+  deletedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface LocalLocation {
   id?: number;
   clientId: string;
@@ -198,6 +224,7 @@ class NoticoDatabase extends Dexie {
   budgetCategoryOverrides!: EntityTable<LocalBudgetCategoryOverride, "id">;
   goals!: EntityTable<LocalGoal, "id">;
   locations!: EntityTable<LocalLocation, "id">;
+  bills!: EntityTable<LocalBill, "id">;
   syncQueue!: EntityTable<SyncQueueEntry, "id">;
 
   constructor() {
@@ -331,6 +358,24 @@ class NoticoDatabase extends Dexie {
       locations: "++id, clientId, serverId, name, updatedAt, pinned, deleted, deviceId",
       syncQueue: "++id, clientId, action, entityType, timestamp",
     });
+
+    // v12 — bills. Upcoming/unpaid bills that the user explicitly marks paid;
+    // marking paid creates a budget_transaction and stamps paidTransactionId
+    // for undo. Local-only for now (no serverId in the index yet) — sync can
+    // be wired later by adding a serverId index and a sync-engine push path.
+    this.version(12).stores({
+      items: "++id, clientId, serverId, type, title, updatedAt, pinned, deleted, folderId, deviceId",
+      folders: "++id, clientId, serverId, name, deleted",
+      studySets: "++id, clientId, name, deleted",
+      quizzes: "++id, clientId, name, deleted",
+      budgetCategories: "++id, clientId, serverId, name, updatedAt, deleted, deviceId",
+      budgetTransactions: "++id, clientId, serverId, categoryId, date, updatedAt, deleted, deviceId",
+      budgetCategoryOverrides: "++id, clientId, serverId, categoryId, monthKey, [categoryId+monthKey], updatedAt, deleted, deviceId",
+      goals: "++id, clientId, serverId, scope, periodKey, completed, updatedAt, deleted, deviceId",
+      locations: "++id, clientId, serverId, name, updatedAt, pinned, deleted, deviceId",
+      bills: "++id, clientId, paid, dueDate, updatedAt, deleted",
+      syncQueue: "++id, clientId, action, entityType, timestamp",
+    });
   }
 }
 
@@ -357,6 +402,7 @@ export async function wipeLocalDB(): Promise<void> {
     db.budgetCategoryOverrides.clear(),
     db.goals.clear(),
     db.locations.clear(),
+    db.bills.clear(),
     db.syncQueue.clear(),
   ]);
 }

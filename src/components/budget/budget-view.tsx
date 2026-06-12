@@ -7,6 +7,7 @@ import {
   formatMonthKey,
   getCurrentMonthKey,
 } from "@/hooks/use-budget";
+import { useBills } from "@/hooks/use-bills";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,6 +34,10 @@ import {
   RotateCcw,
   Receipt,
   ArrowDownToLine,
+  Circle,
+  CheckCircle2,
+  Calendar as CalendarIcon,
+  Undo2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
@@ -95,6 +100,44 @@ export function BudgetView() {
   // Quick-add bills input — accepts "label amount", "amount label", or just
   // "amount". Auto-creates a "Bills" category on first use.
   const [billInput, setBillInput] = useState("");
+
+  // Upcoming bills: user explicitly creates a bill they need to pay; Mark
+  // Paid converts it into a budget transaction in the Bills category.
+  const { unpaidBills, paidBills, addBill, removeBill, markPaid, unmarkPaid } = useBills();
+  const [creatingBill, setCreatingBill] = useState(false);
+  const [newBillName, setNewBillName] = useState("");
+  const [newBillAmount, setNewBillAmount] = useState("");
+  const [newBillDue, setNewBillDue] = useState("");
+  const [showPaidBills, setShowPaidBills] = useState(false);
+
+  const handleAddBill = async () => {
+    const name = newBillName.trim();
+    const amount = Number(newBillAmount);
+    if (!name || !Number.isFinite(amount) || amount <= 0) {
+      toast.error("Add a name and a positive amount");
+      return;
+    }
+    await addBill({
+      name,
+      amount,
+      dueDate: newBillDue || undefined,
+    });
+    setNewBillName("");
+    setNewBillAmount("");
+    setNewBillDue("");
+    setCreatingBill(false);
+    toast.success(`${name} added`);
+  };
+
+  const handleMarkPaid = async (clientId: string, name: string, amount: number) => {
+    await markPaid(clientId);
+    toast.success(`${name} marked paid · ${formatMoney(amount)} logged`);
+  };
+
+  const handleUnmarkPaid = async (clientId: string, name: string) => {
+    await unmarkPaid(clientId);
+    toast.success(`${name} reverted to unpaid`);
+  };
 
   const handleSaveIncome = () => {
     const n = Number(incomeInput);
@@ -332,6 +375,166 @@ export function BudgetView() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Upcoming Bills */}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Receipt className="h-4 w-4" />
+              Upcoming Bills
+              {unpaidBills.length > 0 && (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {unpaidBills.length}
+                </span>
+              )}
+            </CardTitle>
+            <Button size="sm" variant="ghost" className="gap-1.5" onClick={() => setCreatingBill(true)}>
+              <Plus className="h-4 w-4" />
+              Add Bill
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {unpaidBills.length === 0 && paidBills.length === 0 ? (
+            <p className="py-3 text-center text-xs text-muted-foreground">
+              Nothing on your plate. Add a bill to track what&apos;s coming up.
+            </p>
+          ) : unpaidBills.length === 0 ? (
+            <p className="py-3 text-center text-xs text-muted-foreground">All caught up.</p>
+          ) : (
+            <div className="divide-y -mx-4 sm:-mx-6">
+              {unpaidBills.map((bill) => {
+                const overdue =
+                  bill.dueDate && new Date(bill.dueDate) < new Date(new Date().setHours(0, 0, 0, 0));
+                return (
+                  <div key={bill.clientId} className="flex items-center gap-3 px-4 py-2.5 sm:px-6">
+                    <button
+                      onClick={() => handleMarkPaid(bill.clientId, bill.name, bill.amount)}
+                      aria-label="Mark paid"
+                      className="shrink-0 transition-transform active:scale-95"
+                    >
+                      <Circle className={cn("h-5 w-5", overdue ? "text-destructive" : "text-muted-foreground")} />
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{bill.name}</p>
+                      {bill.dueDate && (
+                        <p className={cn("text-[11px] flex items-center gap-1", overdue ? "text-destructive" : "text-muted-foreground")}>
+                          <CalendarIcon className="h-3 w-3" />
+                          {new Date(bill.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                          {overdue && " · overdue"}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-sm font-semibold tabular-nums shrink-0">{formatMoney(bill.amount)}</span>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
+                      onClick={() => {
+                        if (confirm(`Remove "${bill.name}"?`)) removeBill(bill.clientId);
+                      }}
+                      aria-label="Remove bill"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {paidBills.length > 0 && (
+            <div className="mt-2 border-t -mx-4 sm:-mx-6">
+              <button
+                onClick={() => setShowPaidBills((v) => !v)}
+                className="flex w-full items-center justify-between px-4 sm:px-6 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <span>{showPaidBills ? "Hide" : "Show"} paid ({paidBills.length})</span>
+                <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", showPaidBills && "rotate-90")} />
+              </button>
+              {showPaidBills && (
+                <div className="divide-y">
+                  {paidBills.slice(0, 20).map((bill) => (
+                    <div key={bill.clientId} className="flex items-center gap-3 px-4 py-2 sm:px-6 opacity-70">
+                      <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm line-through truncate">{bill.name}</p>
+                        {bill.paidAt && (
+                          <p className="text-[11px] text-muted-foreground">
+                            paid {new Date(bill.paidAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                          </p>
+                        )}
+                      </div>
+                      <span className="text-sm tabular-nums line-through shrink-0">{formatMoney(bill.amount)}</span>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground shrink-0"
+                        onClick={() => handleUnmarkPaid(bill.clientId, bill.name)}
+                        aria-label="Undo paid"
+                        title="Undo paid (removes the budget transaction)"
+                      >
+                        <Undo2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Add Bill dialog */}
+      <Dialog open={creatingBill} onOpenChange={setCreatingBill}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add a Bill</DialogTitle>
+            <DialogDescription>
+              These don&apos;t deduct from your budget until you mark them paid.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="bill-name">Name</Label>
+              <Input
+                id="bill-name"
+                placeholder="Electric, Rent, Netflix…"
+                value={newBillName}
+                onChange={(e) => setNewBillName(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="bill-amt">Amount ($)</Label>
+                <Input
+                  id="bill-amt"
+                  type="number"
+                  inputMode="decimal"
+                  placeholder="80"
+                  value={newBillAmount}
+                  onChange={(e) => setNewBillAmount(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="bill-due">Due (optional)</Label>
+                <Input
+                  id="bill-due"
+                  type="date"
+                  value={newBillDue}
+                  onChange={(e) => setNewBillDue(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setCreatingBill(false)}>Cancel</Button>
+            <Button onClick={handleAddBill}>Add Bill</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* All-time stats */}
       {allTime.monthsTracked > 0 && (
