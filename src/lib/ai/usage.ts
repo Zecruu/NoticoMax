@@ -61,6 +61,19 @@ function startOfUtcMonth(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
+/** Reporting bucket, e.g. "2026-06". UTC so it lines up with the cap windows. */
+export function periodKey(now: Date = new Date()): string {
+  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+  return `${now.getUTCFullYear()}-${m}`;
+}
+
+/** Rough token estimate for pre-call worst-case budgeting (~4 chars/token). */
+export function estimateInputTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+export type UsageStatus = "reserved" | "completed" | "rejected" | "failed";
+
 export interface BudgetStatus {
   allowed: boolean;
   reason?: string;
@@ -70,24 +83,30 @@ export interface BudgetStatus {
 }
 
 /**
- * Roll up this month's ledger and decide whether another call is allowed.
- * Reads at most `monthlyActions` rows (the action cap bounds the row count),
- * so summing in JS is cheap and avoids needing a SQL aggregate RPC.
+ * Roll up this month's COMPLETED usage and decide whether another call is
+ * allowed. When `pendingCostCents` is supplied (a worst-case estimate for the
+ * request about to run) the caps are checked against already-spent + pending,
+ * and the per-request cap is enforced — so we reject BEFORE paying the provider
+ * if the call would push us over. Rejected/failed rows don't count toward spend.
  *
- * `now` is injectable for testing; defaults to the wall clock.
+ * Only 'completed' rows count. Reads at most ~monthlyActions rows (bounded by
+ * the action cap), so summing in JS is cheap and avoids a SQL aggregate RPC.
  */
 export async function checkBudget(
   admin: SupabaseClient,
   userId: string,
-  now: Date = new Date(),
+  opts: { now?: Date; pendingCostCents?: number } = {},
 ): Promise<BudgetStatus> {
+  const now = opts.now ?? new Date();
+  const pending = opts.pendingCostCents ?? 0;
   const monthStart = startOfUtcMonth(now).toISOString();
   const dayStart = startOfUtcDay(now).getTime();
 
   const { data, error } = await admin
     .from("assistant_usage")
-    .select("cost_cents, created_at")
+    .select("actual_cost_cents, created_at, status")
     .eq("user_id", userId)
+    .eq("status", "completed")
     .gte("created_at", monthStart);
 
   if (error) {
@@ -106,7 +125,7 @@ export async function checkBudget(
   let monthlyCentsUsed = 0;
   let dailyCentsUsed = 0;
   for (const r of rows) {
-    const cost = Number(r.cost_cents) || 0;
+    const cost = Number(r.actual_cost_cents) || 0;
     monthlyCentsUsed += cost;
     if (new Date(r.created_at).getTime() >= dayStart) dailyCentsUsed += cost;
   }
@@ -115,9 +134,11 @@ export async function checkBudget(
   let reason: string | undefined;
   if (monthlyActions >= CAPS.monthlyActions) {
     reason = "Monthly action limit reached";
-  } else if (monthlyCentsUsed >= CAPS.monthlyCents) {
+  } else if (pending > CAPS.perRequestCents) {
+    reason = "Request exceeds the per-request limit";
+  } else if (monthlyCentsUsed + pending > CAPS.monthlyCents) {
     reason = "Monthly spend limit reached";
-  } else if (dailyCentsUsed >= CAPS.dailyCents) {
+  } else if (dailyCentsUsed + pending > CAPS.dailyCents) {
     reason = "Daily spend limit reached";
   }
 
@@ -133,22 +154,33 @@ export async function checkBudget(
 /** Append one usage row. Best-effort: logs but never throws into the request. */
 export async function recordUsage(
   admin: SupabaseClient,
-  userId: string,
   entry: {
+    userId: string;
+    userEmail?: string | null;
     model: string;
-    action: string;
-    inputTokens: number;
-    outputTokens: number;
-    costCents: number;
+    feature?: string;
+    status: UsageStatus;
+    inputTokens?: number;
+    outputTokens?: number;
+    estimatedCostCents?: number;
+    actualCostCents?: number;
+    metadata?: Record<string, unknown>;
+    now?: Date;
   },
 ): Promise<void> {
   const { error } = await admin.from("assistant_usage").insert({
-    user_id: userId,
+    user_id: entry.userId,
+    user_email: entry.userEmail ?? null,
+    period_key: periodKey(entry.now),
+    feature: entry.feature ?? "assistant_chat",
+    provider: "google",
     model: entry.model,
-    action: entry.action,
-    input_tokens: entry.inputTokens,
-    output_tokens: entry.outputTokens,
-    cost_cents: entry.costCents,
+    status: entry.status,
+    input_tokens: entry.inputTokens ?? 0,
+    output_tokens: entry.outputTokens ?? 0,
+    estimated_cost_cents: entry.estimatedCostCents ?? 0,
+    actual_cost_cents: entry.actualCostCents ?? 0,
+    metadata: entry.metadata ?? {},
   });
   if (error) {
     console.error("[assistant usage] failed to record usage:", error);
