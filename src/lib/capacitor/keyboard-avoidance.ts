@@ -71,20 +71,37 @@ function scrollFocusedIntoView(): void {
   const vv = window.visualViewport;
   const visibleTop = vv ? vv.offsetTop : 0;
   const visibleBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
-  const rect = el.getBoundingClientRect();
   const bottomMargin = 24;
   // Guard the top against sticky headers (~56px tall) so we don't tuck the
   // field under the header when correcting an upward overshoot.
   const topGuard = visibleTop + 64;
 
-  let delta = 0;
-  if (rect.bottom > visibleBottom - bottomMargin) {
-    delta = rect.bottom - (visibleBottom - bottomMargin);
-  } else if (rect.top < topGuard) {
-    delta = rect.top - topGuard;
-  }
-  if (Math.abs(delta) < 1) return;
+  // Prefer scrolling a whole "keep visible" wrapper (e.g. the Passwords
+  // add-login form) above the keyboard so the field AND its primary action
+  // (Add button) are shown together; fall back to the focused element itself.
+  const wrapper =
+    (el.closest("[data-keyboard-keep-visible]") as HTMLElement | null) ?? el;
+  const wrapRect = wrapper.getBoundingClientRect();
+  const inputRect = el.getBoundingClientRect();
 
+  // Positive delta scrolls content up (rects move up by `delta`).
+  let delta = 0;
+  if (wrapRect.bottom > visibleBottom - bottomMargin) {
+    delta = wrapRect.bottom - (visibleBottom - bottomMargin);
+  } else if (wrapRect.top < topGuard) {
+    delta = wrapRect.top - topGuard;
+  }
+
+  // Never let showing the wrapper hide the focused field itself: a tall wrapper
+  // takes a back seat to keeping the active input within view.
+  if (inputRect.top - delta < topGuard) {
+    delta = inputRect.top - topGuard;
+  }
+  if (inputRect.bottom - delta > visibleBottom - bottomMargin) {
+    delta = inputRect.bottom - (visibleBottom - bottomMargin);
+  }
+
+  if (Math.abs(delta) < 1) return;
   getScrollParent(el).scrollBy({ top: delta, behavior: "smooth" });
 }
 

@@ -365,7 +365,10 @@ export function PasswordsView({ initialTab = "logins" }: PasswordsViewProps = {}
                 </div>
               )}
 
-              <div className="space-y-2 rounded-md border border-dashed p-3">
+              <div
+                data-keyboard-keep-visible
+                className="space-y-2 rounded-md border border-dashed p-3"
+              >
                 <Input
                   placeholder="Service name (e.g., Gmail, GitHub)..."
                   value={newCredLabel}
@@ -544,7 +547,10 @@ export function PasswordsView({ initialTab = "logins" }: PasswordsViewProps = {}
                 </div>
               )}
 
-              <div className="space-y-2 rounded-md border border-dashed p-3">
+              <div
+                data-keyboard-keep-visible
+                className="space-y-2 rounded-md border border-dashed p-3"
+              >
                 <Input
                   placeholder="Project name (e.g., Project 1, my-app)..."
                   value={newEnvProject}
@@ -591,6 +597,11 @@ export function PasswordsView({ initialTab = "logins" }: PasswordsViewProps = {}
           )}
         </CardContent>
       </Card>
+
+      {/* Keyboard-open-only trailing spacer: gives the bottom add-login form
+          enough room to scroll fully above the iOS keyboard. Collapses to 0
+          when the keyboard is closed, so the layout is unchanged. */}
+      <div aria-hidden style={{ height: "var(--keyboard-height, 0px)" }} />
     </div>
   );
 }
