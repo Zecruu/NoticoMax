@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
-import { requireBearerUser } from "@/lib/supabase/bearer-auth";
+import { resolveAllowedAssistantUser } from "@/lib/ai/gate";
 import {
-  ALLOWED_ASSISTANT_EMAIL,
   CAPS,
   checkBudget,
   estimateCostCents,
@@ -10,55 +9,38 @@ import {
   maxOutputTokensForCap,
   recordUsage,
 } from "@/lib/ai/usage";
+import { ASSISTANT_MODEL, generateReply, type ChatMessage } from "@/lib/ai/gemini";
+import { getProfile } from "@/lib/ai/profile";
 import {
-  ASSISTANT_MODEL,
-  generateReply,
-  type ChatMessage,
-} from "@/lib/ai/gemini";
+  addMemory,
+  buildMemorySummary,
+  detectExplicitMemory,
+  listMemories,
+} from "@/lib/ai/memory";
 
 export const runtime = "nodejs";
 
-const SYSTEM_PROMPT =
-  "You are Notico, the helpful assistant inside the NOTICO MAX note-taking app. " +
-  "Be concise and friendly. Help the user with their notes, reminders, URLs, and " +
-  "general questions. You cannot yet take actions in the app — guide the user instead.";
-
-/** Resolve the caller's id + email and confirm they're on the allow-list. */
-async function resolveAllowedUser(
-  request: NextRequest,
-): Promise<
-  | { userId: string; email: string; error: null }
-  | { userId: null; email: null; error: NextResponse }
-> {
-  const auth = await requireBearerUser(request);
-  if (auth.error) return { userId: null, email: null, error: auth.error };
-
-  const admin = getSupabaseAdminClient();
-  const { data, error } = await admin.auth.admin.getUserById(auth.userId);
-  const email = data?.user?.email?.toLowerCase() ?? null;
-
-  if (error || !email || email !== ALLOWED_ASSISTANT_EMAIL) {
-    // 403, not 404 — the user is authenticated but not authorized for the
-    // assistant while it's in limited foundation rollout.
-    return {
-      userId: null,
-      email: null,
-      error: NextResponse.json(
-        { error: "The Notico assistant isn't available on your account yet." },
-        { status: 403 },
-      ),
-    };
-  }
-  return { userId: auth.userId, email, error: null };
+/** Assemble the system prompt from the assistant's name + curated memory. */
+function buildSystemPrompt(name: string, memorySummary: string): string {
+  const base =
+    `You are ${name}, the user's personal assistant inside the NOTICO MAX app. ` +
+    "Be concise, warm, and genuinely helpful with their notes, URLs, reminders, " +
+    "and day-to-day organization. Respect the user's stated preferences and habits.";
+  const security =
+    " SECURITY: Never ask for, store, repeat, or reveal passwords, secrets, API keys, " +
+    "or payment details. You do not have access to the user's saved passwords or " +
+    "credentials. If asked to expose a saved password, politely decline.";
+  const memory = memorySummary
+    ? `\n\nWhat you remember about this user (honor these):\n${memorySummary}`
+    : "";
+  return base + security + memory;
 }
 
 /**
- * GET /api/assistant/chat — lightweight status for the UI to decide whether to
- * enable the composer: is the assistant configured + is the caller allowed +
- * how much budget is left.
+ * GET /api/assistant/chat — status for the UI: configured + allowed + budget.
  */
 export async function GET(request: NextRequest) {
-  const gate = await resolveAllowedUser(request);
+  const gate = await resolveAllowedAssistantUser(request);
   if (gate.error) return gate.error;
 
   const configured = !!process.env.GEMINI_API_KEY;
@@ -85,11 +67,10 @@ export async function GET(request: NextRequest) {
  *   (or { message: string } shorthand for a single user turn).
  */
 export async function POST(request: NextRequest) {
-  const gate = await resolveAllowedUser(request);
+  const gate = await resolveAllowedAssistantUser(request);
   if (gate.error) return gate.error;
   const { userId, email } = gate;
 
-  // Degrade safely when the provider key isn't provisioned in the server env.
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
@@ -115,16 +96,36 @@ export async function POST(request: NextRequest) {
 
   const admin = getSupabaseAdminClient();
 
-  // Worst-case cost estimate: all input tokens + a fully-used capped response.
+  // Capture an explicit "remember this" from the latest user turn before we
+  // build the memory summary, so it's honored immediately. Best-effort + never
+  // stores secrets (addMemory guards).
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  let savedMemory = false;
+  if (lastUser) {
+    const candidate = detectExplicitMemory(lastUser.content);
+    if (candidate) {
+      const res = await addMemory(admin, userId, {
+        type: candidate.type,
+        content: candidate.content,
+        source: "user_explicit",
+      });
+      savedMemory = !("rejected" in res);
+    }
+  }
+
+  const [profile, memories] = await Promise.all([
+    getProfile(admin, userId),
+    listMemories(admin, userId),
+  ]);
+  const systemPrompt = buildSystemPrompt(profile.displayName, buildMemorySummary(memories));
+
   const inputTokensEst = messages.reduce(
     (n, m) => n + estimateInputTokens(m.content),
-    estimateInputTokens(SYSTEM_PROMPT),
+    estimateInputTokens(systemPrompt),
   );
   const maxOutputTokens = maxOutputTokensForCap();
   const worstCaseCents = estimateCostCents(inputTokensEst, maxOutputTokens);
 
-  // Pre-call gate: refuse (and log) before spending anything if a cap would be
-  // exceeded — factoring in the worst-case estimate for THIS request.
   const budget = await checkBudget(admin, userId, { pendingCostCents: worstCaseCents });
   if (!budget.allowed) {
     await recordUsage(admin, {
@@ -142,7 +143,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Bound a single response so it can't exceed the per-request cap.
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
   try {
@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
       apiKey,
       model: ASSISTANT_MODEL,
       messages,
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt,
       maxOutputTokens,
       signal: controller.signal,
     });
@@ -165,12 +165,10 @@ export async function POST(request: NextRequest) {
       outputTokens: result.outputTokens,
       estimatedCostCents: worstCaseCents,
       actualCostCents,
-      // Token usage is from Gemini's usageMetadata; cost is our estimate from
-      // the published per-token rates (Google doesn't return a billed amount).
       metadata: { cost_basis: "estimated_from_token_rates" },
     });
 
-    return NextResponse.json({ reply: result.text });
+    return NextResponse.json({ reply: result.text, savedMemory });
   } catch (err) {
     const status = (err as { status?: number }).status;
     console.error("[assistant chat] generation failed:", err);
