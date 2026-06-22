@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
-import { requireBearerUser } from "@/lib/supabase/bearer-auth";
+import { resolveAllowedAssistantUser } from "@/lib/ai/gate";
 import {
-  ALLOWED_ASSISTANT_EMAIL,
   CAPS,
   checkBudget,
   estimateCostCents,
@@ -14,68 +14,88 @@ import {
   ASSISTANT_MODEL,
   generateReply,
   type ChatMessage,
+  type GeminiFunctionCall,
+  type GeminiTool,
 } from "@/lib/ai/gemini";
+import { getProfile } from "@/lib/ai/profile";
+import {
+  addMemory,
+  buildMemorySummary,
+  detectExplicitMemory,
+  listMemories,
+} from "@/lib/ai/memory";
+import {
+  TOOL_DECLARATIONS,
+  executeToolCall,
+  logToolAudit,
+  toolNoun,
+  validateToolCall,
+} from "@/lib/ai/tools";
 
 export const runtime = "nodejs";
 
-const SYSTEM_PROMPT =
-  "You are Notico, the helpful assistant inside the NOTICO MAX note-taking app. " +
-  "Be concise and friendly. Help the user with their notes, reminders, URLs, and " +
-  "general questions. You cannot yet take actions in the app — guide the user instead.";
+/** At most this many tool calls are executed per chat turn (no autonomy). */
+const MAX_TOOL_CALLS = 2;
 
-/** Resolve the caller's id + email and confirm they're on the allow-list. */
-async function resolveAllowedUser(
-  request: NextRequest,
-): Promise<
-  | { userId: string; email: string; error: null }
-  | { userId: null; email: null; error: NextResponse }
-> {
-  const auth = await requireBearerUser(request);
-  if (auth.error) return { userId: null, email: null, error: auth.error };
+const ASSISTANT_TOOLS: GeminiTool[] = [{ functionDeclarations: [...TOOL_DECLARATIONS] }];
 
-  const admin = getSupabaseAdminClient();
-  const { data, error } = await admin.auth.admin.getUserById(auth.userId);
-  const email = data?.user?.email?.toLowerCase() ?? null;
-
-  if (error || !email || email !== ALLOWED_ASSISTANT_EMAIL) {
-    // 403, not 404 — the user is authenticated but not authorized for the
-    // assistant while it's in limited foundation rollout.
-    return {
-      userId: null,
-      email: null,
-      error: NextResponse.json(
-        { error: "The Notico assistant isn't available on your account yet." },
-        { status: 403 },
-      ),
-    };
-  }
-  return { userId: auth.userId, email, error: null };
+/** Assemble the system prompt from the assistant's name + curated memory. */
+function buildSystemPrompt(name: string, memorySummary: string, nowIso: string): string {
+  const base =
+    `You are ${name}, the user's personal assistant inside the NOTICO MAX app. ` +
+    "Be concise, warm, and genuinely helpful with their notes, URLs, reminders, " +
+    "and day-to-day organization. Respect the user's stated preferences and habits.";
+  const tools =
+    ` The current date and time is ${nowIso}. You can take actions by calling the ` +
+    "provided tools to create notes, URLs/bookmarks, reminders, and alarms for the user. " +
+    "Only call a tool when the user clearly asks to create/save/remind/set something. " +
+    "Resolve relative times to an absolute ISO-8601 datetime. If a request is missing " +
+    "required details (e.g. a reminder with no time), ask a brief clarifying question " +
+    "instead of guessing.";
+  const security =
+    " SECURITY: Never ask for, store, repeat, or reveal passwords, secrets, API keys, " +
+    "or payment details. You do not have access to the user's saved passwords or " +
+    "credentials, and there is no tool to read them. If asked to expose a saved password, " +
+    "politely decline.";
+  const memory = memorySummary
+    ? `\n\nWhat you remember about this user (honor these):\n${memorySummary}`
+    : "";
+  return base + tools + security + memory;
 }
 
 /**
- * GET /api/assistant/chat — lightweight status for the UI to decide whether to
- * enable the composer: is the assistant configured + is the caller allowed +
- * how much budget is left.
+ * GET /api/assistant/chat — status for the UI: configured + allowed + budget.
  */
 export async function GET(request: NextRequest) {
-  const gate = await resolveAllowedUser(request);
+  const gate = await resolveAllowedAssistantUser(request);
   if (gate.error) return gate.error;
 
   const configured = !!process.env.GEMINI_API_KEY;
   const admin = getSupabaseAdminClient();
-  const budget = await checkBudget(admin, gate.userId);
+
+  // Probe the assistant ledger so the UI can show a precise "run the migration"
+  // state instead of a generic failure when the tables don't exist yet.
+  const probe = await admin.from("assistant_usage").select("id").limit(1);
+  const migrationsReady = !(
+    probe.error && (probe.error as { code?: string }).code === "42P01"
+  );
+
+  const budget = migrationsReady ? await checkBudget(admin, gate.userId) : null;
 
   return NextResponse.json({
-    enabled: configured && budget.allowed,
+    enabled: configured && migrationsReady && !!budget?.allowed,
     configured,
+    migrationsReady,
     model: ASSISTANT_MODEL,
     caps: CAPS,
-    usage: {
-      monthlyCentsUsed: budget.monthlyCentsUsed,
-      dailyCentsUsed: budget.dailyCentsUsed,
-      monthlyActions: budget.monthlyActions,
-    },
-    blockedReason: budget.allowed ? null : budget.reason,
+    usage: budget
+      ? {
+          monthlyCentsUsed: budget.monthlyCentsUsed,
+          dailyCentsUsed: budget.dailyCentsUsed,
+          monthlyActions: budget.monthlyActions,
+        }
+      : null,
+    blockedReason: budget && !budget.allowed ? budget.reason : null,
   });
 }
 
@@ -85,11 +105,10 @@ export async function GET(request: NextRequest) {
  *   (or { message: string } shorthand for a single user turn).
  */
 export async function POST(request: NextRequest) {
-  const gate = await resolveAllowedUser(request);
+  const gate = await resolveAllowedAssistantUser(request);
   if (gate.error) return gate.error;
   const { userId, email } = gate;
 
-  // Degrade safely when the provider key isn't provisioned in the server env.
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
@@ -115,16 +134,40 @@ export async function POST(request: NextRequest) {
 
   const admin = getSupabaseAdminClient();
 
-  // Worst-case cost estimate: all input tokens + a fully-used capped response.
+  // Capture an explicit "remember this" from the latest user turn before we
+  // build the memory summary, so it's honored immediately. Best-effort + never
+  // stores secrets (addMemory guards).
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  let savedMemory = false;
+  if (lastUser) {
+    const candidate = detectExplicitMemory(lastUser.content);
+    if (candidate) {
+      const res = await addMemory(admin, userId, {
+        type: candidate.type,
+        content: candidate.content,
+        source: "user_explicit",
+      });
+      savedMemory = !("rejected" in res);
+    }
+  }
+
+  const [profile, memories] = await Promise.all([
+    getProfile(admin, userId),
+    listMemories(admin, userId),
+  ]);
+  const systemPrompt = buildSystemPrompt(
+    profile.displayName,
+    buildMemorySummary(memories),
+    new Date().toISOString(),
+  );
+
   const inputTokensEst = messages.reduce(
     (n, m) => n + estimateInputTokens(m.content),
-    estimateInputTokens(SYSTEM_PROMPT),
+    estimateInputTokens(systemPrompt),
   );
   const maxOutputTokens = maxOutputTokensForCap();
   const worstCaseCents = estimateCostCents(inputTokensEst, maxOutputTokens);
 
-  // Pre-call gate: refuse (and log) before spending anything if a cap would be
-  // exceeded — factoring in the worst-case estimate for THIS request.
   const budget = await checkBudget(admin, userId, { pendingCostCents: worstCaseCents });
   if (!budget.allowed) {
     await recordUsage(admin, {
@@ -142,7 +185,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Bound a single response so it can't exceed the per-request cap.
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
   try {
@@ -150,8 +192,9 @@ export async function POST(request: NextRequest) {
       apiKey,
       model: ASSISTANT_MODEL,
       messages,
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt,
       maxOutputTokens,
+      tools: ASSISTANT_TOOLS,
       signal: controller.signal,
     });
 
@@ -165,12 +208,14 @@ export async function POST(request: NextRequest) {
       outputTokens: result.outputTokens,
       estimatedCostCents: worstCaseCents,
       actualCostCents,
-      // Token usage is from Gemini's usageMetadata; cost is our estimate from
-      // the published per-token rates (Google doesn't return a billed amount).
       metadata: { cost_basis: "estimated_from_token_rates" },
     });
 
-    return NextResponse.json({ reply: result.text });
+    // Bounded, non-recursive tool use: execute up to MAX_TOOL_CALLS validated
+    // tool calls the model requested this turn, then return a clear reply. The
+    // model never gets a user_id — executeToolCall binds it to the authed user.
+    const reply = await runToolCalls(admin, userId, result.functionCalls, result.text);
+    return NextResponse.json({ reply, savedMemory });
   } catch (err) {
     const status = (err as { status?: number }).status;
     console.error("[assistant chat] generation failed:", err);
@@ -190,6 +235,54 @@ export async function POST(request: NextRequest) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * Execute up to MAX_TOOL_CALLS validated tool calls the model requested, then
+ * compose a clear confirmation reply. Bounded + non-recursive: we never feed
+ * results back for another model round. Validation failures (e.g. a reminder
+ * with no time) become a clarification ask rather than a bad write.
+ */
+async function runToolCalls(
+  admin: SupabaseClient,
+  userId: string,
+  functionCalls: GeminiFunctionCall[],
+  modelText: string,
+): Promise<string> {
+  if (!functionCalls.length) return modelText || "…";
+
+  const created: string[] = [];
+  const failed: string[] = [];
+  const clarifications: string[] = [];
+
+  for (const fc of functionCalls.slice(0, MAX_TOOL_CALLS)) {
+    const validation = validateToolCall(fc.name, fc.args);
+    if (!validation.ok) {
+      await logToolAudit(admin, {
+        userId,
+        tool: fc.name || "unknown",
+        status: "rejected",
+        args: fc.args,
+        error: validation.error,
+      });
+      clarifications.push(validation.error);
+      continue;
+    }
+    try {
+      const res = await executeToolCall(admin, userId, validation.call);
+      created.push(`${toolNoun(validation.call.name)} “${res.title}”`);
+    } catch {
+      failed.push(toolNoun(validation.call.name));
+    }
+  }
+
+  const parts: string[] = [];
+  if (created.length) parts.push(`Done — I created your ${created.join(", ")}.`);
+  if (failed.length) parts.push(`Sorry, I couldn't create the ${failed.join(", ")} just now.`);
+  if (clarifications.length) {
+    parts.push(`I need a bit more detail before I can do that: ${clarifications.join("; ")}.`);
+  }
+  return parts.join(" ") || modelText || "Done.";
 }
 
 /** Accept either a full `messages` array or a single `message` string. */

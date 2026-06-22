@@ -13,10 +13,25 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface GeminiFunctionCall {
+  name: string;
+  args: Record<string, unknown>;
+}
+
 export interface GeminiResult {
   text: string;
+  functionCalls: GeminiFunctionCall[];
   inputTokens: number;
   outputTokens: number;
+}
+
+/** Gemini `tools` entry — a set of callable function declarations. */
+export interface GeminiTool {
+  functionDeclarations: Array<{
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  }>;
 }
 
 interface GeminiContent {
@@ -38,6 +53,7 @@ export async function generateReply(opts: {
   messages: ChatMessage[];
   systemPrompt?: string;
   maxOutputTokens: number;
+  tools?: GeminiTool[];
   signal?: AbortSignal;
 }): Promise<GeminiResult> {
   const contents: GeminiContent[] = opts.messages.map((m) => ({
@@ -54,6 +70,9 @@ export async function generateReply(opts: {
   };
   if (opts.systemPrompt) {
     body.systemInstruction = { parts: [{ text: opts.systemPrompt }] };
+  }
+  if (opts.tools?.length) {
+    body.tools = opts.tools;
   }
 
   const res = await fetch(
@@ -79,15 +98,30 @@ export async function generateReply(opts: {
   }
 
   const json = (await res.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
+    candidates?: {
+      content?: {
+        parts?: {
+          text?: string;
+          functionCall?: { name?: string; args?: Record<string, unknown> };
+        }[];
+      };
+    }[];
     usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
   };
 
-  const text =
-    json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+  const parts = json.candidates?.[0]?.content?.parts ?? [];
+  let text = "";
+  const functionCalls: GeminiFunctionCall[] = [];
+  for (const p of parts) {
+    if (typeof p.text === "string") text += p.text;
+    if (p.functionCall?.name) {
+      functionCalls.push({ name: p.functionCall.name, args: p.functionCall.args ?? {} });
+    }
+  }
 
   return {
     text,
+    functionCalls,
     inputTokens: json.usageMetadata?.promptTokenCount ?? 0,
     outputTokens: json.usageMetadata?.candidatesTokenCount ?? 0,
   };
