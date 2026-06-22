@@ -155,14 +155,23 @@ export default function AssistantPage() {
         setMemories(mj.memories ?? []);
       }
 
+      if (data.migrationsReady === false) {
+        setStatus("disabled");
+        setDisabledReason(
+          "Notico's database isn't set up yet. Run the assistant Supabase migrations (0011 + 0012), then reload.",
+        );
+        return;
+      }
       if (!data.configured) {
         setStatus("disabled");
-        setDisabledReason("Notico isn't configured yet — check back soon.");
+        setDisabledReason(
+          "Notico isn't configured yet — the GEMINI_API_KEY isn't set on the server.",
+        );
         return;
       }
       if (!data.enabled && data.blockedReason) {
         setStatus("disabled");
-        setDisabledReason(data.blockedReason);
+        setDisabledReason(`Usage limit reached: ${data.blockedReason}.`);
         return;
       }
       setStatus("ready");

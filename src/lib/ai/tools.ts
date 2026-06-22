@@ -131,10 +131,86 @@ export function validateToolCall(name: string, rawArgs: unknown): ToolValidation
   return validateReminderLike(name as "create_reminder" | "create_alarm", args);
 }
 
+/**
+ * Gemini function declarations for the assistant's write tools. Passed as
+ * `tools[].functionDeclarations` so the model can request a tool; the server
+ * still validates + executes. Descriptions tell the model to use absolute
+ * ISO-8601 datetimes (the chat route injects the current time).
+ */
+export const TOOL_DECLARATIONS = [
+  {
+    name: "create_note",
+    description: "Create a note for the user. Use when they want to jot down or save text.",
+    parameters: {
+      type: "object",
+      properties: {
+        content: { type: "string", description: "The note body." },
+        title: { type: "string", description: "Optional short title." },
+      },
+      required: ["content"],
+    },
+  },
+  {
+    name: "create_url",
+    description: "Save a URL / bookmark for the user.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "The http(s) URL to save." },
+        title: { type: "string", description: "Optional title for the bookmark." },
+        content: { type: "string", description: "Optional note about the link." },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "create_reminder",
+    description:
+      "Create a reminder. Resolve relative times (e.g. 'tomorrow 9am') to an absolute ISO-8601 datetime using the current time provided in the system prompt.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "What to be reminded about." },
+        remindAt: { type: "string", description: "Absolute ISO-8601 datetime to fire at." },
+        content: { type: "string", description: "Optional extra detail." },
+      },
+      required: ["title", "remindAt"],
+    },
+  },
+  {
+    name: "create_alarm",
+    description:
+      "Create an alarm at a specific absolute ISO-8601 datetime. Like a reminder but for a precise alarm time.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Label for the alarm." },
+        remindAt: { type: "string", description: "Absolute ISO-8601 datetime for the alarm." },
+        content: { type: "string", description: "Optional extra detail." },
+      },
+      required: ["title", "remindAt"],
+    },
+  },
+] as const;
+
 export interface ToolExecutionResult {
   clientId: string;
   type: string;
   title: string;
+}
+
+/** Human-friendly label for a tool, used in assistant confirmations. */
+export function toolNoun(name: AssistantToolName): string {
+  switch (name) {
+    case "create_note":
+      return "note";
+    case "create_url":
+      return "bookmark";
+    case "create_reminder":
+      return "reminder";
+    case "create_alarm":
+      return "alarm";
+  }
 }
 
 /** Map a validated call to an `items` row insert payload. */

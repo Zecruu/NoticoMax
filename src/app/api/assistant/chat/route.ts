@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { resolveAllowedAssistantUser } from "@/lib/ai/gate";
 import {
@@ -9,7 +10,13 @@ import {
   maxOutputTokensForCap,
   recordUsage,
 } from "@/lib/ai/usage";
-import { ASSISTANT_MODEL, generateReply, type ChatMessage } from "@/lib/ai/gemini";
+import {
+  ASSISTANT_MODEL,
+  generateReply,
+  type ChatMessage,
+  type GeminiFunctionCall,
+  type GeminiTool,
+} from "@/lib/ai/gemini";
 import { getProfile } from "@/lib/ai/profile";
 import {
   addMemory,
@@ -17,23 +24,43 @@ import {
   detectExplicitMemory,
   listMemories,
 } from "@/lib/ai/memory";
+import {
+  TOOL_DECLARATIONS,
+  executeToolCall,
+  logToolAudit,
+  toolNoun,
+  validateToolCall,
+} from "@/lib/ai/tools";
 
 export const runtime = "nodejs";
 
+/** At most this many tool calls are executed per chat turn (no autonomy). */
+const MAX_TOOL_CALLS = 2;
+
+const ASSISTANT_TOOLS: GeminiTool[] = [{ functionDeclarations: [...TOOL_DECLARATIONS] }];
+
 /** Assemble the system prompt from the assistant's name + curated memory. */
-function buildSystemPrompt(name: string, memorySummary: string): string {
+function buildSystemPrompt(name: string, memorySummary: string, nowIso: string): string {
   const base =
     `You are ${name}, the user's personal assistant inside the NOTICO MAX app. ` +
     "Be concise, warm, and genuinely helpful with their notes, URLs, reminders, " +
     "and day-to-day organization. Respect the user's stated preferences and habits.";
+  const tools =
+    ` The current date and time is ${nowIso}. You can take actions by calling the ` +
+    "provided tools to create notes, URLs/bookmarks, reminders, and alarms for the user. " +
+    "Only call a tool when the user clearly asks to create/save/remind/set something. " +
+    "Resolve relative times to an absolute ISO-8601 datetime. If a request is missing " +
+    "required details (e.g. a reminder with no time), ask a brief clarifying question " +
+    "instead of guessing.";
   const security =
     " SECURITY: Never ask for, store, repeat, or reveal passwords, secrets, API keys, " +
     "or payment details. You do not have access to the user's saved passwords or " +
-    "credentials. If asked to expose a saved password, politely decline.";
+    "credentials, and there is no tool to read them. If asked to expose a saved password, " +
+    "politely decline.";
   const memory = memorySummary
     ? `\n\nWhat you remember about this user (honor these):\n${memorySummary}`
     : "";
-  return base + security + memory;
+  return base + tools + security + memory;
 }
 
 /**
@@ -45,19 +72,30 @@ export async function GET(request: NextRequest) {
 
   const configured = !!process.env.GEMINI_API_KEY;
   const admin = getSupabaseAdminClient();
-  const budget = await checkBudget(admin, gate.userId);
+
+  // Probe the assistant ledger so the UI can show a precise "run the migration"
+  // state instead of a generic failure when the tables don't exist yet.
+  const probe = await admin.from("assistant_usage").select("id").limit(1);
+  const migrationsReady = !(
+    probe.error && (probe.error as { code?: string }).code === "42P01"
+  );
+
+  const budget = migrationsReady ? await checkBudget(admin, gate.userId) : null;
 
   return NextResponse.json({
-    enabled: configured && budget.allowed,
+    enabled: configured && migrationsReady && !!budget?.allowed,
     configured,
+    migrationsReady,
     model: ASSISTANT_MODEL,
     caps: CAPS,
-    usage: {
-      monthlyCentsUsed: budget.monthlyCentsUsed,
-      dailyCentsUsed: budget.dailyCentsUsed,
-      monthlyActions: budget.monthlyActions,
-    },
-    blockedReason: budget.allowed ? null : budget.reason,
+    usage: budget
+      ? {
+          monthlyCentsUsed: budget.monthlyCentsUsed,
+          dailyCentsUsed: budget.dailyCentsUsed,
+          monthlyActions: budget.monthlyActions,
+        }
+      : null,
+    blockedReason: budget && !budget.allowed ? budget.reason : null,
   });
 }
 
@@ -117,7 +155,11 @@ export async function POST(request: NextRequest) {
     getProfile(admin, userId),
     listMemories(admin, userId),
   ]);
-  const systemPrompt = buildSystemPrompt(profile.displayName, buildMemorySummary(memories));
+  const systemPrompt = buildSystemPrompt(
+    profile.displayName,
+    buildMemorySummary(memories),
+    new Date().toISOString(),
+  );
 
   const inputTokensEst = messages.reduce(
     (n, m) => n + estimateInputTokens(m.content),
@@ -152,6 +194,7 @@ export async function POST(request: NextRequest) {
       messages,
       systemPrompt,
       maxOutputTokens,
+      tools: ASSISTANT_TOOLS,
       signal: controller.signal,
     });
 
@@ -168,7 +211,11 @@ export async function POST(request: NextRequest) {
       metadata: { cost_basis: "estimated_from_token_rates" },
     });
 
-    return NextResponse.json({ reply: result.text, savedMemory });
+    // Bounded, non-recursive tool use: execute up to MAX_TOOL_CALLS validated
+    // tool calls the model requested this turn, then return a clear reply. The
+    // model never gets a user_id — executeToolCall binds it to the authed user.
+    const reply = await runToolCalls(admin, userId, result.functionCalls, result.text);
+    return NextResponse.json({ reply, savedMemory });
   } catch (err) {
     const status = (err as { status?: number }).status;
     console.error("[assistant chat] generation failed:", err);
@@ -188,6 +235,54 @@ export async function POST(request: NextRequest) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * Execute up to MAX_TOOL_CALLS validated tool calls the model requested, then
+ * compose a clear confirmation reply. Bounded + non-recursive: we never feed
+ * results back for another model round. Validation failures (e.g. a reminder
+ * with no time) become a clarification ask rather than a bad write.
+ */
+async function runToolCalls(
+  admin: SupabaseClient,
+  userId: string,
+  functionCalls: GeminiFunctionCall[],
+  modelText: string,
+): Promise<string> {
+  if (!functionCalls.length) return modelText || "…";
+
+  const created: string[] = [];
+  const failed: string[] = [];
+  const clarifications: string[] = [];
+
+  for (const fc of functionCalls.slice(0, MAX_TOOL_CALLS)) {
+    const validation = validateToolCall(fc.name, fc.args);
+    if (!validation.ok) {
+      await logToolAudit(admin, {
+        userId,
+        tool: fc.name || "unknown",
+        status: "rejected",
+        args: fc.args,
+        error: validation.error,
+      });
+      clarifications.push(validation.error);
+      continue;
+    }
+    try {
+      const res = await executeToolCall(admin, userId, validation.call);
+      created.push(`${toolNoun(validation.call.name)} “${res.title}”`);
+    } catch {
+      failed.push(toolNoun(validation.call.name));
+    }
+  }
+
+  const parts: string[] = [];
+  if (created.length) parts.push(`Done — I created your ${created.join(", ")}.`);
+  if (failed.length) parts.push(`Sorry, I couldn't create the ${failed.join(", ")} just now.`);
+  if (clarifications.length) {
+    parts.push(`I need a bit more detail before I can do that: ${clarifications.join("; ")}.`);
+  }
+  return parts.join(" ") || modelText || "Done.";
 }
 
 /** Accept either a full `messages` array or a single `message` string. */
