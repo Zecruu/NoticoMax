@@ -19,14 +19,15 @@ import { isCapacitorNative, isIOS } from "@/lib/platform";
 import { getDeviceName } from "@/lib/device";
 import { useSidebarPrefs } from "@/hooks/use-sidebar-prefs";
 import { checkBiometricAvailability } from "@/lib/capacitor/biometric-auth";
-import { presentPaywall, presentCustomerCenter } from "@/lib/iap/revenuecat-client";
-import { Sparkles, Settings as SettingsIcon } from "lucide-react";
+import { presentCustomerCenter } from "@/lib/iap/revenuecat-client";
+import { Settings as SettingsIcon } from "lucide-react";
+import { SecondaryBottomNav } from "@/components/layout/secondary-nav";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { userId, licenseKey, isActivated, isPro, isLoggedIn, isLoading, email, activate, logout, deleteAccount } = useLicense();
+  const { licenseKey, isActivated, isPro, isLoggedIn, isLoading, email, activate, logout, deleteAccount } = useLicense();
 
   // Sign-out (or account deletion) doesn't unmount this page — push the user
   // back home where AuthGate gates them.
@@ -45,74 +46,11 @@ export default function SettingsPage() {
   const [savingPassword, setSavingPassword] = useState(false);
   const [licenseInput, setLicenseInput] = useState("");
   const [activating, setActivating] = useState(false);
-  const showPaywallCTA = typeof window !== "undefined" && isIOS();
+  // Visible pricing / upgrade CTAs are hidden for now (pending the Free / Pro /
+  // Family pricing redesign). Manage-subscription stays so existing
+  // subscribers can still reach App Store billing.
   const showManageSub = typeof window !== "undefined" && isIOS() && isPro;
 
-  const handleUpgrade = async () => {
-    const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> =>
-      Promise.race([
-        p,
-        new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timed out after ${ms}ms`)), ms)),
-      ]);
-    try {
-      toast.info("1: importing Purchases module...");
-      const purchasesMod = await import("@revenuecat/purchases-capacitor");
-      if (!purchasesMod.Purchases) throw new Error("Purchases export missing");
-
-      const apiKey = process.env.NEXT_PUBLIC_REVENUECAT_IOS_KEY;
-      toast.info(`2: API key present? ${apiKey ? "yes (" + apiKey.slice(0, 10) + "…)" : "NO"}`);
-      if (!apiKey) throw new Error("NEXT_PUBLIC_REVENUECAT_IOS_KEY missing in bundle");
-
-      toast.info("3: calling Purchases.configure()...");
-      await withTimeout(purchasesMod.Purchases.configure({ apiKey }), 8000, "configure");
-      toast.success("4: configure done");
-
-      // CRITICAL: alias RC's anonymous ID to our Supabase userId BEFORE the
-      // purchase. Without this, the webhook receives "$RCAnonymousID:..." and
-      // can't link the receipt back to the signed-in user, so Pro never
-      // shows up in the app.
-      if (userId) {
-        toast.info("4a: identifying user to RC...");
-        try {
-          await withTimeout(purchasesMod.Purchases.logIn({ appUserID: userId }), 8000, "logIn");
-        } catch (e) {
-          const m = e instanceof Error ? e.message : String(e);
-          toast.error(`logIn failed: ${m.slice(0, 200)}`);
-          throw e;
-        }
-      } else {
-        toast.error("Not signed in — sign in first, then upgrade.");
-        return;
-      }
-
-      toast.info("4b: getOfferings()...");
-      try {
-        const offerings = await withTimeout(purchasesMod.Purchases.getOfferings(), 10000, "getOfferings");
-        const cur = offerings.current;
-        toast.info(`offerings: current=${cur?.identifier ?? "NONE"}, packages=${cur?.availablePackages?.length ?? 0}`);
-        if (cur?.availablePackages?.[0]) {
-          const p = cur.availablePackages[0];
-          toast.info(`pkg: ${p.identifier} → ${p.product.identifier} @ ${p.product.priceString}`);
-        }
-      } catch (e: unknown) {
-        const m = e instanceof Error ? e.message : String(e);
-        toast.error(`getOfferings failed: ${m.slice(0, 200)}`);
-        throw e;
-      }
-
-      toast.info("5: importing RC UI module...");
-      const uiMod = await import("@revenuecat/purchases-capacitor-ui");
-      if (!uiMod.RevenueCatUI) throw new Error("RevenueCatUI export missing");
-
-      toast.info("6: calling presentPaywall...");
-      const res = await withTimeout(uiMod.RevenueCatUI.presentPaywall(), 30000, "presentPaywall");
-      toast.success(`7: result = ${res.result}`);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(`Paywall error: ${msg.slice(0, 200)}`);
-      console.error("[paywall debug]", err);
-    }
-  };
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isDesktop = typeof window !== "undefined" && window.electronAPI?.isElectron;
@@ -301,7 +239,7 @@ export default function SettingsPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-2xl p-4 md:p-6 space-y-6">
+      <main className="mx-auto max-w-2xl p-4 md:p-6 space-y-6 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-6">
         {/* App (Desktop only) */}
         {isDesktop && (
           <Card>
@@ -646,19 +584,8 @@ export default function SettingsPage() {
                       <XCircle className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">No License</span>
                     </div>
-                    {showPaywallCTA && (
-                      <Button
-                        className="w-full gap-2"
-                        onClick={handleUpgrade}
-                      >
-                        <Sparkles className="h-4 w-4" />
-                        Upgrade to Pro
-                      </Button>
-                    )}
                     <p className="text-sm text-muted-foreground">
-                      {showPaywallCTA
-                        ? "Or enter an existing license key:"
-                        : "Enter your product key to enable cloud sync across all your devices."}
+                      Enter your product key to enable cloud sync across all your devices.
                     </p>
                     <div className="flex gap-2">
                       <Input
@@ -975,6 +902,8 @@ export default function SettingsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <SecondaryBottomNav active="settings" />
     </div>
   );
 }

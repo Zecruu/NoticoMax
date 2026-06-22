@@ -49,7 +49,6 @@ export function HouseholdsCard() {
   const [joining, setJoining] = useState(false);
 
   const [actingRequestToken, setActingRequestToken] = useState<string | null>(null);
-  const [buyingSeatForHousehold, setBuyingSeatForHousehold] = useState<string | null>(null);
   const [diagnosing, setDiagnosing] = useState(false);
 
   const diagnose = async () => {
@@ -99,41 +98,6 @@ export function HouseholdsCard() {
       alert(lines);
     } finally {
       setDiagnosing(false);
-    }
-  };
-
-  const buyExtraSeat = async (householdId: string) => {
-    setBuyingSeatForHousehold(householdId);
-    try {
-      // Dynamic-import so non-Capacitor environments don't try to load the SDK.
-      const { purchase } = await import("@/lib/iap/revenuecat-client");
-      const ok = await purchase("family_extra_seat_monthly");
-      if (ok) {
-        toast.success("Seat added — the webhook will bump your family in a moment");
-        await refresh();
-      } else {
-        toast.error("Purchase cancelled or failed");
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Couldn't start purchase");
-    } finally {
-      setBuyingSeatForHousehold(null);
-    }
-  };
-
-  const startFamilyPlanUpgrade = async () => {
-    try {
-      const { presentPaywall } = await import("@/lib/iap/revenuecat-client");
-      const result = await presentPaywall();
-      if (result === "purchased") {
-        toast.success("Family Plan active — you can now create a family");
-      } else if (result === "cancelled") {
-        // No toast — user closed it intentionally
-      } else if (result !== "not_presented") {
-        toast.error("Couldn't open the paywall");
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Paywall unavailable");
     }
   };
 
@@ -338,27 +302,11 @@ export function HouseholdsCard() {
                   </div>
                 )}
 
-                {/* Seat counter + buy-extra-seat button */}
+                {/* Seat counter */}
                 <div className="flex items-center justify-between text-xs gap-2">
                   <span className="text-muted-foreground">
                     {h.currentSeats} of {h.maxSeats} seats used
                   </span>
-                  {h.role === "owner" && (
-                    <Button
-                      size="sm"
-                      variant={h.currentSeats >= h.maxSeats ? "default" : "ghost"}
-                      onClick={() => void buyExtraSeat(h.id)}
-                      disabled={buyingSeatForHousehold === h.id}
-                      className="gap-1 h-7 px-2 text-xs"
-                    >
-                      {buyingSeatForHousehold === h.id ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <Plus className="h-3 w-3" />
-                      )}
-                      Add seat ($0.99/mo)
-                    </Button>
-                  )}
                 </div>
 
                 {/* Members */}
@@ -488,16 +436,13 @@ export function HouseholdsCard() {
             <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-primary" />
-                <span className="text-sm font-semibold">Family Plan — $4.99/mo</span>
+                <span className="text-sm font-semibold">Family sharing</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Includes everything in Pro + a shared family folder (notes, reminders, lists,
-                passwords), 5 seats, and family cloud storage. Add more seats for $0.99/mo each.
+                Create a shared family folder (notes, reminders, lists, passwords) and a shared
+                budget with your household. Family plans are coming soon — you can still join an
+                existing family with a code above.
               </p>
-              <Button onClick={() => void startFamilyPlanUpgrade()} size="sm" className="gap-1.5 w-full">
-                <Sparkles className="h-3.5 w-3.5" />
-                Upgrade to Family Plan
-              </Button>
             </div>
           )}
         </div>

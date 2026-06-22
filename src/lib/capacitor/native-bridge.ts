@@ -17,15 +17,38 @@ export async function initCapacitorPlugins() {
     await StatusBar.setBackgroundColor({ color: "#0a0a0a" });
   }
 
-  // Track keyboard height via CSS variable
+  // Track keyboard height via CSS variable + a `keyboard-open` marker class.
+  // The class lets CSS hide the fixed bottom nav (.mobile-bottom-nav) so it
+  // never covers the focused field, and the var feeds the bottom-padding used
+  // by dialogs/pages. We also pull the focused input into view above the
+  // keyboard — iOS doesn't reliably do this for inputs inside scroll areas.
+  const bringFocusIntoView = () => {
+    const el = document.activeElement as HTMLElement | null;
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  };
+
   Keyboard.addListener("keyboardWillShow", (info) => {
     document.body.style.setProperty(
       "--keyboard-height",
       `${info.keyboardHeight}px`
     );
+    document.documentElement.classList.add("keyboard-open");
+    requestAnimationFrame(bringFocusIntoView);
+  });
+  Keyboard.addListener("keyboardDidShow", (info) => {
+    // Re-assert once the layout has settled — keyboardWillShow can fire before
+    // the resize completes, leaving the field still partially covered.
+    document.body.style.setProperty(
+      "--keyboard-height",
+      `${info.keyboardHeight}px`
+    );
+    bringFocusIntoView();
   });
   Keyboard.addListener("keyboardWillHide", () => {
     document.body.style.setProperty("--keyboard-height", "0px");
+    document.documentElement.classList.remove("keyboard-open");
   });
 
   // Handle deep links
