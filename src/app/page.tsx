@@ -295,7 +295,7 @@ export default function Dashboard() {
           onTagChange={setActiveTag}
         />
 
-        <main className="flex-1 overflow-auto pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
+        <main className="flex-1 overflow-auto pb-[calc(4rem+env(safe-area-inset-bottom)+var(--keyboard-height,0px))] md:pb-[var(--keyboard-height,0px)] scroll-pb-[var(--keyboard-height,0px)]">
           {activeView === "dashboard" ? (
             <DashboardHome
               noteCount={itemCounts.note ?? 0}

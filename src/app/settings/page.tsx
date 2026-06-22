@@ -239,7 +239,7 @@ export default function SettingsPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-2xl p-4 md:p-6 space-y-6 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-6">
+      <main className="mx-auto max-w-2xl p-4 md:p-6 space-y-6 pb-[calc(5rem+env(safe-area-inset-bottom)+var(--keyboard-height,0px))] md:pb-6 scroll-pb-[var(--keyboard-height,0px)]">
         {/* App (Desktop only) */}
         {isDesktop && (
           <Card>
