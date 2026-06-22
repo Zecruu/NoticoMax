@@ -141,6 +141,13 @@ html.capacitor-native {
   -webkit-touch-callout: none;
 }
 
+/* When the soft keyboard is open, hide the fixed bottom nav so it can never
+   cover the focused input/textarea. Set on <html> by the Capacitor keyboard
+   listeners in native-bridge.ts. */
+html.keyboard-open .mobile-bottom-nav {
+  display: none !important;
+}
+
 /* Markdown compact (card preview) */
 .markdown-compact p { margin: 0; }
 .markdown-compact h1, .markdown-compact h2, .markdown-compact h3,

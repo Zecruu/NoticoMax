@@ -28,6 +28,7 @@ import {
   Wallet,
   Target,
   MapPin,
+  Bot,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -760,6 +761,13 @@ export function Sidebar({
       </div>
 
       <div className="border-t p-3 space-y-1">
+        <Link
+          href="/assistant"
+          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        >
+          <Bot className="h-4 w-4" />
+          Notico
+        </Link>
         <Link
           href="/settings"
           className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
