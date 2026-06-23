@@ -19,7 +19,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SecondaryBottomNav } from "@/components/layout/secondary-nav";
+import type { RecurrenceRule } from "@/lib/db/indexed-db";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { createItem } from "@/lib/sync/sync-engine";
 import { toast } from "@/lib/native-toast";
 import {
   buildNoticoLocalMemorySummary,
@@ -53,12 +55,215 @@ interface SpeechRecognitionLike {
   interimResults: boolean;
   maxAlternatives: number;
   onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((e: { error?: string }) => void) | null;
   onend: (() => void) | null;
   start: () => void;
   stop: () => void;
 }
 type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
+interface PendingReminder {
+  title?: string;
+  dateKey?: string;
+  hour?: number;
+  minute?: number;
+  recurrence: RecurrenceRule;
+  needsRecurrenceClarification?: boolean;
+}
+
+const WEEKDAYS = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+] as const;
+
+const WEEKDAY_ALIASES: Record<string, number> = {
+  sunday: 0,
+  sundays: 0,
+  sun: 0,
+  monday: 1,
+  mondays: 1,
+  mon: 1,
+  tuesday: 2,
+  tuesdays: 2,
+  tue: 2,
+  tues: 2,
+  wednesday: 3,
+  wednesdays: 3,
+  wed: 3,
+  thursday: 4,
+  thursdays: 4,
+  thurs: 4,
+  thu: 4,
+  friday: 5,
+  fridays: 5,
+  fri: 5,
+  saturday: 6,
+  saturdays: 6,
+  sat: 6,
+};
+
+function dateKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function dateFromKey(key: string, hour = 9, minute = 0): Date {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d, hour, minute, 0, 0);
+}
+
+function nextWeekdayDateKey(targetDay: number, forceNext = false): string {
+  const now = new Date();
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let delta = (targetDay - base.getDay() + 7) % 7;
+  if (delta === 0 && forceNext) delta = 7;
+  base.setDate(base.getDate() + delta);
+  return dateKey(base);
+}
+
+function formatReminderDate(date: Date): string {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  }).format(date);
+}
+
+function formatReminderTime(hour: number, minute: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(dateFromKey(dateKey(new Date()), hour, minute));
+}
+
+function titleCaseTitle(value: string): string {
+  const trimmed = value
+    .replace(/\s+/g, " ")
+    .replace(/[.?!]+$/g, "")
+    .trim();
+  if (!trimmed) return "";
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
+function parseWeekday(text: string): { day: number; pluralish: boolean } | null {
+  const normalized = text.toLowerCase().replace(/[’']/g, "");
+  for (const [alias, day] of Object.entries(WEEKDAY_ALIASES)) {
+    const pattern = new RegExp(`\\b${alias}\\b`, "i");
+    if (pattern.test(normalized)) {
+      const pluralish = alias.endsWith("s") || /\b\w+days\b/i.test(normalized);
+      return { day, pluralish };
+    }
+  }
+  return null;
+}
+
+function parseDateKey(text: string): string | undefined {
+  const lower = text.toLowerCase();
+  const now = new Date();
+  if (/\btoday\b/.test(lower)) return dateKey(now);
+  if (/\btomorrow\b/.test(lower)) {
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    return dateKey(tomorrow);
+  }
+  const weekday = parseWeekday(text);
+  if (!weekday) return undefined;
+  return nextWeekdayDateKey(weekday.day, /\bnext\b/i.test(text));
+}
+
+function parseTime(text: string): { hour: number; minute: number } | null {
+  const lower = text.toLowerCase();
+  if (/\bnoon\b/.test(lower)) return { hour: 12, minute: 0 };
+  if (/\bmidnight\b/.test(lower)) return { hour: 0, minute: 0 };
+  if (/\bmorning\b/.test(lower)) return { hour: 9, minute: 0 };
+  if (/\bafternoon\b/.test(lower)) return { hour: 13, minute: 0 };
+  if (/\bevening\b|\btonight\b/.test(lower)) return { hour: 18, minute: 0 };
+
+  const meridiemMatch = lower.match(/\b(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)\b/);
+  if (meridiemMatch) {
+    let hour = Number(meridiemMatch[1]);
+    const minute = Number(meridiemMatch[2] ?? "0");
+    const meridiem = meridiemMatch[3].replace(/\./g, "");
+    if (hour < 1 || hour > 12 || minute > 59) return null;
+    if (meridiem === "pm" && hour !== 12) hour += 12;
+    if (meridiem === "am" && hour === 12) hour = 0;
+    return { hour, minute };
+  }
+
+  const explicit24HourMatch = lower.match(/\bat\s+([01]?\d|2[0-3]):([0-5]\d)\b/);
+  if (explicit24HourMatch) {
+    return { hour: Number(explicit24HourMatch[1]), minute: Number(explicit24HourMatch[2]) };
+  }
+
+  return null;
+}
+
+function parseRecurrence(text: string): {
+  recurrence?: RecurrenceRule;
+  needsClarification?: boolean;
+} {
+  const lower = text.toLowerCase().replace(/[’']/g, "");
+  if (/\b(one[-\s]?time|once|only|just this|this .+ only)\b/.test(lower)) {
+    return { recurrence: "none", needsClarification: false };
+  }
+  if (/\b(every day|daily)\b/.test(lower)) return { recurrence: "daily" };
+  if (/\b(every week|weekly)\b/.test(lower)) return { recurrence: "weekly" };
+  if (/\b(every month|monthly)\b/.test(lower)) return { recurrence: "monthly" };
+  if (/\b(every year|yearly|annually)\b/.test(lower)) return { recurrence: "yearly" };
+
+  const weekday = parseWeekday(lower);
+  if (weekday?.pluralish || /\bevery\s+\w+day\b/.test(lower)) {
+    return { recurrence: "weekly", needsClarification: !/\bevery\b/.test(lower) };
+  }
+
+  return {};
+}
+
+function stripSchedulingWords(value: string): string {
+  const weekdayPattern = WEEKDAYS.join("|");
+  return value
+    .replace(new RegExp(`\\b(?:on|this|next|every)\\s+(?:${weekdayPattern})s?\\b.*$`, "i"), "")
+    .replace(/\b(?:today|tomorrow)\b.*$/i, "")
+    .replace(/\bat\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?.*$/i, "")
+    .replace(/\b(?:morning|afternoon|evening|tonight|noon|midnight)\b.*$/i, "");
+}
+
+function extractReminderTitle(text: string): string | undefined {
+  const withoutGreeting = text.replace(/^\s*(hi|hey|hello)\b[^,.;!?]*[,.;!?]?\s*/i, "");
+  const forParts = withoutGreeting.split(/\bfor\b/i).map((part) => part.trim()).filter(Boolean);
+  const candidateFromFor = forParts.length > 1 ? forParts[forParts.length - 1] : "";
+  const toMatch = withoutGreeting.match(/\b(?:remind me to|reminder to|remember to|schedule)\s+(.+)$/i);
+  const candidate = candidateFromFor || toMatch?.[1] || "";
+  const cleaned = titleCaseTitle(
+    stripSchedulingWords(candidate)
+      .replace(/\bme\b/gi, "")
+      .replace(/\b(on|at|for)\b$/i, "")
+  );
+  return cleaned || undefined;
+}
+
+function isReminderIntent(text: string): boolean {
+  return /\b(remind|reminder|appointment|schedule|calendar)\b/i.test(text);
+}
+
+function parseReminderDraft(text: string): Partial<PendingReminder> {
+  const time = parseTime(text);
+  const recurrence = parseRecurrence(text);
+  return {
+    title: extractReminderTitle(text),
+    dateKey: parseDateKey(text),
+    hour: time?.hour,
+    minute: time?.minute,
+    recurrence: recurrence.recurrence,
+    needsRecurrenceClarification: recurrence.needsClarification,
+  };
+}
 
 function getSpeechRecognition(): SpeechRecognitionCtor | null {
   if (typeof window === "undefined") return null;
@@ -98,6 +303,8 @@ export default function AssistantPage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [listening, setListening] = useState(false);
+  const [voiceNotice, setVoiceNotice] = useState("");
+  const [pendingReminder, setPendingReminder] = useState<PendingReminder | null>(null);
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -115,6 +322,14 @@ export default function AssistantPage() {
         ...(t ? { Authorization: `Bearer ${t}` } : {}),
       },
     });
+  }, []);
+
+  const appendAssistantMessage = useCallback((content: string) => {
+    setMessages((prev) =>
+      prev[prev.length - 1]?.role === "assistant" && prev[prev.length - 1]?.content === content
+        ? prev
+        : [...prev, { role: "assistant", content }]
+    );
   }, []);
 
   const refreshMemories = useCallback(async () => {
@@ -216,15 +431,115 @@ export default function AssistantPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
-  const toggleMic = () => {
+  const completeOrAskReminder = useCallback(
+    async (draft: PendingReminder): Promise<boolean> => {
+      if (!draft.title) {
+        setPendingReminder(draft);
+        appendAssistantMessage("What should I call the reminder?");
+        return true;
+      }
+
+      if (!draft.dateKey) {
+        setPendingReminder(draft);
+        appendAssistantMessage(`What day should I remind you about ${draft.title}?`);
+        return true;
+      }
+
+      if (draft.needsRecurrenceClarification) {
+        setPendingReminder(draft);
+        appendAssistantMessage(
+          `Should ${draft.title} repeat every ${WEEKDAYS[dateFromKey(draft.dateKey).getDay()]} or just this once? What time should I remind you?`
+        );
+        return true;
+      }
+
+      if (draft.hour === undefined || draft.minute === undefined) {
+        setPendingReminder(draft);
+        appendAssistantMessage(`What time should I remind you about ${draft.title}?`);
+        return true;
+      }
+
+      const scheduledAt = dateFromKey(draft.dateKey, draft.hour, draft.minute);
+      try {
+        await createItem({
+          type: "reminder",
+          title: draft.title,
+          content: "Created by Notico.",
+          reminderDate: scheduledAt.toISOString(),
+          reminderCompleted: false,
+          recurrence: draft.recurrence,
+          tags: [],
+          pinned: false,
+        });
+        setPendingReminder(null);
+        appendAssistantMessage(
+          `Done. I set a ${draft.recurrence === "weekly" ? "weekly " : ""}reminder for ${draft.title} on ${formatReminderDate(scheduledAt)} at ${formatReminderTime(draft.hour, draft.minute)}.`
+        );
+        toast.success("Reminder created");
+      } catch {
+        appendAssistantMessage("I couldn't save that reminder locally. Please try again.");
+      }
+      return true;
+    },
+    [appendAssistantMessage]
+  );
+
+  const handleLocalReminderAction = useCallback(
+    async (text: string): Promise<boolean> => {
+      const incoming = parseReminderDraft(text);
+      const hasFollowUpSignal =
+        pendingReminder &&
+        (incoming.dateKey ||
+          incoming.hour !== undefined ||
+          incoming.recurrence ||
+          /\b(only|once|weekly|every|just this|this\b|next\b|today|tomorrow)\b/i.test(text));
+
+      if (!pendingReminder && !isReminderIntent(text)) return false;
+      if (pendingReminder && !hasFollowUpSignal && !isReminderIntent(text)) return false;
+
+      const merged: PendingReminder = {
+        recurrence: pendingReminder?.recurrence ?? "none",
+        ...pendingReminder,
+        ...Object.fromEntries(
+          Object.entries(incoming).filter(([, value]) => value !== undefined)
+        ),
+      };
+
+      if (incoming.recurrence === "none") merged.needsRecurrenceClarification = false;
+      if (incoming.recurrence && incoming.recurrence !== "none") {
+        merged.needsRecurrenceClarification = false;
+      }
+
+      return completeOrAskReminder(merged);
+    },
+    [completeOrAskReminder, pendingReminder]
+  );
+
+  const toggleMic = async () => {
     const SR = getSpeechRecognition();
     if (!SR) {
-      toast.info("Voice input isn't available here — use your keyboard's mic / dictation.");
+      const notice =
+        "Voice input is not available in this app view. Tap the message field and use the iOS keyboard microphone or dictation.";
+      setVoiceNotice(notice);
+      toast.info(notice);
+      appendAssistantMessage(notice);
       return;
     }
     if (listening) {
       recognitionRef.current?.stop();
       return;
+    }
+    if (navigator.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+      } catch {
+        const notice = "Microphone permission was denied. Enable microphone access, then try again.";
+        setVoiceNotice(notice);
+        toast.error(notice);
+        appendAssistantMessage(notice);
+        return;
+      }
     }
     const rec = new SR();
     rec.lang = navigator.language || "en-US";
@@ -232,16 +547,37 @@ export default function AssistantPage() {
     rec.maxAlternatives = 1;
     rec.onresult = (e) => {
       const transcript = e.results?.[0]?.[0]?.transcript ?? "";
-      if (transcript) setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
+      if (transcript) {
+        setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
+        setVoiceNotice("Voice captured. Review it, then send.");
+      }
     };
-    rec.onerror = () => setListening(false);
-    rec.onend = () => setListening(false);
+    rec.onerror = (event) => {
+      setListening(false);
+      const notice =
+        event.error === "not-allowed"
+          ? "Microphone permission was denied. Enable microphone access, then try again."
+          : event.error === "no-speech"
+            ? "I didn't hear anything. Try again or use keyboard dictation."
+            : "Voice input stopped. Try again or use keyboard dictation.";
+      setVoiceNotice(notice);
+      toast.error(notice);
+    };
+    rec.onend = () => {
+      setListening(false);
+      setVoiceNotice((current) => (current === "Listening..." ? "Voice input stopped." : current));
+    };
     recognitionRef.current = rec;
     setListening(true);
+    setVoiceNotice("Listening...");
     try {
       rec.start();
     } catch {
       setListening(false);
+      const notice = "Voice input could not start here. Use keyboard dictation instead.";
+      setVoiceNotice(notice);
+      toast.error(notice);
+      appendAssistantMessage(notice);
     }
   };
 
@@ -253,6 +589,9 @@ export default function AssistantPage() {
     setInput("");
     setSending(true);
     try {
+      const handledLocally = await handleLocalReminderAction(text);
+      if (handledLocally) return;
+
       const res = await authFetch("/api/assistant/chat", {
         method: "POST",
         body: JSON.stringify({
@@ -543,42 +882,56 @@ export default function AssistantPage() {
             data-keyboard-keep-visible
             className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 border-t bg-background/95 px-4 py-3 backdrop-blur md:bottom-0"
           >
-            <div className="mx-auto flex max-w-2xl items-center gap-2">
-              <Button
-                variant={listening ? "default" : "ghost"}
-                size="icon"
-                onClick={toggleMic}
-                aria-label={speechSupported ? "Voice input" : "Voice input unavailable"}
-                title={
-                  speechSupported
-                    ? "Tap to dictate"
-                    : "Voice input isn't available here — use your keyboard's dictation"
-                }
-                className="shrink-0"
-              >
-                {listening ? (
-                  <Mic className="h-4 w-4 animate-pulse" />
-                ) : speechSupported ? (
-                  <Mic className="h-4 w-4" />
-                ) : (
-                  <MicOff className="h-4 w-4 text-muted-foreground" />
-                )}
-              </Button>
-              <Input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    send();
+            <div className="mx-auto max-w-2xl">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant={listening ? "default" : "ghost"}
+                  size="icon"
+                  onClick={toggleMic}
+                  aria-label={speechSupported ? "Voice input" : "Voice input unavailable"}
+                  title={
+                    speechSupported
+                      ? "Tap to dictate"
+                      : "Voice input isn't available here. Use your keyboard's dictation."
                   }
-                }}
-                placeholder={`Message ${name}…`}
-                className="flex-1"
-              />
-              <Button size="icon" onClick={send} disabled={!input.trim() || sending} className="shrink-0">
-                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              </Button>
+                  className="shrink-0"
+                >
+                  {listening ? (
+                    <Mic className="h-4 w-4 animate-pulse" />
+                  ) : speechSupported ? (
+                    <Mic className="h-4 w-4" />
+                  ) : (
+                    <MicOff className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </Button>
+                <Input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      send();
+                    }
+                  }}
+                  placeholder={`Message ${name}…`}
+                  className="flex-1"
+                />
+                <Button size="icon" onClick={send} disabled={!input.trim() || sending} className="shrink-0">
+                  {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                </Button>
+              </div>
+              {voiceNotice && (
+                <p
+                  className={
+                    listening
+                      ? "mt-1.5 text-xs font-medium text-primary"
+                      : "mt-1.5 text-xs text-muted-foreground"
+                  }
+                  aria-live="polite"
+                >
+                  {voiceNotice}
+                </p>
+              )}
             </div>
           </div>
         </>
