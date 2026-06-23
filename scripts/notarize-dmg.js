@@ -49,12 +49,29 @@ if (!dmg) {
 }
 
 const dmgPath = path.join(DIST_DIR, dmg);
+// process.env takes precedence so callers can override (e.g. unset a stale
+// APPLE_APP_SPECIFIC_PASSWORD in shell to force the API-key path below).
 const env = { ...parseEnv(ENV_FILE), ...process.env };
-const { APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID } = env;
+const {
+  APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID,
+  APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER,
+} = env;
 
-if (!APPLE_ID || !APPLE_APP_SPECIFIC_PASSWORD || !APPLE_TEAM_ID) {
+if (!APPLE_TEAM_ID) {
+  console.warn("notarize-dmg: missing APPLE_TEAM_ID — skipping DMG notarization.");
+  process.exit(0);
+}
+
+// Auth preference: App Store Connect API key (.p8) > Apple ID + app-specific
+// password. The API key is headless-safe and doesn't rotate when the Apple ID
+// password changes, so prefer it when present.
+const hasApiKey = !!(APPLE_API_KEY && APPLE_API_KEY_ID && APPLE_API_ISSUER);
+const hasApplePassword = !!(APPLE_ID && APPLE_APP_SPECIFIC_PASSWORD);
+
+if (!hasApiKey && !hasApplePassword) {
   console.warn(
-    "notarize-dmg: missing APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID — skipping DMG notarization."
+    "notarize-dmg: need either APPLE_API_KEY + APPLE_API_KEY_ID + APPLE_API_ISSUER (preferred) " +
+    "or APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD — skipping DMG notarization."
   );
   process.exit(0);
 }
@@ -66,18 +83,24 @@ execFileSync("codesign", ["--force", "--sign", identity, "--timestamp", dmgPath]
   stdio: "inherit",
 });
 
-console.log(`notarize-dmg: submitting ${dmg} to Apple (can take a few min)...`);
-execFileSync(
-  "xcrun",
-  [
-    "notarytool", "submit", dmgPath,
+const notarizeArgs = ["notarytool", "submit", dmgPath];
+if (hasApiKey) {
+  console.log(`notarize-dmg: submitting ${dmg} (API key auth) — can take a few min...`);
+  notarizeArgs.push(
+    "--key", APPLE_API_KEY,
+    "--key-id", APPLE_API_KEY_ID,
+    "--issuer", APPLE_API_ISSUER,
+  );
+} else {
+  console.log(`notarize-dmg: submitting ${dmg} (Apple ID auth) — can take a few min...`);
+  notarizeArgs.push(
     "--apple-id", APPLE_ID,
     "--password", APPLE_APP_SPECIFIC_PASSWORD,
     "--team-id", APPLE_TEAM_ID,
-    "--wait",
-  ],
-  { stdio: "inherit" }
-);
+  );
+}
+notarizeArgs.push("--wait");
+execFileSync("xcrun", notarizeArgs, { stdio: "inherit" });
 
 console.log(`notarize-dmg: stapling ticket to ${dmg}...`);
 execFileSync("xcrun", ["stapler", "staple", dmgPath], { stdio: "inherit" });
