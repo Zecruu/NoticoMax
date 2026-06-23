@@ -12,6 +12,7 @@ import { HouseholdsCard } from "@/components/settings/households-card";
 import { StorageCard } from "@/components/settings/storage-card";
 import { ClaudeTokensCard } from "@/components/settings/claude-tokens-card";
 import { BootstrapCurl } from "@/components/settings/bootstrap-curl";
+import { NoticoMemoryCard } from "@/components/settings/notico-memory-card";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -523,6 +524,7 @@ export default function SettingsPage() {
         {/* Family + Storage */}
         <HouseholdsCard />
         <StorageCard />
+        <NoticoMemoryCard />
 
         <Card>
           <CardHeader>

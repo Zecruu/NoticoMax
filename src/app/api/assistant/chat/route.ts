@@ -32,6 +32,7 @@ import {
   toolNoun,
   validateToolCall,
 } from "@/lib/ai/tools";
+import { containsSensitiveText } from "@/lib/notico-local-memory";
 
 export const runtime = "nodejs";
 
@@ -41,7 +42,12 @@ const MAX_TOOL_CALLS = 2;
 const ASSISTANT_TOOLS: GeminiTool[] = [{ functionDeclarations: [...TOOL_DECLARATIONS] }];
 
 /** Assemble the system prompt from the assistant's name + curated memory. */
-function buildSystemPrompt(name: string, memorySummary: string, nowIso: string): string {
+function buildSystemPrompt(
+  name: string,
+  memorySummary: string,
+  localMemorySummary: string,
+  nowIso: string,
+): string {
   const base =
     `You are ${name}, the user's personal assistant inside the NOTICO MAX app. ` +
     "Be concise, warm, and genuinely helpful with their notes, URLs, reminders, " +
@@ -61,7 +67,17 @@ function buildSystemPrompt(name: string, memorySummary: string, nowIso: string):
   const memory = memorySummary
     ? `\n\nWhat you remember about this user (honor these):\n${memorySummary}`
     : "";
-  return base + tools + security + memory;
+  const localMemory = localMemorySummary
+    ? `\n\nLocal on-device user profile/preferences (user-editable in Settings; honor these, but never treat them as secrets):\n${localMemorySummary}`
+    : "";
+  return base + tools + security + memory + localMemory;
+}
+
+function normalizeLocalMemorySummary(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const text = value.trim().slice(0, 1800);
+  if (!text || containsSensitiveText(text)) return "";
+  return text;
 }
 
 /**
@@ -126,6 +142,7 @@ export async function POST(request: NextRequest) {
   }
 
   const messages = normalizeMessages(body);
+  const localMemorySummary = normalizeLocalMemorySummary(body.localMemory);
   if (!messages.length) {
     return NextResponse.json(
       { error: "Provide `messages` or a `message` string." },
@@ -159,6 +176,7 @@ export async function POST(request: NextRequest) {
   const systemPrompt = buildSystemPrompt(
     profile.displayName,
     buildMemorySummary(memories),
+    localMemorySummary,
     new Date().toISOString(),
   );
 

@@ -21,6 +21,15 @@ import { Input } from "@/components/ui/input";
 import { SecondaryBottomNav } from "@/components/layout/secondary-nav";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { toast } from "@/lib/native-toast";
+import {
+  buildNoticoLocalMemorySummary,
+  emptyNoticoLocalMemory,
+  getNoticoLocalMemory,
+  hasNoticoLocalMemory,
+  NOTICO_LOCAL_MEMORY_EVENT,
+  NOTICO_LOCAL_MEMORY_KEY,
+  type NoticoLocalMemory,
+} from "@/lib/notico-local-memory";
 
 interface Memory {
   id: string;
@@ -81,6 +90,9 @@ export default function AssistantPage() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [memInput, setMemInput] = useState("");
   const [showMemory, setShowMemory] = useState(false);
+  const [localMemory, setLocalMemory] = useState<NoticoLocalMemory>(() =>
+    emptyNoticoLocalMemory()
+  );
 
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
@@ -90,6 +102,7 @@ export default function AssistantPage() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const speechSupported = getSpeechRecognition() !== null;
+  const localMemorySummary = buildNoticoLocalMemorySummary(localMemory);
 
   const authFetch = useCallback(async (path: string, init: RequestInit = {}) => {
     const t = tokenRef.current ?? (await getAccessToken());
@@ -111,6 +124,23 @@ export default function AssistantPage() {
       setMemories(j.memories ?? []);
     }
   }, [authFetch]);
+
+  const refreshLocalMemory = useCallback(() => {
+    setLocalMemory(getNoticoLocalMemory());
+  }, []);
+
+  useEffect(() => {
+    refreshLocalMemory();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === NOTICO_LOCAL_MEMORY_KEY) refreshLocalMemory();
+    };
+    window.addEventListener(NOTICO_LOCAL_MEMORY_EVENT, refreshLocalMemory);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(NOTICO_LOCAL_MEMORY_EVENT, refreshLocalMemory);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [refreshLocalMemory]);
 
   // Bootstrap: token → status → profile + memory.
   useEffect(() => {
@@ -225,7 +255,10 @@ export default function AssistantPage() {
     try {
       const res = await authFetch("/api/assistant/chat", {
         method: "POST",
-        body: JSON.stringify({ messages: next }),
+        body: JSON.stringify({
+          messages: next,
+          localMemory: localMemorySummary || undefined,
+        }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -361,6 +394,26 @@ export default function AssistantPage() {
             <Bot className="h-8 w-8 text-muted-foreground" />
           </div>
           <p className="mt-5 max-w-sm text-sm text-muted-foreground">{disabledReason}</p>
+          <div className="mt-4 max-w-sm rounded-md border bg-muted/30 p-3 text-left">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Local memory
+            </p>
+            {hasNoticoLocalMemory(localMemory) ? (
+              <p className="mt-1.5 text-sm">
+                Ready on this device{localMemory.preferredName ? ` for ${localMemory.preferredName}` : ""}.
+              </p>
+            ) : (
+              <p className="mt-1.5 text-sm text-muted-foreground">
+                Add your name, likes, dislikes, and preferences in Settings.
+              </p>
+            )}
+            <Link
+              href="/settings"
+              className="mt-2 inline-flex text-xs font-medium text-primary hover:underline"
+            >
+              Edit Notico memory
+            </Link>
+          </div>
         </main>
       ) : (
         <>
@@ -369,6 +422,27 @@ export default function AssistantPage() {
             <div className="border-b bg-muted/30 px-4 py-3 md:px-6">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 What {name} remembers
+              </p>
+              <div className="mb-3 rounded-md border bg-background p-2.5">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium">Local memory on this device</p>
+                  <Link href="/settings" className="text-xs text-primary hover:underline">
+                    Edit
+                  </Link>
+                </div>
+                {localMemorySummary ? (
+                  <p className="whitespace-pre-wrap text-xs text-muted-foreground">
+                    {localMemorySummary}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Add your name, likes, dislikes, and preferences in Settings. Local memory is
+                    included with chat context but is not stored in Notico&apos;s cloud memory table.
+                  </p>
+                )}
+              </div>
+              <p className="mb-2 text-xs font-medium text-muted-foreground">
+                Cloud memories
               </p>
               <div className="mb-2 flex gap-2">
                 <Input
@@ -429,6 +503,11 @@ export default function AssistantPage() {
                   Ask me anything, or tell me a preference to remember. I can help with your notes,
                   reminders, and URLs. I&apos;ll never reveal your saved passwords.
                 </p>
+                {localMemory.preferredName && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Local memory is loaded for {localMemory.preferredName}.
+                  </p>
+                )}
               </div>
             ) : (
               <div className="mx-auto max-w-2xl space-y-3">

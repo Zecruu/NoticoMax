@@ -3,7 +3,15 @@
 import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Lock,
   UserCheck,
@@ -54,6 +62,7 @@ export function PasswordsView({ initialTab = "logins" }: PasswordsViewProps = {}
   const [newCredLabel, setNewCredLabel] = useState("");
   const [newCredUser, setNewCredUser] = useState("");
   const [newCredPass, setNewCredPass] = useState("");
+  const [credentialDialogOpen, setCredentialDialogOpen] = useState(false);
   const [visibleCredKeys, setVisibleCredKeys] = useState<Set<number>>(new Set());
 
   const [syncEnabled, setSyncEnabled] = useState(false);
@@ -187,7 +196,15 @@ export function PasswordsView({ initialTab = "logins" }: PasswordsViewProps = {}
     setNewCredLabel("");
     setNewCredUser("");
     setNewCredPass("");
+    setCredentialDialogOpen(false);
     toast.success(`Added ${label}`);
+  };
+
+  const openCredentialDialog = () => {
+    setNewCredLabel("");
+    setNewCredUser("");
+    setNewCredPass("");
+    setCredentialDialogOpen(true);
   };
 
   const handleRemoveCredential = async (index: number) => {
@@ -215,6 +232,10 @@ export function PasswordsView({ initialTab = "logins" }: PasswordsViewProps = {}
       return next;
     });
   };
+
+  const canAddCredential = Boolean(
+    newCredLabel.trim() && newCredUser.trim() && newCredPass.trim()
+  );
 
   return (
     <div className="mx-auto max-w-3xl p-4 md:p-6 space-y-4">
@@ -292,6 +313,13 @@ export function PasswordsView({ initialTab = "logins" }: PasswordsViewProps = {}
           {/* Logins */}
           {tab === "logins" && (
             <div className="space-y-3">
+              <div className="flex justify-end">
+                <Button size="sm" className="gap-1.5" onClick={openCredentialDialog}>
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Login
+                </Button>
+              </div>
+
               {credentials.length > 0 && (
                 <div className="space-y-2">
                   {credentials.map((cred, index) => (
@@ -365,44 +393,11 @@ export function PasswordsView({ initialTab = "logins" }: PasswordsViewProps = {}
                 </div>
               )}
 
-              <div
-                data-keyboard-keep-visible
-                className="space-y-2 rounded-md border border-dashed p-3"
-              >
-                <Input
-                  placeholder="Service name (e.g., Gmail, GitHub)..."
-                  value={newCredLabel}
-                  onChange={(e) => setNewCredLabel(e.target.value)}
-                  className="h-8 text-sm"
-                />
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Username / Email..."
-                    value={newCredUser}
-                    onChange={(e) => setNewCredUser(e.target.value)}
-                    className="flex-1 h-8 text-sm"
-                  />
-                  <Input
-                    placeholder="Password..."
-                    type="password"
-                    value={newCredPass}
-                    onChange={(e) => setNewCredPass(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleAddCredential();
-                    }}
-                    className="flex-1 h-8 text-sm"
-                  />
+              {credentials.length === 0 && (
+                <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+                  No saved logins yet.
                 </div>
-                <Button
-                  size="sm"
-                  className="w-full gap-1.5"
-                  disabled={!newCredLabel.trim() || !newCredUser.trim() || !newCredPass.trim()}
-                  onClick={handleAddCredential}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add Login
-                </Button>
-              </div>
+              )}
             </div>
           )}
 
@@ -598,10 +593,75 @@ export function PasswordsView({ initialTab = "logins" }: PasswordsViewProps = {}
         </CardContent>
       </Card>
 
-      {/* Keyboard-open-only trailing spacer: gives the bottom add-login form
-          enough room to scroll fully above the iOS keyboard. Collapses to 0
-          when the keyboard is closed, so the layout is unchanged. */}
+      {/* Keyboard-open-only trailing spacer: gives editable Passwords forms
+          enough room to scroll fully above the iOS keyboard.
+          Collapses to 0 when the keyboard is closed, so the layout is unchanged. */}
       <div aria-hidden style={{ height: "var(--keyboard-height, 0px)" }} />
+
+      <Dialog open={credentialDialogOpen} onOpenChange={setCredentialDialogOpen}>
+        <DialogContent className="top-[calc(var(--visual-viewport-height,100vh)/2)] flex max-h-[calc(var(--visual-viewport-height,100vh)-1rem)] w-[calc(100vw-2rem)] max-w-md flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+          <DialogHeader className="shrink-0 border-b px-6 py-4 text-left">
+            <DialogTitle>Add Login</DialogTitle>
+          </DialogHeader>
+
+          <form
+            className="flex min-h-0 flex-1 flex-col"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleAddCredential();
+            }}
+          >
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4 pb-[calc(1rem+var(--keyboard-height,0px))]">
+              <div className="space-y-2">
+                <Label htmlFor="credential-service">Service name</Label>
+                <Input
+                  id="credential-service"
+                  placeholder="Gmail, GitHub, bank..."
+                  value={newCredLabel}
+                  onChange={(e) => setNewCredLabel(e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="credential-username">Username / Email</Label>
+                <Input
+                  id="credential-username"
+                  placeholder="name@example.com"
+                  value={newCredUser}
+                  onChange={(e) => setNewCredUser(e.target.value)}
+                  autoComplete="username"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="credential-password">Password</Label>
+                <Input
+                  id="credential-password"
+                  placeholder="Password"
+                  type="password"
+                  value={newCredPass}
+                  onChange={(e) => setNewCredPass(e.target.value)}
+                  autoComplete="new-password"
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="shrink-0 border-t bg-background px-6 py-4">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setCredentialDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!canAddCredential}>
+                Add Login
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
