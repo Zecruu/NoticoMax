@@ -199,6 +199,40 @@ export interface ToolExecutionResult {
   title: string;
 }
 
+// Write verbs/phrases. Kept deliberately broad but only consulted once a
+// message is established to be a command, not a question.
+const WRITE_VERBS =
+  /\b(create|save|saving|add|adding|make|set|record|log|bookmark|jot|store|capture|append|put|note)\b|note (this|that|it|down)|write (this|that|it|down)|new (note|reminder|alarm|bookmark|url|link|to-?do)/i;
+// "remind me to/about/at ..." is a command; "remind me what/when ..." is a
+// question (handled by the question check below).
+const REMIND_WRITE = /\bremind me\b(?!\s+(what|when|where|which|who|why|how|if|whether)\b)/i;
+// Interrogative openers — an information request, not a command.
+const INFO_QUESTION =
+  /^\s*(what|what'?s|when|where|which|who|whose|why|how|do|does|did|is|are|am|was|were|have|has|should|shall|tell me|show me|list)\b/i;
+// Polite-command wrappers that look like questions but are really commands:
+// "can you create…", "could you save…", "please add…".
+const POLITE_COMMAND = /^\s*(please\s+)?((can|could|would|will)\s+you\s+|please\s+)/i;
+
+/**
+ * Decide whether the user's latest message explicitly asks the assistant to
+ * WRITE something, vs. asking for information. Gates every create_* tool so an
+ * info question ("what do I have this week?") can never create a note. Pure +
+ * synchronous so it's easy to reason about and test.
+ *
+ * Rule: a message phrased as a question writes nothing (even if it contains a
+ * verb like "save" in "what did I save?"), unless it's a polite command
+ * ("can you save…"). Otherwise, an explicit write verb signals intent.
+ */
+export function hasWriteIntent(message: string): boolean {
+  const t = (message ?? "").trim();
+  if (!t) return false;
+
+  const isQuestion = INFO_QUESTION.test(t) && !POLITE_COMMAND.test(t);
+  if (isQuestion) return false;
+
+  return WRITE_VERBS.test(t) || REMIND_WRITE.test(t);
+}
+
 /** Human-friendly label for a tool, used in assistant confirmations. */
 export function toolNoun(name: AssistantToolName): string {
   switch (name) {

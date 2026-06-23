@@ -27,6 +27,7 @@ import {
 import {
   TOOL_DECLARATIONS,
   executeToolCall,
+  hasWriteIntent,
   logToolAudit,
   toolNoun,
   validateToolCall,
@@ -214,7 +215,14 @@ export async function POST(request: NextRequest) {
     // Bounded, non-recursive tool use: execute up to MAX_TOOL_CALLS validated
     // tool calls the model requested this turn, then return a clear reply. The
     // model never gets a user_id — executeToolCall binds it to the authed user.
-    const reply = await runToolCalls(admin, userId, result.functionCalls, result.text);
+    // Writes are gated on explicit user write-intent (see runToolCalls).
+    const reply = await runToolCalls(
+      admin,
+      userId,
+      result.functionCalls,
+      result.text,
+      lastUser?.content ?? "",
+    );
     return NextResponse.json({ reply, savedMemory });
   } catch (err) {
     const status = (err as { status?: number }).status;
@@ -239,23 +247,46 @@ export async function POST(request: NextRequest) {
 
 /**
  * Execute up to MAX_TOOL_CALLS validated tool calls the model requested, then
- * compose a clear confirmation reply. Bounded + non-recursive: we never feed
- * results back for another model round. Validation failures (e.g. a reminder
- * with no time) become a clarification ask rather than a bad write.
+ * compose a clear reply. Bounded + non-recursive: we never feed results back
+ * for another model round.
+ *
+ * Writes are gated on EXPLICIT user write-intent: the model is too eager to
+ * call create_* on information questions ("what do I have this week?"), which
+ * once produced a junk note full of meta-reasoning. If the latest user message
+ * isn't an explicit ask to create/save/add/set/remind, every tool call is
+ * blocked (and audited) and we answer conversationally instead — never writing
+ * the model's reasoning into a note. Validation failures become a clarification.
  */
 async function runToolCalls(
   admin: SupabaseClient,
   userId: string,
   functionCalls: GeminiFunctionCall[],
   modelText: string,
+  userMessage: string,
 ): Promise<string> {
   if (!functionCalls.length) return modelText || "…";
+
+  const writeIntent = hasWriteIntent(userMessage);
 
   const created: string[] = [];
   const failed: string[] = [];
   const clarifications: string[] = [];
+  let blocked = false;
 
   for (const fc of functionCalls.slice(0, MAX_TOOL_CALLS)) {
+    // Gate: no explicit write request → refuse the write, log it, don't create.
+    if (!writeIntent) {
+      blocked = true;
+      await logToolAudit(admin, {
+        userId,
+        tool: fc.name || "unknown",
+        status: "rejected",
+        args: fc.args,
+        error: "no_explicit_write_intent",
+      });
+      continue;
+    }
+
     const validation = validateToolCall(fc.name, fc.args);
     if (!validation.ok) {
       await logToolAudit(admin, {
@@ -282,7 +313,19 @@ async function runToolCalls(
   if (clarifications.length) {
     parts.push(`I need a bit more detail before I can do that: ${clarifications.join("; ")}.`);
   }
-  return parts.join(" ") || modelText || "Done.";
+  if (parts.length) return parts.join(" ");
+
+  // Nothing was created. If we blocked a write on an info question, answer
+  // honestly rather than echoing the model's tool-call reasoning.
+  if (blocked) {
+    return (
+      modelText.trim() ||
+      "I can create notes, reminders, bookmarks, and alarms when you ask me to " +
+        "(e.g. “remind me at 9am to call mom”). I can’t read your existing " +
+        "schedule, calendar, or saved reminders yet."
+    );
+  }
+  return modelText || "Done.";
 }
 
 /** Accept either a full `messages` array or a single `message` string. */
