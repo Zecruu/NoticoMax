@@ -1,0 +1,4 @@
+- [x] Verify AgentsHive project scope is `noticomax`.
+- [x] Dispatch release/signing/upload mission to `holy`.
+- [ ] Monitor coder updates and answer blockers. Current state: blocked on expired Xcode Apple account session and missing Apple/iOS Distribution signing identity.
+- [ ] Confirm App Store Connect/TestFlight upload result with operator.

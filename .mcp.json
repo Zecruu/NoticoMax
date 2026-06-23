@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "agentshive": {
+      "type": "http",
+      "url": "https://agentshive-production.up.railway.app/mcp?project=noticomax",
+      "headers": {
+        "Authorization": "Bearer ${AGENTSHIVE_API_KEY}"
+      }
+    }
+  }
+}
