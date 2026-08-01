@@ -88,6 +88,23 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
+.item-editor-toolbar,
+.item-editor-details {
+  padding-bottom: max(0.5rem, var(--safe-area-bottom));
+}
+
+.keyboard-open .item-editor-toolbar,
+.keyboard-open .item-editor-details {
+  padding-bottom: 0.5rem;
+}
+
+@media (min-width: 768px) {
+  .item-editor-toolbar,
+  .item-editor-details {
+    padding-bottom: 0.5rem;
+  }
+}
+
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);

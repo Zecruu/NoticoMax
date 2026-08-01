@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -20,9 +19,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Link2, Bell, X, Eye, Pencil, List, ListOrdered, ALargeSmall, ListChecks, Trash2, ChevronDown } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { ChevronLeft, X, Eye, Pencil, List, ListOrdered, ALargeSmall, ListChecks, Trash2, ChevronDown, MoreHorizontal, Share2 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { cn } from "@/lib/utils";
+import { toast } from "@/lib/native-toast";
+import {
+  DEFAULT_URL_CATEGORIES,
+  getUrlCategoryLabel,
+  withUrlCategory,
+  withoutUrlCategoryTags,
+} from "@/lib/url-categories";
 
 interface ItemDialogProps {
   open: boolean;
@@ -56,6 +63,9 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
   const [recurrence, setRecurrence] = useState<RecurrenceRule>("none");
   const [tagInput, setTagInput] = useState("");
   const [tags, setTags] = useState<string[]>([]);
+  const [urlCategory, setUrlCategory] = useState("General");
+  const [customCategoryOpen, setCustomCategoryOpen] = useState(false);
+  const [customCategory, setCustomCategory] = useState("");
   const [pinned, setPinned] = useState(false);
   const [folderId, setFolderId] = useState<string | undefined>(undefined);
   const [previewing, setPreviewing] = useState(false);
@@ -200,7 +210,8 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
       setReminderDate(
         editingItem.reminderDate ? toLocalDatetimeValue(editingItem.reminderDate) : "",
       );
-      setTags(editingItem.tags);
+      setTags(withoutUrlCategoryTags(editingItem.tags));
+      setUrlCategory(getUrlCategoryLabel(editingItem.tags));
       setPinned(editingItem.pinned);
       setFolderId(editingItem.folderId || undefined);
       setRecurrence(editingItem.recurrence || "none");
@@ -211,6 +222,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
       setUrl("");
       setReminderDate(defaultType === "reminder" && defaultReminderDate ? defaultReminderDate : "");
       setTags([]);
+      setUrlCategory("General");
       setPinned(false);
       setFolderId(defaultFolderId || undefined);
       setRecurrence("none");
@@ -218,6 +230,8 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
     setPreviewing(false);
     setActiveListMode(null);
     setDetailsOpen(false);
+    setCustomCategoryOpen(false);
+    setCustomCategory("");
     closingRef.current = false;
   }, [editingItem, open, defaultFolderId, defaultType, defaultReminderDate]);
 
@@ -264,7 +278,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
       reminderDate: reminderIso,
       reminderCompleted: editingItem?.reminderCompleted || false,
       recurrence: type === "reminder" ? recurrence : undefined,
-      tags,
+      tags: type === "url" ? withUrlCategory(tags, urlCategory) : tags,
       pinned,
       color: editingItem?.color,
       folderId: folderId || undefined,
@@ -318,357 +332,434 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
     });
   }, []);
 
+  const handleShare = async () => {
+    if (!editingItem) return;
+    try {
+      const res = await fetch("/api/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: editingItem.clientId }),
+      });
+      if (!res.ok) throw new Error();
+      const { shareId } = await res.json();
+      await navigator.clipboard.writeText(`${window.location.origin}/shared/${shareId}`);
+      toast.success("Share link copied");
+      setDetailsOpen(false);
+    } catch {
+      toast.error("Failed to create share link");
+    }
+  };
+
+  const applyCustomCategory = () => {
+    const value = customCategory.trim();
+    if (!value) return;
+    setUrlCategory(value.slice(0, 40));
+    setCustomCategory("");
+    setCustomCategoryOpen(false);
+  };
+
+  const detailsContent = (
+    <div className="space-y-5">
+      {type === "note" && content && (
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full justify-start gap-2"
+          onClick={() => {
+            setPreviewing((value) => !value);
+            setDetailsOpen(false);
+          }}
+        >
+          {previewing ? <Pencil className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          {previewing ? "Return to editing" : "Preview Markdown"}
+        </Button>
+      )}
+
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <Label htmlFor="item-pinned">Pinned</Label>
+          <p className="text-xs text-muted-foreground">Keep this item at the top of its list.</p>
+        </div>
+        <Switch id="item-pinned" checked={pinned} onCheckedChange={setPinned} />
+      </div>
+
+      {folders.length > 0 && (
+        <div className="space-y-1.5">
+          <Label htmlFor="folder-select">Folder</Label>
+          <Select
+            value={folderId || "none"}
+            onValueChange={(value) => setFolderId(value === "none" ? undefined : value)}
+          >
+            <SelectTrigger id="folder-select">
+              <SelectValue placeholder="No folder" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">
+                <span className="text-muted-foreground">No folder</span>
+              </SelectItem>
+              {folders.map((folder) => (
+                <SelectItem key={folder.clientId} value={folder.clientId}>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                      style={{ backgroundColor: folder.color || "#6b7280" }}
+                    />
+                    <span>{folder.name}</span>
+                    {folder.householdId && (
+                      <span className="rounded-full bg-primary/15 px-1 py-0.5 text-[9px] font-semibold uppercase text-primary">
+                        Family
+                      </span>
+                    )}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <Label htmlFor="item-tag-input">Tags</Label>
+        <div className="flex gap-2">
+          <Input
+            id="item-tag-input"
+            placeholder="Add tag..."
+            value={tagInput}
+            onChange={(event) => setTagInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                handleAddTag();
+              }
+            }}
+          />
+          <Button type="button" variant="secondary" onClick={handleAddTag}>Add</Button>
+        </div>
+        {tags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {tags.map((tag) => (
+              <Badge key={tag} variant="secondary" className="gap-1">
+                {tag}
+                <button
+                  type="button"
+                  onClick={() => handleRemoveTag(tag)}
+                  className="ml-0.5 hover:text-destructive"
+                  aria-label={`Remove ${tag} tag`}
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+        )}
+        {allTags.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {allTags
+              .filter((tag) => !tags.includes(tag) && (!tagInput || tag.toLowerCase().includes(tagInput.toLowerCase())))
+              .slice(0, 8)
+              .map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => {
+                    setTags((current) => current.includes(tag) ? current : [...current, tag]);
+                    setTagInput("");
+                  }}
+                  className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  + {tag}
+                </button>
+              ))}
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-2 border-t pt-4">
+        {editingItem && (
+          <Button type="button" variant="outline" className="w-full justify-start" onClick={handleShare}>
+            <Share2 className="h-4 w-4" />
+            Share
+          </Button>
+        )}
+        {editingItem && onDelete && (
+          <Button type="button" variant="ghost" className="w-full justify-start text-destructive hover:text-destructive" onClick={handleDelete}>
+            <Trash2 className="h-4 w-4" />
+            Move to Trash
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && finalizeAndClose()}>
       <DialogContent
         showCloseButton={false}
+        aria-describedby={undefined}
         onEscapeKeyDown={(e) => { e.preventDefault(); finalizeAndClose(); }}
         onPointerDownOutside={(e) => { e.preventDefault(); finalizeAndClose(); }}
         onInteractOutside={(e) => { e.preventDefault(); }}
-        className="!fixed !inset-0 !top-0 !left-0 !translate-x-0 !translate-y-0 !max-w-none !w-screen !h-[100dvh] !max-h-none !rounded-none !border-0 !p-0 !gap-0 flex flex-col bg-background"
+        className="item-editor-shell !fixed !inset-0 !left-0 !top-0 !flex !h-[var(--visual-viewport-height,100dvh)] !max-h-none !w-screen !max-w-none !translate-x-0 !translate-y-0 flex-col !gap-0 !overflow-hidden !rounded-none !border-0 !p-0 bg-background md:!inset-auto md:!left-1/2 md:!top-1/2 md:!h-[min(760px,calc(100dvh-3rem))] md:!w-[min(720px,calc(100vw-3rem))] md:!-translate-x-1/2 md:!-translate-y-1/2 md:!rounded-lg md:!border"
       >
-        {/* Top bar */}
-        <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-b shrink-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <DialogTitle className="sr-only">
+          {editingItem ? `Edit ${type}` : `New ${type}`}
+        </DialogTitle>
+
+        <div className="item-editor-topbar flex shrink-0 items-center justify-between gap-2 border-b bg-background/95 px-3 pb-2.5 pt-[max(0.625rem,var(--safe-area-top))] backdrop-blur md:pt-2.5">
           <button
             type="button"
             onClick={finalizeAndClose}
-            className="inline-flex items-center justify-center h-9 w-9 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            aria-label="Close (auto-saves)"
-            title="Close (auto-saves)"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
+            aria-label="Back and save"
+            title="Back and save"
           >
-            <X className="h-5 w-5" />
+            <ChevronLeft className="h-6 w-6" />
           </button>
-          <DialogTitle className="text-sm font-semibold truncate flex-1 text-center px-2">
-            {editingItem ? "Edit Item" : "New Item"}
-          </DialogTitle>
+          <span className="truncate px-2 text-sm font-medium text-muted-foreground">
+            {type === "note" ? "Note" : type === "url" ? "Bookmark" : "Reminder"}
+          </span>
           <div className="flex items-center gap-1">
+            {type === "note" && previewing && (
+              <button
+                type="button"
+                onClick={() => setPreviewing(false)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label="Return to editing"
+                title="Return to editing"
+              >
+                <Pencil className="h-5 w-5" />
+              </button>
+            )}
             <button
               type="button"
-              onClick={handleDelete}
-              disabled={!editingItem || !onDelete}
-              className="inline-flex items-center justify-center h-9 w-9 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              aria-label="Delete"
-              title={editingItem ? "Delete" : "Save first to delete"}
+              onClick={() => setDetailsOpen(true)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
+              aria-label="Item details"
+              title="Item details"
             >
-              <Trash2 className="h-5 w-5" />
+              <MoreHorizontal className="h-5 w-5" />
             </button>
-            <Button
-              size="sm"
-              onClick={finalizeAndClose}
-              className="font-semibold h-9 px-4"
-            >
-              Save
-            </Button>
           </div>
         </div>
 
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-[calc(1rem+var(--keyboard-height,0px))]">
-          {!editingItem && (
-            <Tabs value={type} onValueChange={(v) => setType(v as ItemType)}>
-              <TabsList className="w-full">
-                <TabsTrigger value="note" className="flex-1 gap-1.5">
-                  <FileText className="h-3.5 w-3.5" />
-                  Note
-                </TabsTrigger>
-                <TabsTrigger value="url" className="flex-1 gap-1.5">
-                  <Link2 className="h-3.5 w-3.5" />
-                  URL
-                </TabsTrigger>
-                <TabsTrigger value="reminder" className="flex-1 gap-1.5">
-                  <Bell className="h-3.5 w-3.5" />
-                  Reminder
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="note" className="hidden" />
-              <TabsContent value="url" className="hidden" />
-              <TabsContent value="reminder" className="hidden" />
-            </Tabs>
-          )}
-
-          {/* Title — visually quiet; the body autoFocuses instead so users can
-              just start typing. Title can stay blank — it auto-derives from
-              the first line of content (see computeFinalTitle below). */}
-          {(type !== "note" || title || editingItem) && (
-            <Input
-              id="title"
-              placeholder={
-                type === "note"
-                  ? "Title (optional)"
-                  : type === "url"
-                    ? "Bookmark name..."
-                    : "Reminder title..."
-              }
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              autoFocus={type !== "note" && !editingItem}
-              className="text-lg font-semibold border-0 px-0 shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/40"
-            />
-          )}
-
-          {type === "url" && (
-            <div className="space-y-2">
-              <Label htmlFor="url">URL</Label>
-              <Input
-                id="url"
-                type="url"
-                placeholder="https://..."
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-              />
-            </div>
-          )}
-
-          {type === "reminder" && (
-            <>
-            <div className="space-y-2">
-              <Label htmlFor="reminderDate">Date & Time</Label>
-              <Input
-                id="reminderDate"
-                type="datetime-local"
-                value={reminderDate}
-                onChange={(e) => setReminderDate(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="recurrence">Repeat</Label>
-              <select
-                id="recurrence"
-                value={recurrence}
-                onChange={(e) => setRecurrence(e.target.value as RecurrenceRule)}
-                className="text-foreground bg-transparent dark:bg-input/30 border-input flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-              >
-                <option value="none">Does not repeat</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-                <option value="yearly">Yearly (birthdays, anniversaries)</option>
-              </select>
-            </div>
-            </>
-          )}
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              {type === "note" ? <span /> : <Label htmlFor="content">Description (optional)</Label>}
-              {type === "note" && content && (
-                <div className="flex items-center gap-1 rounded-md border p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setPreviewing(false)}
-                    className={`flex items-center gap-1 rounded-sm px-2 py-0.5 text-xs transition-colors ${
-                      !previewing ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <Pencil className="h-3 w-3" />
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewing(true)}
-                    className={`flex items-center gap-1 rounded-sm px-2 py-0.5 text-xs transition-colors ${
-                      previewing ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <Eye className="h-3 w-3" />
-                    Preview
-                  </button>
-                </div>
-              )}
-            </div>
-            {type === "note" && !previewing && (
-              <div className="flex items-center gap-0.5 rounded-md border p-0.5 w-fit">
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => insertListPrefix("checklist")}
-                  className={`flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors ${
-                    activeListMode === "checklist" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-                  title="Checklist (tap circles to tick)"
-                >
-                  <ListChecks className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => insertListPrefix("bullet")}
-                  className={`flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors ${
-                    activeListMode === "bullet" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-                  title="Bullet list"
-                >
-                  <List className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => insertListPrefix("numbered")}
-                  className={`flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors ${
-                    activeListMode === "numbered" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-                  title="Numbered list"
-                >
-                  <ListOrdered className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => insertListPrefix("lettered")}
-                  className={`flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors ${
-                    activeListMode === "lettered" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-                  title="Lettered list (a, b, c)"
-                >
-                  <ALargeSmall className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
-            {previewing && type === "note" ? (
-              <div className="min-h-[150px] max-h-[60dvh] overflow-auto rounded-md border bg-background p-3">
+        {type === "note" ? (
+          <div className="flex min-h-0 flex-1 flex-col">
+            {previewing ? (
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 md:px-8">
                 <MarkdownRenderer content={content} onToggleTask={toggleTaskAtIndex} />
               </div>
             ) : (
-              <Textarea
-                ref={type === "note" ? textareaRef : undefined}
-                id="content"
-                autoFocus={type === "note" && !editingItem}
-                placeholder={
-                  type === "note"
-                    ? "Start typing…"
-                    : "Add a description..."
-                }
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                onInput={type === "note" ? handleTextareaInput : undefined}
-                onFocus={type === "note" ? handleTextareaInput : undefined}
-                onKeyDown={type === "note" ? handleContentKeyDown : undefined}
-                rows={type === "note" ? 14 : 3}
-                className={cn(
-                  type === "note" && "min-h-[40dvh] text-base border-0 px-0 shadow-none focus-visible:ring-0 resize-none",
-                )}
-              />
+              <div className="flex min-h-0 flex-1 flex-col px-5 pt-4 md:px-8 md:pt-6">
+                <Input
+                  id="title"
+                  placeholder="Title"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  className="h-auto shrink-0 border-0 !bg-transparent px-0 py-1 text-2xl font-semibold shadow-none placeholder:text-muted-foreground/35 focus-visible:ring-0 md:text-3xl"
+                />
+                <Textarea
+                  ref={textareaRef}
+                  id="content"
+                  autoFocus={!editingItem}
+                  placeholder="Start typing..."
+                  value={content}
+                  onChange={(event) => setContent(event.target.value)}
+                  onInput={handleTextareaInput}
+                  onFocus={handleTextareaInput}
+                  onKeyDown={handleContentKeyDown}
+                  className="min-h-0 flex-1 resize-none overflow-y-auto border-0 !bg-transparent px-0 py-3 text-base leading-7 shadow-none placeholder:text-muted-foreground/35 focus-visible:ring-0 md:text-base"
+                  style={{ fieldSizing: "fixed" }}
+                />
+              </div>
+            )}
+
+            {!previewing && (
+              <div className="item-editor-toolbar flex shrink-0 items-center justify-center border-t bg-background/95 px-3 pt-2 backdrop-blur md:justify-start md:px-6">
+                <div className="flex h-10 items-center gap-0.5 rounded-md border bg-muted/40 p-0.5">
+                  {([
+                    ["checklist", ListChecks, "Checklist"],
+                    ["bullet", List, "Bullet list"],
+                    ["numbered", ListOrdered, "Numbered list"],
+                    ["lettered", ALargeSmall, "Lettered list"],
+                  ] as const).map(([mode, Icon, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={() => insertListPrefix(mode)}
+                      className={cn(
+                        "inline-flex h-8 w-10 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-background hover:text-foreground",
+                        activeListMode === mode && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground",
+                      )}
+                      aria-label={label}
+                      title={label}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
+        ) : (
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 pb-[max(1.25rem,var(--safe-area-bottom))] md:px-8 md:py-6">
+            <div className="mx-auto max-w-xl space-y-5">
+            <Input
+              id="title"
+              placeholder={type === "url" ? "Bookmark name..." : "Reminder title..."}
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              autoFocus={!editingItem}
+              className="text-lg font-semibold border-0 px-0 shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/40"
+            />
 
-          {/* Collapsible Details: folder + tags */}
-          <div className="rounded-md border">
-            <button
-              type="button"
-              onClick={() => setDetailsOpen((v) => !v)}
-              className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-              aria-expanded={detailsOpen}
-            >
-              <span className="flex items-center gap-2">
-                Details
-                {(folderId || tags.length > 0) && (
-                  <span className="text-[10px] rounded-full bg-muted px-1.5 py-0.5">
-                    {[folderId ? "folder" : null, tags.length > 0 ? `${tags.length} tag${tags.length > 1 ? "s" : ""}` : null]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
-                )}
-              </span>
-              <ChevronDown className={cn("h-4 w-4 transition-transform", detailsOpen && "rotate-180")} />
-            </button>
-            {detailsOpen && (
-              <div className="border-t px-3 py-3 space-y-3">
-                {folders.length > 0 && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="folder-select" className="text-xs">Folder</Label>
-                    <Select
-                      value={folderId || "none"}
-                      onValueChange={(v) => setFolderId(v === "none" ? undefined : v)}
+            {type === "url" && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="url">URL</Label>
+                  <Input
+                    id="url"
+                    type="url"
+                    inputMode="url"
+                    placeholder="https://..."
+                    value={url}
+                    onChange={(event) => setUrl(event.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Category</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {DEFAULT_URL_CATEGORIES.map((category) => (
+                      <button
+                        key={category}
+                        type="button"
+                        onClick={() => {
+                          setUrlCategory(category);
+                          setCustomCategoryOpen(false);
+                        }}
+                        className={cn(
+                          "h-8 rounded-md border px-3 text-xs font-medium transition-colors",
+                          urlCategory === category
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                        )}
+                      >
+                        {category}
+                      </button>
+                    ))}
+                    {!DEFAULT_URL_CATEGORIES.includes(urlCategory as typeof DEFAULT_URL_CATEGORIES[number]) && (
+                      <button type="button" className="h-8 rounded-md border border-primary bg-primary px-3 text-xs font-medium text-primary-foreground">
+                        {urlCategory}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setCustomCategoryOpen((value) => !value)}
+                      className="h-8 rounded-md border px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                     >
-                      <SelectTrigger id="folder-select" className="h-8">
-                        <SelectValue placeholder="No folder" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">
-                          <span className="text-muted-foreground">No folder</span>
-                        </SelectItem>
-                        {folders.map((folder) => (
-                          <SelectItem key={folder.clientId} value={folder.clientId}>
-                            <div className="flex items-center gap-2">
-                              <div
-                                className="h-2.5 w-2.5 rounded-sm shrink-0"
-                                style={{ backgroundColor: folder.color || "#6b7280" }}
-                              />
-                              <span>{folder.name}</span>
-                              {folder.householdId && (
-                                <span className="text-[9px] rounded-full bg-primary/15 text-primary px-1 py-0.5 font-semibold uppercase tracking-wider">
-                                  Family
-                                </span>
-                              )}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      Custom
+                    </button>
                   </div>
-                )}
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Tags</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Add tag..."
-                      value={tagInput}
-                      onChange={(e) => setTagInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleAddTag();
-                        }
-                      }}
-                    />
-                    <Button type="button" variant="secondary" onClick={handleAddTag}>
-                      Add
-                    </Button>
-                  </div>
-                  {tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {tags.map((tag) => (
-                        <Badge key={tag} variant="secondary" className="gap-1">
-                          {tag}
-                          <button
-                            onClick={() => handleRemoveTag(tag)}
-                            className="ml-0.5 hover:text-destructive"
-                          >
-                            <X className="h-2.5 w-2.5" />
-                          </button>
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                  {allTags.length > 0 && (
-                    <div className="space-y-1">
-                      <p className="text-[10px] text-muted-foreground">Suggestions</p>
-                      <div className="flex flex-wrap gap-1">
-                        {allTags
-                          .filter((t) => !tags.includes(t) && (!tagInput || t.toLowerCase().includes(tagInput.toLowerCase())))
-                          .slice(0, 8)
-                          .map((tag) => (
-                            <button
-                              key={tag}
-                              type="button"
-                              onClick={() => {
-                                if (!tags.includes(tag)) setTags([...tags, tag]);
-                                setTagInput("");
-                              }}
-                              className="rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                            >
-                              + {tag}
-                            </button>
-                          ))}
-                      </div>
+                  {customCategoryOpen && (
+                    <div className="flex gap-2">
+                      <Input
+                        value={customCategory}
+                        onChange={(event) => setCustomCategory(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            applyCustomCategory();
+                          }
+                        }}
+                        placeholder="Category name"
+                        maxLength={40}
+                        autoFocus
+                      />
+                      <Button type="button" variant="secondary" onClick={applyCustomCategory}>Set</Button>
                     </div>
                   )}
                 </div>
               </div>
             )}
+
+            {type === "reminder" && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="reminderDate">Date & Time</Label>
+                  <Input
+                    id="reminderDate"
+                    type="datetime-local"
+                    value={reminderDate}
+                    onChange={(event) => setReminderDate(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="recurrence">Repeat</Label>
+                  <select
+                    id="recurrence"
+                    value={recurrence}
+                    onChange={(event) => setRecurrence(event.target.value as RecurrenceRule)}
+                    className="border-input flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
+                  >
+                    <option value="none">Does not repeat</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="yearly">Yearly (birthdays, anniversaries)</option>
+                  </select>
+                </div>
+              </>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="content">Description (optional)</Label>
+              <Textarea
+                id="content"
+                placeholder="Add a description..."
+                value={content}
+                onChange={(event) => setContent(event.target.value)}
+                rows={4}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setDetailsOpen(true)}
+              className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              Details
+              <ChevronDown className="h-4 w-4 -rotate-90" />
+            </button>
           </div>
-        </div>
+          </div>
+        )}
+
+        {detailsOpen && (
+          <div className="absolute inset-0 z-20 flex items-end md:items-stretch md:justify-end">
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/45"
+              onClick={() => setDetailsOpen(false)}
+              aria-label="Close item details"
+            />
+            <section className="item-editor-details relative z-10 flex max-h-[85%] w-full flex-col overflow-hidden rounded-t-lg border-t bg-background shadow-xl md:h-full md:max-h-none md:w-[22rem] md:rounded-none md:rounded-r-lg md:border-l md:border-t-0">
+              <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
+                <h2 className="font-semibold">Details</h2>
+                <button
+                  type="button"
+                  onClick={() => setDetailsOpen(false)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label="Close details"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+                {detailsContent}
+              </div>
+            </section>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

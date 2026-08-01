@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { FileText, Link2, Bell, ExternalLink } from "lucide-react";
+import { getUrlCategoryLabel, withoutUrlCategoryTags } from "@/lib/url-categories";
 
 interface SharedData {
   title: string;
@@ -67,6 +68,7 @@ export default function SharedNotePage() {
   }
 
   const Icon = typeIcons[data.type];
+  const ordinaryTags = withoutUrlCategoryTags(data.tags);
 
   return (
     <div className="min-h-screen bg-background">
@@ -110,9 +112,13 @@ export default function SharedNotePage() {
           </div>
         )}
 
-        {data.tags.length > 0 && (
+        {data.type === "url" && (
+          <Badge variant="secondary">{getUrlCategoryLabel(data.tags)}</Badge>
+        )}
+
+        {ordinaryTags.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {data.tags.map((tag) => (
+            {ordinaryTags.map((tag) => (
               <Badge key={tag} variant="outline" className="text-xs">
                 {tag}
               </Badge>

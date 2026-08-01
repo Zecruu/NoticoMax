@@ -1,9 +1,12 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { type LocalItem, type LocalFolder } from "@/lib/db/indexed-db";
 import { ItemCard } from "./item-card";
 import { Button } from "@/components/ui/button";
 import { FileText, Link2, Bell, Inbox, FolderOpen, Plus } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { getUrlCategoryLabel } from "@/lib/url-categories";
 
 interface ItemListProps {
   items: LocalItem[];
@@ -48,8 +51,24 @@ export function ItemList({
   onCreateWithType,
   onCreateNew,
 }: ItemListProps) {
+  const [activeCategory, setActiveCategory] = useState("all");
   // Build a folder lookup map
   const folderMap = new Map(folders.map((f) => [f.clientId, f]));
+  const categoryOptions = useMemo(() => {
+    const categories = new Set(
+      items
+        .filter((item) => item.type === "url")
+        .map((item) => getUrlCategoryLabel(item.tags)),
+    );
+    if (activeCategory !== "all") categories.add(activeCategory);
+    return Array.from(categories).sort((a, b) => a.localeCompare(b));
+  }, [activeCategory, items]);
+  const visibleItems = useMemo(() => {
+    if (activeFilter !== "url" || activeCategory === "all") return items;
+    return items.filter(
+      (item) => item.type === "url" && getUrlCategoryLabel(item.tags) === activeCategory,
+    );
+  }, [activeCategory, activeFilter, items]);
 
   if (loading) {
     return (
@@ -99,7 +118,20 @@ export function ItemList({
 
   return (
     <div className="p-4 md:p-6 space-y-4">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-3">
+        {activeFilter === "url" ? (
+          <Select value={activeCategory} onValueChange={setActiveCategory}>
+            <SelectTrigger className="h-8 w-[min(11rem,55vw)]" aria-label="Filter bookmarks by category">
+              <SelectValue placeholder="All categories" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All categories</SelectItem>
+              {categoryOptions.map((category) => (
+                <SelectItem key={category} value={category}>{category}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : <span />}
         {activeFolder && onCreateNew && (
           <Button size="sm" variant="outline" className="gap-1.5" onClick={onCreateNew}>
             <Plus className="h-3.5 w-3.5" />
@@ -115,7 +147,7 @@ export function ItemList({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        {items.map((item) => (
+        {visibleItems.map((item) => (
           <ItemCard
             key={item.clientId}
             item={item}
@@ -127,6 +159,11 @@ export function ItemList({
             onUpdateContent={onUpdateContent}
           />
         ))}
+        {visibleItems.length === 0 && activeFilter === "url" && (
+          <div className="py-14 text-center text-sm text-muted-foreground">
+            No bookmarks in {activeCategory}.
+          </div>
+        )}
       </div>
     </div>
   );

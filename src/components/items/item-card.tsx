@@ -27,6 +27,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
+import { getUrlCategoryLabel, withoutUrlCategoryTags } from "@/lib/url-categories";
 
 interface ItemCardProps {
   item: LocalItem;
@@ -102,6 +103,8 @@ async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggleComplete, onUpdateContent }: ItemCardProps) {
+  const ordinaryTags = withoutUrlCategoryTags(item.tags);
+  const urlCategory = item.type === "url" ? getUrlCategoryLabel(item.tags) : null;
   // The Maximize button shows only when there's meaningful body content beyond
   // the one-line preview (or beyond the inline checklist for task notes). It
   // opens the full-screen note editor (same target as the pencil).
@@ -243,6 +246,12 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
             </a>
           )}
 
+          {urlCategory && (
+            <Badge variant="secondary" className="mt-1.5 h-5 px-1.5 text-[10px] font-medium">
+              {urlCategory}
+            </Badge>
+          )}
+
           {/* Task list — tappable circles inline */}
           {hasTaskList && (
             <div className="mt-1.5 text-xs text-muted-foreground">
@@ -251,9 +260,9 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
           )}
 
           {/* Tags */}
-          {item.tags.length > 0 && (
+          {ordinaryTags.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1.5">
-              {item.tags.map((tag) => (
+              {ordinaryTags.map((tag) => (
                 <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0">
                   {tag}
                 </Badge>

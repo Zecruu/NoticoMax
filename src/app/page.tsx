@@ -26,6 +26,7 @@ import { useLicense } from "@/hooks/use-license";
 import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
 import { toast } from "@/lib/native-toast";
+import { isUrlCategoryTag } from "@/lib/url-categories";
 
 export default function Dashboard() {
   const [activeFilter, setActiveFilter] = useState("all");
@@ -90,7 +91,7 @@ export default function Dashboard() {
     const tagSet = new Set<string>();
     for (const item of items) {
       for (const tag of item.tags) {
-        tagSet.add(tag);
+        if (!isUrlCategoryTag(tag)) tagSet.add(tag);
       }
     }
     return Array.from(tagSet).sort();
