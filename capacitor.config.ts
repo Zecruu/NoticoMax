@@ -1,4 +1,5 @@
 import type { CapacitorConfig } from "@capacitor/cli";
+import type { PresentationOption } from "@capacitor/push-notifications";
 
 const config: CapacitorConfig = {
   appId: "com.noticomax.app",
@@ -8,6 +9,7 @@ const config: CapacitorConfig = {
   server: {
     url: "https://app.noticomax.com",
     cleartext: false,
+    errorPath: "offline.html",
     allowNavigation: [
       "app.noticomax.com",
       "www.noticomax.com",
@@ -36,7 +38,7 @@ const config: CapacitorConfig = {
       resizeOnFullScreen: true,
     },
     PushNotifications: {
-      presentationOptions: ["badge", "sound", "alert"],
+      presentationOptions: ["badge", "sound", "alert"] as PresentationOption[],
     },
     LocalNotifications: {
       smallIcon: "ic_stat_notification",
