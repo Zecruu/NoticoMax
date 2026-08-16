@@ -200,7 +200,7 @@ export function MobileNav({
           );
         })}
 
-        {/* Notico assistant — routes to the dedicated assistant screen. */}
+        {/* Lyte assistant — routes to the dedicated assistant screen. */}
         <button
           onClick={() => router.push("/assistant")}
           className="flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] text-muted-foreground transition-colors"
@@ -208,7 +208,7 @@ export function MobileNav({
           <div className="flex h-8 w-8 items-center justify-center rounded-full">
             <Bot className="h-4 w-4" />
           </div>
-          <span>Notico</span>
+          <span>Lyte</span>
         </button>
       </nav>
 

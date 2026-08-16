@@ -6,7 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * the gated assistant API.
  */
 
-export const DEFAULT_ASSISTANT_NAME = "Notico";
+export const DEFAULT_ASSISTANT_NAME = "Lyte";
 const MAX_NAME = 40;
 const MAX_STYLE = 500;
 
