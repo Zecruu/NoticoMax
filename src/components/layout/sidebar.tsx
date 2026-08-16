@@ -766,7 +766,7 @@ export function Sidebar({
           className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
         >
           <Bot className="h-4 w-4" />
-          Notico
+          Lyte
         </Link>
         <Link
           href="/settings"

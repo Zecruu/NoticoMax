@@ -27,7 +27,7 @@ export async function resolveAllowedAssistantUser(
       userId: null,
       email: null,
       error: NextResponse.json(
-        { error: "The Notico assistant isn't available on your account yet." },
+        { error: "Lyte isn't available on your account yet." },
         { status: 403 },
       ),
     };

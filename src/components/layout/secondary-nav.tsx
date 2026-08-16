@@ -8,13 +8,13 @@ type SecondaryNavKey = "home" | "assistant" | "settings";
 
 const items: { key: SecondaryNavKey; label: string; href: string; icon: typeof Home }[] = [
   { key: "home", label: "Home", href: "/", icon: Home },
-  { key: "assistant", label: "Notico", href: "/assistant", icon: Bot },
+  { key: "assistant", label: "Lyte", href: "/assistant", icon: Bot },
   { key: "settings", label: "Settings", href: "/settings", icon: Settings },
 ];
 
 /**
  * Bottom footer nav for secondary pages (Settings, Assistant) that don't carry
- * the main dashboard's MobileNav. Keeps the Notico assistant reachable from the
+ * the main dashboard's MobileNav. Keeps the Lyte assistant reachable from the
  * footer everywhere. Mobile-only — desktop uses the sidebar. Shares the
  * `mobile-bottom-nav` class so it auto-hides when the keyboard opens.
  */

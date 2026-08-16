@@ -74,7 +74,7 @@ export default function AssistantPage() {
   const [status, setStatus] = useState<Status>("loading");
   const [disabledReason, setDisabledReason] = useState("");
 
-  const [name, setName] = useState("Notico");
+  const [name, setName] = useState("Lyte");
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
 
@@ -121,7 +121,7 @@ export default function AssistantPage() {
       if (!t) {
         if (!cancelled) {
           setStatus("disabled");
-          setDisabledReason("Sign in to use Notico.");
+          setDisabledReason("Sign in to use Lyte.");
         }
         return;
       }
@@ -131,12 +131,12 @@ export default function AssistantPage() {
       if (cancelled) return;
       if (res.status === 403) {
         setStatus("disabled");
-        setDisabledReason("Notico isn't available on your account yet.");
+        setDisabledReason("Lyte isn't available on your account yet.");
         return;
       }
       if (!res.ok) {
         setStatus("disabled");
-        setDisabledReason("Notico is unavailable right now. Try again later.");
+        setDisabledReason("Lyte is unavailable right now. Try again later.");
         return;
       }
       const data = await res.json();
@@ -148,7 +148,7 @@ export default function AssistantPage() {
       if (cancelled) return;
       if (pRes.ok) {
         const pj = await pRes.json();
-        setName(pj.profile?.displayName ?? "Notico");
+        setName(pj.profile?.displayName ?? "Lyte");
       }
       if (mRes.ok) {
         const mj = await mRes.json();
@@ -158,14 +158,14 @@ export default function AssistantPage() {
       if (data.migrationsReady === false) {
         setStatus("disabled");
         setDisabledReason(
-          "Notico's database isn't set up yet. Run the assistant Supabase migrations (0011 + 0012), then reload.",
+          "Lyte's database isn't set up yet. Run the assistant Supabase migrations (0011 + 0012), then reload.",
         );
         return;
       }
       if (!data.configured) {
         setStatus("disabled");
         setDisabledReason(
-          "Notico isn't configured yet — the GEMINI_API_KEY isn't set on the server.",
+          "Lyte isn't configured yet — the GEMINI_API_KEY isn't set on the server.",
         );
         return;
       }
@@ -231,7 +231,7 @@ export default function AssistantPage() {
         const j = await res.json().catch(() => ({}));
         const msg =
           res.status === 503
-            ? "Notico isn't configured yet."
+            ? "Lyte isn't configured yet."
             : (j.error as string) || "Something went wrong.";
         setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ ${msg}` }]);
         return;
@@ -282,7 +282,7 @@ export default function AssistantPage() {
       const j = await res.json();
       setMemories((prev) => [j.memory as Memory, ...prev]);
       setMemInput("");
-      toast.success("Notico will remember that");
+      toast.success(`${name} will remember that`);
     }
   };
 
@@ -346,7 +346,7 @@ export default function AssistantPage() {
               variant="ghost"
               size="icon"
               onClick={() => setShowMemory((v) => !v)}
-              aria-label="What Notico remembers"
+              aria-label={`What ${name} remembers`}
               disabled={status === "disabled"}
             >
               <Brain className={showMemory ? "h-4 w-4 text-primary" : "h-4 w-4"} />
@@ -387,7 +387,7 @@ export default function AssistantPage() {
               {memories.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
                   Nothing yet. Say &quot;remember that…&quot;, &quot;I like…&quot;, or &quot;always…&quot; in chat,
-                  or add one above. Notico never stores passwords or secrets.
+                  or add one above. {name} never stores passwords or secrets.
                 </p>
               ) : (
                 <div className="max-h-40 space-y-1 overflow-auto">
@@ -426,8 +426,9 @@ export default function AssistantPage() {
                 </div>
                 <h2 className="mt-4 text-lg font-semibold">Hi, I&apos;m {name}</h2>
                 <p className="mt-1.5 text-sm text-muted-foreground">
-                  Ask me anything, or tell me a preference to remember. I can help with your notes,
-                  reminders, and URLs. I&apos;ll never reveal your saved passwords.
+                  I&apos;m your memory for everything you save in NoticoMax. Ask about your notes,
+                  reminders, and links, or tell me something to remember. I&apos;ll never reveal
+                  your saved passwords.
                 </p>
               </div>
             ) : (

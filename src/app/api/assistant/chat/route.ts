@@ -32,20 +32,40 @@ import {
   toolNoun,
   validateToolCall,
 } from "@/lib/ai/tools";
+import { buildRetrievalBlock, searchLyteMemory } from "@/lib/ai/retrieval";
 
 export const runtime = "nodejs";
 
 /** At most this many tool calls are executed per chat turn (no autonomy). */
 const MAX_TOOL_CALLS = 2;
 
+/**
+ * Conversation compression, first slice: only the most recent turns go to the
+ * model. Older turns will be folded into a rolling summary later
+ * (docs/LYTE_ARCHITECTURE.md §6) — for now they are simply dropped so a long
+ * chat can't balloon input tokens.
+ */
+const MAX_HISTORY_MESSAGES = 20;
+
 const ASSISTANT_TOOLS: GeminiTool[] = [{ functionDeclarations: [...TOOL_DECLARATIONS] }];
 
-/** Assemble the system prompt from the assistant's name + curated memory. */
-function buildSystemPrompt(name: string, memorySummary: string, nowIso: string): string {
+/**
+ * Assemble the system prompt from the assistant's name, curated memory, and
+ * the snippets retrieved for THIS request. Retrieval-first: the model only
+ * ever sees these compressed snippets, never the database.
+ */
+function buildSystemPrompt(
+  name: string,
+  memorySummary: string,
+  retrievalBlock: string,
+  nowIso: string,
+): string {
   const base =
-    `You are ${name}, the user's personal assistant inside the NOTICO MAX app. ` +
-    "Be concise, warm, and genuinely helpful with their notes, URLs, reminders, " +
-    "and day-to-day organization. Respect the user's stated preferences and habits.";
+    `You are ${name}, the user's personal memory and productivity assistant inside ` +
+    "the NoticoMax app. You are not a generic chatbot: your job is to remember what " +
+    "the user saves — notes, URLs, reminders, projects, preferences — and to help " +
+    "them find it and act on it. Be concise, warm, and specific. Respect the " +
+    "user's stated preferences and habits.";
   const tools =
     ` The current date and time is ${nowIso}. You can take actions by calling the ` +
     "provided tools to create notes, URLs/bookmarks, reminders, and alarms for the user. " +
@@ -61,7 +81,8 @@ function buildSystemPrompt(name: string, memorySummary: string, nowIso: string):
   const memory = memorySummary
     ? `\n\nWhat you remember about this user (honor these):\n${memorySummary}`
     : "";
-  return base + tools + security + memory;
+  const retrieved = retrievalBlock ? `\n\n${retrievalBlock}` : "";
+  return base + tools + security + memory + retrieved;
 }
 
 /**
@@ -152,17 +173,26 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const [profile, memories] = await Promise.all([
+  // Retrieval-first: search Supabase for context relevant to THIS request
+  // (best-effort — empty on failure) while loading profile + curated memory.
+  const [profile, memories, retrieved] = await Promise.all([
     getProfile(admin, userId),
     listMemories(admin, userId),
+    lastUser
+      ? searchLyteMemory(admin, userId, lastUser.content)
+      : Promise.resolve([]),
   ]);
   const systemPrompt = buildSystemPrompt(
     profile.displayName,
     buildMemorySummary(memories),
+    buildRetrievalBlock(retrieved),
     new Date().toISOString(),
   );
 
-  const inputTokensEst = messages.reduce(
+  // Compression, first slice: only the most recent turns reach the model.
+  const recentMessages = messages.slice(-MAX_HISTORY_MESSAGES);
+
+  const inputTokensEst = recentMessages.reduce(
     (n, m) => n + estimateInputTokens(m.content),
     estimateInputTokens(systemPrompt),
   );
@@ -192,7 +222,7 @@ export async function POST(request: NextRequest) {
     const result = await generateReply({
       apiKey,
       model: ASSISTANT_MODEL,
-      messages,
+      messages: recentMessages,
       systemPrompt,
       maxOutputTokens,
       tools: ASSISTANT_TOOLS,
@@ -320,9 +350,10 @@ async function runToolCalls(
   if (blocked) {
     return (
       modelText.trim() ||
-      "I can create notes, reminders, bookmarks, and alarms when you ask me to " +
-        "(e.g. “remind me at 9am to call mom”). I can’t read your existing " +
-        "schedule, calendar, or saved reminders yet."
+      "I can answer questions about what you've saved in NoticoMax, and create " +
+        "notes, reminders, bookmarks, and alarms when you ask me to (e.g. " +
+        "“remind me at 9am to call mom”). I couldn't find anything relevant " +
+        "for that one."
     );
   }
   return modelText || "Done.";

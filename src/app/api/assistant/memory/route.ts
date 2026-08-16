@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
   if ("rejected" in result) {
     const msg =
       result.rejected === "secret"
-        ? "That looks like a secret — Notico won't store passwords or sensitive values."
+        ? "That looks like a secret — Lyte won't store passwords or sensitive values."
         : result.rejected === "too_long"
           ? "That memory is too long."
           : "That memory is empty.";
