@@ -127,6 +127,10 @@ function writeExportOptions(teamId) {
   fs.writeFileSync(EXPORT_PLIST, plist);
 }
 
+function prepareCapacitorWebAssets() {
+  sh("node", ["scripts/prepare-capacitor-web-assets.js"], { cwd: ROOT });
+}
+
 function main() {
   if (process.platform !== "darwin") {
     console.error("build-ios: iOS builds require macOS.");
@@ -148,6 +152,7 @@ function main() {
     if (fs.existsSync(path.join(ROOT, "scripts/fix-standalone.js"))) {
       sh("node", ["scripts/fix-standalone.js"], { cwd: ROOT });
     }
+    prepareCapacitorWebAssets();
 
     console.log("build-ios: npx cap sync ios...");
     sh("npx", ["cap", "sync", "ios"], { cwd: ROOT });
