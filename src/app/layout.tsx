@@ -5,16 +5,17 @@ import { ThemeProvider } from "@/components/layout/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { UpdatePrompt } from "@/components/update-prompt";
+import { ServiceWorkerRegister } from "@/components/service-worker-register";
 import "./globals.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
-  subsets: ["latin"],
+  subsets: ["latin"] as const,
 });
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  subsets: ["latin"] as const,
 });
 
 export const metadata: Metadata = {
@@ -45,9 +46,9 @@ export const viewport: Viewport = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="en" suppressHydrationWarning>
       <body
@@ -64,6 +65,7 @@ export default function RootLayout({
               {children}
               <Toaster />
               <UpdatePrompt />
+              <ServiceWorkerRegister />
             </TooltipProvider>
           </ThemeProvider>
         </CapacitorProvider>

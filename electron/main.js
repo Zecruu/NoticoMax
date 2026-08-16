@@ -17,6 +17,7 @@ autoUpdater.logger = {
 const isDev = process.env.NODE_ENV === "development";
 const DEV_URL = "http://localhost:5467";
 const PROD_URL = "https://app.noticomax.com";
+const OFFLINE_FALLBACK_PATH = path.join(__dirname, "..", "public", "offline.html");
 
 let mainWindow;
 // Resolver for an in-flight Apple sign-in started via shell.openExternal.
@@ -25,6 +26,14 @@ let mainWindow;
 // or open-url (mac). Null when no sign-in is pending.
 let pendingAppleSignInResolver = null;
 let pendingAppleSignInTimeout = null;
+
+function loadOfflineFallback(reason) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  logger.info("electron", `Loading offline fallback: ${reason}`);
+  mainWindow.loadFile(OFFLINE_FALLBACK_PATH).catch((err) => {
+    logger.error("electron", `Offline fallback failed to load: ${err.message}`);
+  });
+}
 
 // Initialize logger immediately with userData path
 logger.init(app.getPath("userData"));
@@ -181,12 +190,7 @@ function createWindow(url) {
   mainWindow.webContents.on("did-fail-load", (event, errorCode, errorDescription) => {
     logger.error("electron", `Window failed to load: ${errorCode} ${errorDescription}`);
     if (!isDev) {
-      logger.info("electron", "Retrying page load in 2 seconds...");
-      setTimeout(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.loadURL(url);
-        }
-      }, 2000);
+      loadOfflineFallback(`${errorCode} ${errorDescription}`);
     }
   });
 

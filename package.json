@@ -42,7 +42,10 @@
       }
     ],
     "files": [
-      "electron/**/*"
+      "electron/**/*",
+      "public/offline.html",
+      "public/sw.js",
+      "public/logo.png"
     ],
     "win": {
       "target": [
