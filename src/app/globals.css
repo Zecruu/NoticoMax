@@ -166,6 +166,23 @@ html.keyboard-open .mobile-bottom-nav {
   display: none !important;
 }
 
+/* The Lyte composer participates in the visual-viewport flex layout. Reserve
+   the fixed mobile nav only while it is visible; the keyboard-open state hides
+   that nav, so the composer can sit directly at the visual viewport bottom. */
+.assistant-composer {
+  margin-bottom: calc(4rem + var(--safe-area-bottom));
+}
+
+html.keyboard-open .assistant-composer {
+  margin-bottom: 0;
+}
+
+@media (min-width: 768px) {
+  .assistant-composer {
+    margin-bottom: 0;
+  }
+}
+
 /* Markdown compact (card preview) */
 .markdown-compact p { margin: 0; }
 .markdown-compact h1, .markdown-compact h2, .markdown-compact h3,

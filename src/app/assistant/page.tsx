@@ -308,6 +308,7 @@ export default function AssistantPage() {
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const composerInputRef = useRef<HTMLInputElement>(null);
   const speechSupported = getSpeechRecognition() !== null;
   const localMemorySummary = buildNoticoLocalMemorySummary(localMemory);
 
@@ -430,6 +431,30 @@ export default function AssistantPage() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
+
+  // Keep the latest turn visible while iOS animates the visual viewport around
+  // a focused composer. The layout itself follows --visual-viewport-height;
+  // this only preserves the transcript's bottom position as its height changes.
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+
+    let frame = 0;
+    const keepLatestVisible = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (document.activeElement !== composerInputRef.current) return;
+        const transcript = scrollRef.current;
+        transcript?.scrollTo({ top: transcript.scrollHeight, behavior: "auto" });
+      });
+    };
+
+    viewport.addEventListener("resize", keepLatestVisible);
+    return () => {
+      cancelAnimationFrame(frame);
+      viewport.removeEventListener("resize", keepLatestVisible);
+    };
+  }, []);
 
   const completeOrAskReminder = useCallback(
     async (draft: PendingReminder): Promise<boolean> => {
@@ -666,8 +691,8 @@ export default function AssistantPage() {
   };
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-background">
-      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur pt-[env(safe-area-inset-top)]">
+    <div className="flex h-[var(--visual-viewport-height,100dvh)] max-h-[var(--visual-viewport-height,100dvh)] min-h-0 flex-col overflow-hidden bg-background">
+      <header className="sticky top-0 z-40 shrink-0 border-b bg-background/95 backdrop-blur pt-[env(safe-area-inset-top)]">
         <div className="flex h-14 items-center gap-3 px-4 md:px-6">
           <Link href="/">
             <Button variant="ghost" size="icon">
@@ -758,7 +783,7 @@ export default function AssistantPage() {
         <>
           {/* Memory drawer */}
           {showMemory && (
-            <div className="border-b bg-muted/30 px-4 py-3 md:px-6">
+            <div className="max-h-[50%] shrink-0 overflow-y-auto border-b bg-muted/30 px-4 py-3 md:px-6">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 What {name} remembers
               </p>
@@ -830,7 +855,7 @@ export default function AssistantPage() {
           {/* Transcript */}
           <div
             ref={scrollRef}
-            className="flex-1 overflow-auto px-4 py-4 md:px-6 pb-[calc(5rem+env(safe-area-inset-bottom)+var(--keyboard-height,0px))]"
+            className="min-h-0 flex-1 overscroll-contain overflow-y-auto px-4 py-4 scroll-pb-4 md:px-6"
           >
             {messages.length === 0 ? (
               <div className="mx-auto mt-10 max-w-sm text-center">
@@ -877,10 +902,10 @@ export default function AssistantPage() {
             )}
           </div>
 
-          {/* Composer — sits above the footer nav. */}
+          {/* In-flow so visual viewport resizing keeps it above the iOS keyboard. */}
           <div
             data-keyboard-keep-visible
-            className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 border-t bg-background/95 px-4 py-3 backdrop-blur md:bottom-0"
+            className="assistant-composer z-40 shrink-0 border-t bg-background/95 px-4 py-3 backdrop-blur"
           >
             <div className="mx-auto max-w-2xl">
               <div className="flex items-center gap-2">
@@ -905,6 +930,7 @@ export default function AssistantPage() {
                   )}
                 </Button>
                 <Input
+                  ref={composerInputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
