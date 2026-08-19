@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { type LocalItem, type LocalFolder } from "@/lib/db/indexed-db";
 import { ItemCard } from "./item-card";
 import { Button } from "@/components/ui/button";
-import { FileText, Link2, Bell, Inbox, FolderOpen, Plus } from "lucide-react";
+import { Bell, ChevronLeft, FileText, FolderOpen, Inbox, Link2, Plus } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getUrlCategoryLabel } from "@/lib/url-categories";
 
@@ -21,6 +21,7 @@ interface ItemListProps {
   activeFolder: string | null;
   onCreateWithType?: (type: "note" | "url" | "reminder") => void;
   onCreateNew?: () => void;
+  onBackToFolders?: () => void;
 }
 
 const emptyMessages: Record<string, { icon: React.ElementType; message: string }> = {
@@ -50,6 +51,7 @@ export function ItemList({
   activeFolder,
   onCreateWithType,
   onCreateNew,
+  onBackToFolders,
 }: ItemListProps) {
   const [activeCategory, setActiveCategory] = useState("all");
   // Build a folder lookup map
@@ -94,15 +96,27 @@ export function ItemList({
     <div className="pb-4 md:space-y-4 md:p-6">
       <div className="px-4 py-4 md:px-0 md:py-0">
         <div className="flex min-h-11 items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="truncate text-xl font-semibold md:text-2xl">{pageTitle}</h1>
-            <p className="text-xs text-muted-foreground">{loading ? "Loading…" : countLabel}</p>
+          <div className="flex min-w-0 items-center gap-1">
+            {activeFilter === "note" && activeFolder && onBackToFolders && (
+              <button
+                type="button"
+                onClick={onBackToFolders}
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+                aria-label="Back to folders"
+              >
+                <ChevronLeft className="h-6 w-6" />
+              </button>
+            )}
+            <div className="min-w-0">
+              <h1 className="truncate text-xl font-semibold md:text-2xl">{pageTitle}</h1>
+              <p className="text-xs text-muted-foreground">{loading ? "Loading…" : countLabel}</p>
+            </div>
           </div>
           <div className="hidden md:flex">
             {activeFolder && onCreateNew && (
               <Button size="sm" variant="outline" className="gap-1.5" onClick={onCreateNew}>
                 <Plus className="h-3.5 w-3.5" />
-                Add Item
+                {addBtn?.label ?? "Add Item"}
               </Button>
             )}
             {!activeFolder && addBtn && onCreateWithType && (
@@ -143,7 +157,7 @@ export function ItemList({
           {activeFolder && onCreateNew && (
             <Button size="sm" className="mt-4 gap-1.5" onClick={onCreateNew}>
               <Plus className="h-3.5 w-3.5" />
-              Add Item
+              {addBtn?.label ?? "Add Item"}
             </Button>
           )}
           {!activeFolder && addBtn && onCreateWithType && (

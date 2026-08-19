@@ -10,6 +10,7 @@ import { MobileNav } from "@/components/layout/mobile-nav";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ItemList } from "@/components/items/item-list";
 import { ItemDialog } from "@/components/items/item-dialog";
+import { NotesFoldersView } from "@/components/items/notes-folders-view";
 import { SearchCommand } from "@/components/items/search-bar";
 import { TrashView } from "@/components/items/trash-view";
 import { CalendarView } from "@/components/calendar/calendar-view";
@@ -27,6 +28,7 @@ import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
 import { toast } from "@/lib/native-toast";
 import { isUrlCategoryTag } from "@/lib/url-categories";
+import { resolveDefaultNoteFolderId } from "@/lib/note-folders";
 
 export default function Dashboard() {
   const [activeFilter, setActiveFilter] = useState("all");
@@ -62,7 +64,6 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, [isPro, isLoggedIn]);
 
-  const { folders, addFolder, editFolder, removeFolder } = useFolders();
   const {
     items,
     trashedItems,
@@ -76,6 +77,7 @@ export default function Dashboard() {
     permanentlyDeleteItem,
     syncNow,
   } = useItems(activeFilter, searchQuery, activeFolder, isPro);
+  const { folders, loading: foldersLoading, addFolder, editFolder, removeFolder } = useFolders(isPro);
 
   // Counts for sidebar (type-based, ignoring folder filter)
   const itemCounts = useMemo(() => {
@@ -124,12 +126,13 @@ export default function Dashboard() {
   const folderItemCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const item of items) {
-      if (item.folderId) {
-        counts[item.folderId] = (counts[item.folderId] || 0) + 1;
-      }
+      const folderId = item.type === "note"
+        ? resolveDefaultNoteFolderId(item.folderId, folders)
+        : item.folderId;
+      if (folderId) counts[folderId] = (counts[folderId] || 0) + 1;
     }
     return counts;
-  }, [items]);
+  }, [folders, items]);
 
   const handleCreateNew = useCallback(() => {
     setEditingItem(null);
@@ -348,6 +351,18 @@ export default function Dashboard() {
             <LocationsView />
           ) : activeView === "family" ? (
             <FamilyView />
+          ) : activeView === "list" && activeFilter === "note" && !activeFolder ? (
+            <NotesFoldersView
+              folders={folders}
+              notes={items}
+              loading={loading || foldersLoading}
+              onOpenFolder={(folderId) => {
+                setActiveFolder(folderId);
+                setActiveTag(null);
+              }}
+              onCreateFolder={addFolder}
+              onCreateNote={() => handleCreateWithType("note")}
+            />
           ) : activeFolder && folders.find((f) => f.clientId === activeFolder)?.householdId ? (
             (() => {
               const sharedFolder = folders.find((f) => f.clientId === activeFolder)!;
@@ -377,6 +392,7 @@ export default function Dashboard() {
               activeFolder={activeFolder}
               onCreateWithType={handleCreateWithType}
               onCreateNew={handleCreateNew}
+              onBackToFolders={activeFilter === "note" ? () => setActiveFolder(null) : undefined}
             />
           )}
         </main>

@@ -1,5 +1,6 @@
 import db, { type LocalItem, type LocalFolder } from "@/lib/db/indexed-db";
-import { createItem, createFolder } from "@/lib/sync/sync-engine";
+import { createItem, createFolder, ensureDefaultNotesFolder } from "@/lib/sync/sync-engine";
+import { isReservedDefaultFolderName } from "@/lib/note-folders";
 
 interface ExportData {
   version: 1;
@@ -36,6 +37,10 @@ export async function importData(json: string): Promise<{ items: number; folders
   if (data.folders) {
     for (const folder of data.folders) {
       if (folder.deleted) continue;
+      if (!folder.householdId && isReservedDefaultFolderName(folder.name)) {
+        await ensureDefaultNotesFolder();
+        continue;
+      }
       await createFolder({
         name: folder.name,
         color: folder.color,

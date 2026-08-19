@@ -44,6 +44,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "@/lib/native-toast";
+import {
+  DEFAULT_FOLDER_CREATE_ERROR,
+  getCanonicalDefaultNotesFolder,
+  isReservedDefaultFolderName,
+} from "@/lib/note-folders";
 
 const PRESET_COLORS = [
   "#ef4444", "#f97316", "#eab308", "#22c55e",
@@ -95,6 +100,7 @@ export function MobileNav({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deletingFolder, setDeletingFolder] = useState<LocalFolder | null>(null);
+  const canonicalDefaultFolder = getCanonicalDefaultNotesFolder(folders);
 
   const createInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -113,11 +119,21 @@ export function MobileNav({
       setCreating(false);
       return;
     }
+    if (isReservedDefaultFolderName(name)) {
+      toast.error(DEFAULT_FOLDER_CREATE_ERROR);
+      setCreating(false);
+      setNewName("");
+      return;
+    }
     const color = PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)];
-    await onAddFolder({ name, color });
-    setNewName("");
-    setCreating(false);
-    toast.success("Folder created");
+    try {
+      await onAddFolder({ name, color });
+      setNewName("");
+      setCreating(false);
+      toast.success("Folder created");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Folder could not be created");
+    }
   };
 
   const handleRename = async (clientId: string) => {
@@ -126,24 +142,46 @@ export function MobileNav({
       setRenamingId(null);
       return;
     }
-    await onEditFolder(clientId, { name });
-    setRenamingId(null);
-    toast.success("Folder renamed");
+    const folder = folders.find((candidate) => candidate.clientId === clientId);
+    if (folder && name === folder.name.trim()) {
+      setRenamingId(null);
+      return;
+    }
+    if (!folder?.householdId && isReservedDefaultFolderName(name)) {
+      toast.error(DEFAULT_FOLDER_CREATE_ERROR);
+      setRenamingId(null);
+      return;
+    }
+    try {
+      await onEditFolder(clientId, { name });
+      setRenamingId(null);
+      toast.success("Folder renamed");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Folder could not be renamed");
+    }
   };
 
   const handleColorChange = async (clientId: string, color: string) => {
-    await onEditFolder(clientId, { color });
-    toast.success("Color updated");
+    try {
+      await onEditFolder(clientId, { color });
+      toast.success("Color updated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Folder color could not be updated");
+    }
   };
 
   const handleDelete = async () => {
     if (!deletingFolder) return;
-    await onRemoveFolder(deletingFolder.clientId);
-    if (activeFolder === deletingFolder.clientId) {
-      onFolderChange(null);
+    try {
+      await onRemoveFolder(deletingFolder.clientId);
+      if (activeFolder === deletingFolder.clientId) {
+        onFolderChange(null);
+      }
+      setDeletingFolder(null);
+      toast.success("Folder and all its items deleted");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Folder could not be deleted");
     }
-    setDeletingFolder(null);
-    toast.success("Folder and all its items deleted");
   };
 
   return (
@@ -329,16 +367,18 @@ export function MobileNav({
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setRenamingId(folder.clientId);
-                            setRenameValue(folder.name);
-                          }}
-                        >
-                          <Pencil className="h-3.5 w-3.5 mr-2" />
-                          Rename
-                        </DropdownMenuItem>
+                        {canonicalDefaultFolder?.clientId !== folder.clientId && (
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRenamingId(folder.clientId);
+                              setRenameValue(folder.name);
+                            }}
+                          >
+                            <Pencil className="h-3.5 w-3.5 mr-2" />
+                            Rename
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuSub>
                           <DropdownMenuSubTrigger>
                             <Palette className="h-3.5 w-3.5 mr-2" />
@@ -368,17 +408,21 @@ export function MobileNav({
                             </div>
                           </DropdownMenuSubContent>
                         </DropdownMenuSub>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeletingFolder(folder);
-                          }}
-                          className="text-destructive focus:text-destructive"
-                        >
-                          <Trash2 className="h-3.5 w-3.5 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
+                        {canonicalDefaultFolder?.clientId !== folder.clientId && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeletingFolder(folder);
+                              }}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Trash2 className="h-3.5 w-3.5 mr-2" />
+                              Delete
+                            </DropdownMenuItem>
+                          </>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </>

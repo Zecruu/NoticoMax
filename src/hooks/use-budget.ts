@@ -17,6 +17,20 @@ import {
 
 // Must match the key used by sync-engine so cross-device sync stays consistent.
 const INCOME_KEY = "noticomax_budget_monthly_income";
+const BUDGET_GOALS_KEY = "noticomax_budget_monthly_goals";
+
+function readBudgetGoals(): Record<string, number> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(BUDGET_GOALS_KEY) ?? "{}") as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, number] => (
+        typeof entry[1] === "number" && Number.isFinite(entry[1]) && entry[1] >= 0
+      )),
+    );
+  } catch {
+    return {};
+  }
+}
 
 export function getCurrentMonthKey(d: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -60,6 +74,7 @@ export interface MonthSummary {
 
 export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
   const [monthlyIncome, setMonthlyIncomeState] = useState<number>(0);
+  const [budgetGoals, setBudgetGoals] = useState<Record<string, number>>({});
 
   // Hydrate from localStorage on mount, and stay in sync with realtime
   // updates from other devices (sync-engine writes to the same key).
@@ -84,6 +99,16 @@ export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
       window.removeEventListener("storage", onStorage);
       document.removeEventListener("visibilitychange", onVis);
     };
+  }, []);
+
+  useEffect(() => {
+    const read = () => setBudgetGoals(readBudgetGoals());
+    read();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === BUDGET_GOALS_KEY) read();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   const setMonthlyIncome = useCallback((amount: number) => {
@@ -153,6 +178,16 @@ export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
   const totalSpent = categoriesWithTotals.reduce((s, c) => s + c.spentInMonth, 0);
   const unallocated = monthlyIncome - totalBudgeted;
   const incomeRemaining = monthlyIncome - totalSpent;
+  const monthlyBudgetGoal = budgetGoals[viewMonthKey] ?? totalBudgeted;
+  const budgetRemaining = monthlyBudgetGoal - totalSpent;
+
+  const setMonthlyBudgetGoal = useCallback((amount: number) => {
+    setBudgetGoals((current) => {
+      const next = { ...current, [viewMonthKey]: amount };
+      localStorage.setItem(BUDGET_GOALS_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, [viewMonthKey]);
 
   const availableMonths = useMemo(() => {
     const set = new Set<string>();
@@ -277,6 +312,9 @@ export function useBudget(viewMonthKey: string = getCurrentMonthKey()) {
     allTime,
     monthlyIncome,
     setMonthlyIncome,
+    monthlyBudgetGoal,
+    setMonthlyBudgetGoal,
+    budgetRemaining,
     categories: categoriesWithTotals,
     transactions: transactions ?? [],
     monthTransactions,

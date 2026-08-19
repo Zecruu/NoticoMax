@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   useBudget,
   type BudgetCategoryWithTotals,
@@ -8,10 +8,10 @@ import {
   getCurrentMonthKey,
 } from "@/hooks/use-budget";
 import { useBills } from "@/hooks/use-bills";
+import type { LocalBill } from "@/lib/db/indexed-db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -20,23 +20,36 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Plus,
-  Trash2,
-  Wallet,
-  TrendingDown,
-  TrendingUp,
-  DollarSign,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  CalendarDays,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  History,
-  Crown,
-  Pencil,
-  RotateCcw,
-  Receipt,
-  ArrowDownToLine,
   Circle,
-  CheckCircle2,
-  Calendar as CalendarIcon,
+  DollarSign,
+  History,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  ReceiptText,
+  RotateCcw,
+  Settings2,
+  Target,
+  Trash2,
   Undo2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -47,31 +60,37 @@ const PRESET_COLORS = [
   "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899",
 ];
 
-function formatMoney(n: number): string {
-  const sign = n < 0 ? "-" : "";
-  return `${sign}$${Math.abs(n).toFixed(2)}`;
+const MOBILE_DIALOG_CLASS = "top-[calc(var(--visual-viewport-height,100vh)/2)] max-h-[calc(var(--visual-viewport-height,100vh)-2rem)] overflow-y-auto sm:max-w-md";
+
+function formatMoney(value: number): string {
+  const sign = value < 0 ? "-" : "";
+  return `${sign}$${Math.abs(value).toFixed(2)}`;
+}
+
+function dateForMonth(monthKey: string, isCurrentMonth: boolean): string {
+  if (isCurrentMonth) return new Date().toISOString();
+  const [year, month] = monthKey.split("-").map(Number);
+  return new Date(year, month - 1, 15, 12, 0, 0).toISOString();
+}
+
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 export function BudgetView() {
-  const [viewMonthKey, setViewMonthKey] = useState<string>(getCurrentMonthKey());
-
-  // True when the user is looking ahead — e.g. it's May and they're viewing
-  // June. Used to relabel "spent" → "planned" so the screen reads as planning.
-  const isFutureMonth = viewMonthKey > getCurrentMonthKey();
-
+  const [viewMonthKey, setViewMonthKey] = useState(getCurrentMonthKey());
   const {
     isCurrentMonth,
     availableMonths,
     monthSummaries,
-    allTime,
     monthlyIncome,
     setMonthlyIncome,
+    monthlyBudgetGoal,
+    setMonthlyBudgetGoal,
+    budgetRemaining,
     categories,
     monthTransactions,
-    totalBudgeted,
     totalSpent,
-    unallocated,
-    incomeRemaining,
     addCategory,
     deleteCategory,
     addTransaction,
@@ -80,901 +99,668 @@ export function BudgetView() {
     shiftMonth,
   } = useBudget(viewMonthKey);
 
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const { unpaidBills, paidBills, addBill, removeBill, markPaid, unmarkPaid } = useBills();
 
-  const [incomeInput, setIncomeInput] = useState(monthlyIncome ? String(monthlyIncome) : "");
-  const [editingIncome, setEditingIncome] = useState(monthlyIncome === 0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState("goal");
+  const [goalInput, setGoalInput] = useState("");
+  const [incomeInput, setIncomeInput] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [billsOpen, setBillsOpen] = useState(false);
+  const [showPaidBills, setShowPaidBills] = useState(false);
 
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [newCatLimit, setNewCatLimit] = useState("");
   const [newCatColor, setNewCatColor] = useState(PRESET_COLORS[0]);
-
-  const [spendingCategory, setSpendingCategory] = useState<BudgetCategoryWithTotals | null>(null);
-  const [spendAmount, setSpendAmount] = useState("");
-  const [spendNote, setSpendNote] = useState("");
-
   const [limitEditingCategory, setLimitEditingCategory] = useState<BudgetCategoryWithTotals | null>(null);
   const [limitInput, setLimitInput] = useState("");
+  const [spendInputs, setSpendInputs] = useState<Record<string, string>>({});
 
-  // Quick-add bills input — accepts "label amount", "amount label", or just
-  // "amount". Auto-creates a "Bills" category on first use.
-  const [billInput, setBillInput] = useState("");
-
-  // Upcoming bills: user explicitly creates a bill they need to pay; Mark
-  // Paid converts it into a budget transaction in the Bills category.
-  const { unpaidBills, paidBills, addBill, removeBill, markPaid, unmarkPaid } = useBills();
   const [creatingBill, setCreatingBill] = useState(false);
   const [newBillName, setNewBillName] = useState("");
   const [newBillAmount, setNewBillAmount] = useState("");
   const [newBillDue, setNewBillDue] = useState("");
-  const [showPaidBills, setShowPaidBills] = useState(false);
+  const [newBillCategoryId, setNewBillCategoryId] = useState("");
+
+  const transactionsByCategory = useMemo(() => {
+    const result = new Map<string, typeof monthTransactions>();
+    for (const transaction of [...monthTransactions].sort((a, b) => b.date.localeCompare(a.date))) {
+      const list = result.get(transaction.categoryId) ?? [];
+      list.push(transaction);
+      result.set(transaction.categoryId, list);
+    }
+    return result;
+  }, [monthTransactions]);
+
+  const categoryNameById = useMemo(
+    () => new Map(categories.map((category) => [category.clientId, category.name])),
+    [categories],
+  );
+
+  const openSettings = (tab: "goal" | "income") => {
+    setSettingsTab(tab);
+    setGoalInput(monthlyBudgetGoal > 0 ? String(monthlyBudgetGoal) : "");
+    setIncomeInput(monthlyIncome > 0 ? String(monthlyIncome) : "");
+    setSettingsOpen(true);
+  };
+
+  const saveGoal = () => {
+    const amount = Number(goalInput);
+    if (!Number.isFinite(amount) || amount < 0) {
+      toast.error("Enter a valid budget goal");
+      return;
+    }
+    setMonthlyBudgetGoal(amount);
+    setSettingsOpen(false);
+    toast.success(`Budget goal saved for ${formatMonthKey(viewMonthKey)}`);
+  };
+
+  const saveIncome = () => {
+    const amount = Number(incomeInput);
+    if (!Number.isFinite(amount) || amount < 0) {
+      toast.error("Enter a valid monthly income");
+      return;
+    }
+    setMonthlyIncome(amount);
+    setSettingsOpen(false);
+    toast.success("Monthly income updated");
+  };
+
+  const handleAddCategory = async () => {
+    const name = newCatName.trim();
+    const target = newCatLimit.trim() === "" ? 0 : Number(newCatLimit);
+    if (!name) {
+      toast.error("Enter a category name");
+      return;
+    }
+    if (!Number.isFinite(target) || target < 0) {
+      toast.error("Enter a valid category target");
+      return;
+    }
+    const categoryId = await addCategory({ name, color: newCatColor, monthlyLimit: 0 });
+    if (target > 0) await setCategoryLimitForMonth(categoryId, target);
+    setNewCatName("");
+    setNewCatLimit("");
+    setNewCatColor(PRESET_COLORS[0]);
+    setCreatingCategory(false);
+    toast.success(`${name} added`);
+  };
+
+  const logCategorySpend = async (category: BudgetCategoryWithTotals) => {
+    const amount = Number(spendInputs[category.clientId]);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Enter a positive amount");
+      return;
+    }
+    await addTransaction({
+      categoryId: category.clientId,
+      amount,
+      date: dateForMonth(viewMonthKey, isCurrentMonth),
+    });
+    setSpendInputs((current) => ({ ...current, [category.clientId]: "" }));
+    toast.success(`${formatMoney(amount)} added to ${category.name}`);
+  };
+
+  const openLimitEditor = (category: BudgetCategoryWithTotals) => {
+    setLimitEditingCategory(category);
+    setLimitInput(category.effectiveLimit > 0 ? String(category.effectiveLimit) : "");
+  };
+
+  const saveCategoryTarget = async () => {
+    if (!limitEditingCategory) return;
+    const target = limitInput.trim() === "" ? 0 : Number(limitInput);
+    if (!Number.isFinite(target) || target < 0) {
+      toast.error("Enter a valid category target");
+      return;
+    }
+    await setCategoryLimitForMonth(limitEditingCategory.clientId, target);
+    setLimitEditingCategory(null);
+    setLimitInput("");
+    toast.success("Category target updated");
+  };
+
+  const startAddingBill = () => {
+    if (categories.length === 0) {
+      toast.error("Create a category first");
+      return;
+    }
+    setNewBillCategoryId(categories[0].clientId);
+    setCreatingBill(true);
+  };
 
   const handleAddBill = async () => {
     const name = newBillName.trim();
     const amount = Number(newBillAmount);
-    if (!name || !Number.isFinite(amount) || amount <= 0) {
-      toast.error("Add a name and a positive amount");
+    if (!name || !Number.isFinite(amount) || amount <= 0 || !newBillCategoryId) {
+      toast.error("Add a category, name, and positive amount");
       return;
     }
     await addBill({
       name,
       amount,
       dueDate: newBillDue || undefined,
+      categoryId: newBillCategoryId,
     });
     setNewBillName("");
     setNewBillAmount("");
     setNewBillDue("");
+    setNewBillCategoryId("");
     setCreatingBill(false);
     toast.success(`${name} added`);
   };
 
-  const handleMarkPaid = async (clientId: string, name: string, amount: number) => {
-    await markPaid(clientId);
-    toast.success(`${name} marked paid · ${formatMoney(amount)} logged`);
+  const handleMarkPaid = async (bill: LocalBill) => {
+    await markPaid(bill.clientId, { categoryId: bill.categoryId });
+    toast.success(`${bill.name} paid and logged`);
   };
-
-  const handleUnmarkPaid = async (clientId: string, name: string) => {
-    await unmarkPaid(clientId);
-    toast.success(`${name} reverted to unpaid`);
-  };
-
-  const handleSaveIncome = () => {
-    const n = Number(incomeInput);
-    if (Number.isNaN(n) || n < 0) {
-      toast.error("Enter a valid amount");
-      return;
-    }
-    setMonthlyIncome(n);
-    setEditingIncome(false);
-    toast.success("Monthly income updated");
-  };
-
-  const handleAddCategory = async () => {
-    const name = newCatName.trim();
-    const limit = Number(newCatLimit);
-    if (!name || Number.isNaN(limit) || limit <= 0) {
-      toast.error("Enter a name and a positive amount");
-      return;
-    }
-    // Per-month budgets: the category itself has monthlyLimit=0 (no forever
-    // default). The amount the user typed is stamped as an override for the
-    // viewed month only. Future months start at $0 until the user sets them
-    // (or taps "Carry over from last month").
-    const newClientId = await addCategory({ name, color: newCatColor, monthlyLimit: 0 });
-    await setCategoryLimitForMonth(newClientId, limit);
-    setNewCatName("");
-    setNewCatLimit("");
-    setNewCatColor(PRESET_COLORS[0]);
-    setCreatingCategory(false);
-    toast.success(`${name} budgeted for ${formatMonthKey(viewMonthKey)}`);
-  };
-
-  // Quick-add bills. Parses "gas 50", "50 gas", or just "50" (defaults note
-  // to "Bill"). Logs to a "Bills" category, auto-creating it on first use.
-  const findOrCreateBillsCategory = async (): Promise<string> => {
-    const existing = categories.find((c) => c.name.toLowerCase() === "bills");
-    if (existing) return existing.clientId;
-    return await addCategory({ name: "Bills", color: "#f97316", monthlyLimit: 0 });
-  };
-
-  const handleQuickAddBill = async () => {
-    const raw = billInput.trim();
-    if (!raw) return;
-    // Pull the first numeric token (with optional decimal). Everything else
-    // becomes the note. Order-agnostic so "gas 50" and "50 gas" both work.
-    const numMatch = raw.match(/(\d+(?:\.\d{1,2})?)/);
-    if (!numMatch) {
-      toast.error("Include an amount, e.g. \"gas 50\"");
-      return;
-    }
-    const amount = Number(numMatch[1]);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      toast.error("Amount must be positive");
-      return;
-    }
-    const note = raw.replace(numMatch[0], "").replace(/\$/g, "").trim() || "Bill";
-    const billsId = await findOrCreateBillsCategory();
-    const date = isCurrentMonth
-      ? new Date().toISOString()
-      : (() => {
-          const [y, m] = viewMonthKey.split("-").map(Number);
-          return new Date(y, m - 1, 15, 12, 0, 0).toISOString();
-        })();
-    await addTransaction({ categoryId: billsId, amount, note, date });
-    setBillInput("");
-    toast.success(`${formatMoney(amount)} · ${note}`);
-  };
-
-  // Copy this-month limits from the immediately prior month. Looks at the
-  // PREVIOUS month's effective limit per category — only fills categories
-  // that don't yet have an override in the current viewed month.
-  const handleCarryFromLastMonth = async () => {
-    const prevMonthKey = shiftMonth(viewMonthKey, -1);
-    const prevOverrides = await import("@/lib/db/indexed-db").then(async ({ default: db }) => {
-      const all = await db.budgetCategoryOverrides.toArray();
-      const map = new Map<string, number>();
-      for (const o of all) {
-        if (o.deleted || o.monthKey !== prevMonthKey) continue;
-        map.set(o.categoryId, o.monthlyLimit);
-      }
-      return map;
-    });
-    let count = 0;
-    for (const cat of categories) {
-      if (cat.hasOverride) continue;
-      const prevLimit = prevOverrides.get(cat.clientId) ?? cat.monthlyLimit;
-      if (prevLimit > 0) {
-        await setCategoryLimitForMonth(cat.clientId, prevLimit);
-        count++;
-      }
-    }
-    if (count > 0) toast.success(`Carried ${count} budget${count > 1 ? "s" : ""} from ${formatMonthKey(prevMonthKey)}`);
-    else toast.info("Nothing to carry from last month");
-  };
-
-  const openLimitEditor = (cat: BudgetCategoryWithTotals) => {
-    setLimitEditingCategory(cat);
-    setLimitInput(cat.hasOverride ? String(cat.effectiveLimit) : "");
-  };
-
-  const handleSaveLimit = async () => {
-    if (!limitEditingCategory) return;
-    const trimmed = limitInput.trim();
-    if (trimmed === "") {
-      await setCategoryLimitForMonth(limitEditingCategory.clientId, null);
-      toast.success("Reverted to default limit");
-    } else {
-      const n = Number(trimmed);
-      if (Number.isNaN(n) || n < 0) {
-        toast.error("Enter a positive amount or leave blank to revert");
-        return;
-      }
-      await setCategoryLimitForMonth(limitEditingCategory.clientId, n);
-      toast.success(`Limit for ${formatMonthKey(viewMonthKey)}: ${formatMoney(n)}`);
-    }
-    setLimitEditingCategory(null);
-    setLimitInput("");
-  };
-
-  const handleAddSpending = async () => {
-    if (!spendingCategory) return;
-    const amount = Number(spendAmount);
-    if (Number.isNaN(amount) || amount <= 0) {
-      toast.error("Enter a positive amount");
-      return;
-    }
-    // Stamp the transaction within the viewed month. For the current month,
-    // use "now" so it lands at today's date; for past months, use the 15th
-    // (mid-month) so category totals attribute correctly.
-    let date: string;
-    if (isCurrentMonth) {
-      date = new Date().toISOString();
-    } else {
-      const [y, m] = viewMonthKey.split("-").map(Number);
-      date = new Date(y, m - 1, 15, 12, 0, 0).toISOString();
-    }
-    await addTransaction({
-      categoryId: spendingCategory.clientId,
-      amount,
-      note: spendNote.trim() || undefined,
-      date,
-    });
-    setSpendAmount("");
-    setSpendNote("");
-    setSpendingCategory(null);
-    toast.success(`${formatMoney(amount)} logged`);
-  };
-
-  const txCategoryNameById = new Map(categories.map((c) => [c.clientId, c.name]));
-  const txCategoryColorById = new Map(categories.map((c) => [c.clientId, c.color]));
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6 md:px-6 md:py-8 space-y-6">
-      <div className="flex items-center gap-3">
-        <Wallet className="h-6 w-6 text-primary" />
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold tracking-tight">BudgetMaxxing</h1>
-          <p className="text-sm text-muted-foreground">
-            Track monthly income, set category budgets, watch them tick down as you spend.
-          </p>
+    <div className="mx-auto max-w-4xl px-4 py-5 pb-8 md:px-6 md:py-8">
+      <header className="mb-4 flex items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold md:text-2xl">Budget</h1>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11"
+            onClick={() => setHistoryOpen(true)}
+            aria-label="Spending history"
+            title="Spending history"
+          >
+            <History className="h-5 w-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11"
+            onClick={() => openSettings("goal")}
+            aria-label="Budget settings"
+            title="Budget settings"
+          >
+            <Settings2 className="h-5 w-5" />
+          </Button>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          onClick={() => setHistoryOpen(true)}
-        >
-          <History className="h-4 w-4" />
-          History
-        </Button>
-      </div>
+      </header>
 
-      {/* Month navigator */}
-      <div className="flex items-center justify-between rounded-lg border bg-card px-3 py-2">
+      <div className="mb-3 flex min-h-12 items-center justify-between rounded-md border bg-card px-1">
         <Button
           variant="ghost"
           size="icon"
+          className="h-11 w-11"
           onClick={() => setViewMonthKey(shiftMonth(viewMonthKey, -1))}
           aria-label="Previous month"
         >
-          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft className="h-5 w-5" />
         </Button>
-        <div className="text-center">
-          <div className="flex items-center justify-center gap-1.5">
-            <p className="text-sm font-medium">{formatMonthKey(viewMonthKey)}</p>
-            {isFutureMonth && (
-              <span className="rounded-full bg-primary/15 text-primary px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider">
-                Upcoming
-              </span>
-            )}
-          </div>
-          {!isCurrentMonth && (
-            <button
-              onClick={() => setViewMonthKey(getCurrentMonthKey())}
-              className="text-xs text-primary hover:underline"
-            >
-              Jump to current month
-            </button>
-          )}
-        </div>
+        <button className="min-h-11 px-3 text-sm font-semibold" onClick={() => setViewMonthKey(getCurrentMonthKey())}>
+          {formatMonthKey(viewMonthKey)}
+        </button>
         <Button
           variant="ghost"
           size="icon"
+          className="h-11 w-11"
           onClick={() => setViewMonthKey(shiftMonth(viewMonthKey, 1))}
           aria-label="Next month"
         >
-          <ChevronRight className="h-4 w-4" />
+          <ChevronRight className="h-5 w-5" />
         </Button>
       </div>
 
-      {/* Quick-add bill — single input. "gas 50" or "50 gas" both work. */}
-      <Card>
-        <CardContent className="pt-4 pb-4">
-          <div className="flex items-center gap-2 mb-2 text-xs uppercase text-muted-foreground tracking-wider">
-            <Receipt className="h-3.5 w-3.5" />
-            Quick-add Bill
-          </div>
-          <div className="flex gap-2">
-            <Input
-              placeholder='e.g. "gas 50" or just "30"'
-              value={billInput}
-              onChange={(e) => setBillInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void handleQuickAddBill();
-                }
-              }}
-              inputMode="text"
-            />
-            <Button onClick={handleQuickAddBill} className="shrink-0 gap-1.5">
-              <Plus className="h-4 w-4" />
-              Log
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Upcoming Bills */}
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Receipt className="h-4 w-4" />
-              Upcoming Bills
-              {unpaidBills.length > 0 && (
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {unpaidBills.length}
-                </span>
-              )}
-            </CardTitle>
-            <Button size="sm" variant="ghost" className="gap-1.5" onClick={() => setCreatingBill(true)}>
-              <Plus className="h-4 w-4" />
-              Add Bill
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="pt-0">
-          {unpaidBills.length === 0 && paidBills.length === 0 ? (
-            <p className="py-3 text-center text-xs text-muted-foreground">
-              Nothing on your plate. Add a bill to track what&apos;s coming up.
-            </p>
-          ) : unpaidBills.length === 0 ? (
-            <p className="py-3 text-center text-xs text-muted-foreground">All caught up.</p>
-          ) : (
-            <div className="divide-y -mx-4 sm:-mx-6">
-              {unpaidBills.map((bill) => {
-                const overdue =
-                  bill.dueDate && new Date(bill.dueDate) < new Date(new Date().setHours(0, 0, 0, 0));
-                return (
-                  <div key={bill.clientId} className="flex items-center gap-3 px-4 py-2.5 sm:px-6">
-                    <button
-                      onClick={() => handleMarkPaid(bill.clientId, bill.name, bill.amount)}
-                      aria-label="Mark paid"
-                      className="shrink-0 transition-transform active:scale-95"
-                    >
-                      <Circle className={cn("h-5 w-5", overdue ? "text-destructive" : "text-muted-foreground")} />
-                    </button>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium truncate">{bill.name}</p>
-                      {bill.dueDate && (
-                        <p className={cn("text-[11px] flex items-center gap-1", overdue ? "text-destructive" : "text-muted-foreground")}>
-                          <CalendarIcon className="h-3 w-3" />
-                          {new Date(bill.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                          {overdue && " · overdue"}
-                        </p>
-                      )}
-                    </div>
-                    <span className="text-sm font-semibold tabular-nums shrink-0">{formatMoney(bill.amount)}</span>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
-                      onClick={() => {
-                        if (confirm(`Remove "${bill.name}"?`)) removeBill(bill.clientId);
-                      }}
-                      aria-label="Remove bill"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {paidBills.length > 0 && (
-            <div className="mt-2 border-t -mx-4 sm:-mx-6">
-              <button
-                onClick={() => setShowPaidBills((v) => !v)}
-                className="flex w-full items-center justify-between px-4 sm:px-6 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <span>{showPaidBills ? "Hide" : "Show"} paid ({paidBills.length})</span>
-                <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", showPaidBills && "rotate-90")} />
-              </button>
-              {showPaidBills && (
-                <div className="divide-y">
-                  {paidBills.slice(0, 20).map((bill) => (
-                    <div key={bill.clientId} className="flex items-center gap-3 px-4 py-2 sm:px-6 opacity-70">
-                      <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm line-through truncate">{bill.name}</p>
-                        {bill.paidAt && (
-                          <p className="text-[11px] text-muted-foreground">
-                            paid {new Date(bill.paidAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                          </p>
-                        )}
-                      </div>
-                      <span className="text-sm tabular-nums line-through shrink-0">{formatMoney(bill.amount)}</span>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground shrink-0"
-                        onClick={() => handleUnmarkPaid(bill.clientId, bill.name)}
-                        aria-label="Undo paid"
-                        title="Undo paid (removes the budget transaction)"
-                      >
-                        <Undo2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Add Bill dialog */}
-      <Dialog open={creatingBill} onOpenChange={setCreatingBill}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add a Bill</DialogTitle>
-            <DialogDescription>
-              These don&apos;t deduct from your budget until you mark them paid.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="bill-name">Name</Label>
-              <Input
-                id="bill-name"
-                placeholder="Electric, Rent, Netflix…"
-                value={newBillName}
-                onChange={(e) => setNewBillName(e.target.value)}
-                autoFocus
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="bill-amt">Amount ($)</Label>
-                <Input
-                  id="bill-amt"
-                  type="number"
-                  inputMode="decimal"
-                  placeholder="80"
-                  value={newBillAmount}
-                  onChange={(e) => setNewBillAmount(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="bill-due">Due (optional)</Label>
-                <Input
-                  id="bill-due"
-                  type="date"
-                  value={newBillDue}
-                  onChange={(e) => setNewBillDue(e.target.value)}
-                />
-              </div>
-            </div>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setCreatingBill(false)}>Cancel</Button>
-            <Button onClick={handleAddBill}>Add Bill</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* All-time stats */}
-      {allTime.monthsTracked > 0 && (
-        <Card>
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center gap-2 mb-3 text-xs uppercase text-muted-foreground tracking-wider">
-              <Crown className="h-3 w-3" />
-              All Time
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div>
-                <p className="text-xs text-muted-foreground">Months tracked</p>
-                <p className="text-lg font-semibold tabular-nums">{allTime.monthsTracked}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Total spent</p>
-                <p className="text-lg font-semibold tabular-nums">{formatMoney(allTime.totalSpent)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Avg / month</p>
-                <p className="text-lg font-semibold tabular-nums">{formatMoney(allTime.avgPerMonth)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Top category</p>
-                <p className="text-lg font-semibold truncate" title={allTime.topCategoryName ?? "—"}>
-                  {allTime.topCategoryName ?? "—"}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <DollarSign className="h-4 w-4" />
-            Monthly Income
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {editingIncome ? (
-            <div className="flex items-end gap-2">
-              <div className="flex-1">
-                <Label htmlFor="income">Amount per month</Label>
-                <Input
-                  id="income"
-                  type="number"
-                  inputMode="decimal"
-                  placeholder="3000"
-                  value={incomeInput}
-                  onChange={(e) => setIncomeInput(e.target.value)}
-                />
-              </div>
-              <Button onClick={handleSaveIncome}>Save</Button>
-              {monthlyIncome > 0 && (
-                <Button variant="outline" onClick={() => { setIncomeInput(String(monthlyIncome)); setEditingIncome(false); }}>
-                  Cancel
-                </Button>
-              )}
-            </div>
-          ) : (
-            <div className="flex items-center justify-between">
-              <div className="text-3xl font-bold tabular-nums">{formatMoney(monthlyIncome)}</div>
-              <Button variant="outline" size="sm" onClick={() => setEditingIncome(true)}>
-                Edit
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {monthlyIncome > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Card>
-            <CardContent className="pt-4">
-              <p className="text-xs uppercase text-muted-foreground tracking-wider">Budgeted</p>
-              <p className="text-xl font-semibold tabular-nums">{formatMoney(totalBudgeted)}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <p className="text-xs uppercase text-muted-foreground tracking-wider">
-                {isFutureMonth ? "Planned" : `Spent ${isCurrentMonth ? "this month" : "in month"}`}
-              </p>
-              <p className="text-xl font-semibold tabular-nums flex items-center gap-1">
-                <TrendingDown className="h-4 w-4 text-destructive" />
-                {formatMoney(totalSpent)}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <p className="text-xs uppercase text-muted-foreground tracking-wider">Income remaining</p>
-              <p className={cn("text-xl font-semibold tabular-nums flex items-center gap-1", incomeRemaining < 0 && "text-destructive")}>
-                <TrendingUp className={cn("h-4 w-4", incomeRemaining >= 0 ? "text-green-500" : "text-destructive")} />
-                {formatMoney(incomeRemaining)}
-              </p>
-            </CardContent>
-          </Card>
+      <div className="mb-7 grid grid-cols-2 gap-2">
+        <button
+          className="min-h-16 rounded-md border bg-card px-3 py-2 text-left"
+          onClick={() => openSettings("goal")}
+        >
+          <span className="block text-[11px] font-medium text-muted-foreground">Budget left</span>
+          <span className={cn("block truncate text-lg font-semibold tabular-nums", budgetRemaining < 0 && "text-destructive")}>
+            {formatMoney(budgetRemaining)}
+          </span>
+        </button>
+        <div className="min-h-16 rounded-md border bg-card px-3 py-2">
+          <span className="block text-[11px] font-medium text-muted-foreground">Total spent</span>
+          <span className="block truncate text-lg font-semibold tabular-nums">{formatMoney(totalSpent)}</span>
         </div>
-      )}
+      </div>
 
-      {monthlyIncome > 0 && unallocated !== 0 && (
-        <p className="text-xs text-muted-foreground text-center">
-          {unallocated > 0
-            ? `${formatMoney(unallocated)} of your income is not yet assigned to any category.`
-            : `You've budgeted ${formatMoney(-unallocated)} more than your income.`}
-        </p>
-      )}
-
-      <div>
-        <div className="flex items-center justify-between mb-3 gap-2">
-          <h2 className="text-lg font-semibold">Categories</h2>
-          <div className="flex items-center gap-1.5">
-            {categories.length > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5"
-                onClick={handleCarryFromLastMonth}
-                title={`Use last month's limits in ${formatMonthKey(viewMonthKey)}`}
-              >
-                <ArrowDownToLine className="h-3.5 w-3.5" />
-                Carry from last month
-              </Button>
-            )}
-            <Button size="sm" onClick={() => setCreatingCategory(true)} className="gap-1.5">
-              <Plus className="h-4 w-4" />
-              New Category
-            </Button>
+      <section aria-labelledby="budget-categories-title">
+        <div className="mb-2 flex min-h-11 items-center justify-between gap-3">
+          <div>
+            <h2 id="budget-categories-title" className="text-base font-semibold">Categories</h2>
+            <p className="text-xs text-muted-foreground">{categories.length} {categories.length === 1 ? "category" : "categories"}</p>
           </div>
+          <Button size="sm" className="h-11 gap-1.5" onClick={() => setCreatingCategory(true)}>
+            <Plus className="h-4 w-4" />
+            Category
+          </Button>
         </div>
 
         {categories.length === 0 ? (
-          <Card>
-            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              No categories yet. Click <strong>New Category</strong> to set your first budget.
-            </CardContent>
-          </Card>
+          <button
+            className="flex min-h-28 w-full items-center justify-center rounded-md border border-dashed px-4 text-sm text-muted-foreground"
+            onClick={() => setCreatingCategory(true)}
+          >
+            Create your first spending category
+          </button>
         ) : (
-          <div className="space-y-3">
-            {categories.map((cat) => {
-              const overspent = cat.remaining < 0;
-              const pct = Math.min(100, Math.max(0, cat.percent));
+          <div className="divide-y border-y md:overflow-hidden md:rounded-md md:border">
+            {categories.map((category) => {
+              const transactions = transactionsByCategory.get(category.clientId) ?? [];
+              const latestTransactions = transactions.slice(0, 3);
+              const overTarget = category.effectiveLimit > 0 && category.remaining < 0;
+              const progress = category.effectiveLimit > 0
+                ? Math.min(100, Math.max(0, category.percent))
+                : 0;
+
               return (
-                <Card key={cat.clientId}>
-                  <CardContent className="pt-4 pb-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: cat.color }} />
-                        <h3 className="font-medium truncate">{cat.name}</h3>
-                        {cat.hasOverride && (
-                          <span className="rounded-full bg-primary/15 text-primary px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider shrink-0">
-                            Custom
-                          </span>
-                        )}
+                <article key={category.clientId} className="py-4 md:px-5">
+                  <div className="mb-3 flex items-start gap-3">
+                    <span className="mt-1.5 h-3 w-3 shrink-0 rounded-sm" style={{ backgroundColor: category.color }} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <h3 className="truncate font-medium">{category.name}</h3>
+                        <span className="shrink-0 text-sm font-semibold tabular-nums">{formatMoney(category.spentInMonth)}</span>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <Button size="sm" variant="outline" className="h-7" onClick={() => setSpendingCategory(cat)}>
-                          Log Spend
+                      {category.effectiveLimit > 0 && (
+                        <>
+                          <div className="mt-1 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                            <span>{formatMoney(category.effectiveLimit)} target</span>
+                            <span className={cn(overTarget && "text-destructive")}>
+                              {overTarget ? `${formatMoney(-category.remaining)} over` : `${formatMoney(category.remaining)} left`}
+                            </span>
+                          </div>
+                          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className="h-full transition-[width]"
+                              style={{
+                                width: `${progress}%`,
+                                backgroundColor: overTarget ? "#ef4444" : category.color,
+                              }}
+                            />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="-mr-2 h-11 w-11 shrink-0" aria-label={`Manage ${category.name}`}>
+                          <MoreHorizontal className="h-5 w-5" />
                         </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                          onClick={() => openLimitEditor(cat)}
-                          title="Edit limit for this month"
-                          aria-label="Edit limit for this month"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => openLimitEditor(category)}>
+                          <Pencil className="mr-2 h-4 w-4" />
+                          Monthly target
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
                           onClick={() => {
-                            if (confirm(`Delete budget category "${cat.name}"? Its transactions will also be removed.`)) {
-                              deleteCategory(cat.clientId);
+                            if (confirm(`Delete "${category.name}" and its spending history?`)) {
+                              void deleteCategory(category.clientId);
                             }
                           }}
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </div>
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete category
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
 
-                    <div className="flex items-baseline justify-between text-sm mb-1.5">
-                      <span className="tabular-nums">
-                        {formatMoney(cat.spentInMonth)} / {formatMoney(cat.effectiveLimit)}
-                      </span>
-                      <span className={cn("tabular-nums font-medium", overspent ? "text-destructive" : "text-muted-foreground")}>
-                        {overspent ? `${formatMoney(cat.remaining)} over` : `${formatMoney(cat.remaining)} left`}
-                      </span>
-                    </div>
-
-                    <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full transition-all"
-                        style={{
-                          width: `${pct}%`,
-                          backgroundColor: overspent ? "#ef4444" : cat.color,
+                  <div className="flex gap-2 pl-6">
+                    <div className="relative min-w-0 flex-1">
+                      <DollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        aria-label={`Amount spent on ${category.name}`}
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.01"
+                        placeholder="Amount spent"
+                        className="h-11 pl-9"
+                        value={spendInputs[category.clientId] ?? ""}
+                        onChange={(event) => setSpendInputs((current) => ({
+                          ...current,
+                          [category.clientId]: event.target.value,
+                        }))}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void logCategorySpend(category);
+                          }
                         }}
                       />
                     </div>
-                  </CardContent>
-                </Card>
+                    <Button
+                      size="icon"
+                      className="h-11 w-11 shrink-0"
+                      onClick={() => void logCategorySpend(category)}
+                      aria-label={`Add spending to ${category.name}`}
+                    >
+                      <Plus className="h-5 w-5" />
+                    </Button>
+                  </div>
+
+                  {latestTransactions.length > 0 && (
+                    <div className="mt-3 divide-y pl-6">
+                      {latestTransactions.map((transaction) => (
+                        <div key={transaction.clientId} className="flex min-h-11 items-center gap-3 py-1.5 text-sm">
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-muted-foreground">{transaction.note || "Expense"}</p>
+                            <p className="text-[11px] text-muted-foreground">{shortDate(transaction.date)}</p>
+                          </div>
+                          <span className="shrink-0 font-medium tabular-nums">{formatMoney(transaction.amount)}</span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-11 w-11 shrink-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => {
+                              if (confirm(`Remove ${formatMoney(transaction.amount)} entry?`)) {
+                                void deleteTransaction(transaction.clientId);
+                              }
+                            }}
+                            aria-label="Delete spending entry"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                      {transactions.length > latestTransactions.length && (
+                        <p className="py-2 text-xs text-muted-foreground">
+                          +{transactions.length - latestTransactions.length} earlier {transactions.length - latestTransactions.length === 1 ? "entry" : "entries"}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </article>
               );
             })}
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Recent transactions for the viewed month */}
-      {monthTransactions.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold mb-3">Transactions ({monthTransactions.length})</h2>
-          <Card>
-            <CardContent className="p-0 divide-y">
-              {monthTransactions
-                .slice()
-                .sort((a, b) => b.date.localeCompare(a.date))
-                .slice(0, 50)
-                .map((tx) => (
-                  <div key={tx.clientId} className="flex items-center gap-3 px-4 py-2.5">
-                    <div
-                      className="h-2.5 w-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: txCategoryColorById.get(tx.categoryId) ?? "#6b7280" }}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm truncate">
-                        {txCategoryNameById.get(tx.categoryId) ?? "(deleted category)"}
-                        {tx.note && <span className="text-muted-foreground"> · {tx.note}</span>}
-                      </p>
-                      <p className="text-xs text-muted-foreground tabular-nums">
-                        {new Date(tx.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                      </p>
-                    </div>
-                    <span className="text-sm font-medium tabular-nums">{formatMoney(tx.amount)}</span>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => {
-                        if (confirm(`Remove ${formatMoney(tx.amount)} entry?`)) {
-                          deleteTransaction(tx.clientId);
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ))}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      <button
+        className="mt-5 flex min-h-12 w-full items-center gap-3 rounded-md border px-3 text-left text-sm hover:bg-muted/50"
+        onClick={() => setBillsOpen(true)}
+      >
+        <ReceiptText className="h-5 w-5 text-muted-foreground" />
+        <span className="flex-1 font-medium">Scheduled bills</span>
+        <span className="text-muted-foreground">{unpaidBills.length}</span>
+        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+      </button>
 
-      {/* New category dialog */}
-      <Dialog open={creatingCategory} onOpenChange={setCreatingCategory}>
-        <DialogContent className="sm:max-w-md">
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className={MOBILE_DIALOG_CLASS}>
           <DialogHeader>
-            <DialogTitle>New Budget Category</DialogTitle>
-            <DialogDescription>
-              Pick a name and limit for <strong>{formatMonthKey(viewMonthKey)}</strong>. Limits are per-month — next month starts fresh (or tap &ldquo;Carry from last month&rdquo;).
-            </DialogDescription>
+            <DialogTitle>Monthly budget</DialogTitle>
+            <DialogDescription>{formatMonthKey(viewMonthKey)}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+          <Tabs value={settingsTab} onValueChange={setSettingsTab}>
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="goal"><Target className="h-4 w-4" />Goal</TabsTrigger>
+              <TabsTrigger value="income"><DollarSign className="h-4 w-4" />Income</TabsTrigger>
+            </TabsList>
+            <TabsContent value="goal" className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="budget-goal">Amount to budget this month</Label>
+                <Input
+                  id="budget-goal"
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.01"
+                  placeholder="1500"
+                  value={goalInput}
+                  onChange={(event) => setGoalInput(event.target.value)}
+                  autoFocus={settingsTab === "goal"}
+                />
+              </div>
+              <Button className="h-11 w-full" onClick={saveGoal}>Save budget goal</Button>
+            </TabsContent>
+            <TabsContent value="income" className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="monthly-income">Monthly income</Label>
+                <Input
+                  id="monthly-income"
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.01"
+                  placeholder="3000"
+                  value={incomeInput}
+                  onChange={(event) => setIncomeInput(event.target.value)}
+                />
+              </div>
+              <Button className="h-11 w-full" onClick={saveIncome}>Save income</Button>
+            </TabsContent>
+          </Tabs>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={creatingCategory} onOpenChange={setCreatingCategory}>
+        <DialogContent className={MOBILE_DIALOG_CLASS}>
+          <DialogHeader>
+            <DialogTitle>New category</DialogTitle>
+            <DialogDescription>Group related spending together.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="cat-name">Name</Label>
+              <Label htmlFor="category-name">Name</Label>
               <Input
-                id="cat-name"
-                placeholder="Clothes, Food, Subscriptions…"
+                id="category-name"
+                placeholder="Gas, Groceries, Rent"
                 value={newCatName}
-                onChange={(e) => setNewCatName(e.target.value)}
+                onChange={(event) => setNewCatName(event.target.value)}
+                autoFocus
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="cat-limit">Limit for {formatMonthKey(viewMonthKey)} ($)</Label>
+              <Label htmlFor="category-target">Monthly target (optional)</Label>
               <Input
-                id="cat-limit"
+                id="category-target"
                 type="number"
                 inputMode="decimal"
+                min="0"
+                step="0.01"
                 placeholder="200"
                 value={newCatLimit}
-                onChange={(e) => setNewCatLimit(e.target.value)}
+                onChange={(event) => setNewCatLimit(event.target.value)}
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label>Color</Label>
               <div className="flex flex-wrap gap-2">
-                {PRESET_COLORS.map((c) => (
+                {PRESET_COLORS.map((color) => (
                   <button
-                    key={c}
-                    onClick={() => setNewCatColor(c)}
+                    key={color}
                     className={cn(
-                      "h-7 w-7 rounded-md border-2 transition-transform",
-                      newCatColor === c ? "scale-110" : "border-transparent",
+                      "h-11 w-11 rounded-md border-2",
+                      newCatColor === color ? "border-foreground" : "border-transparent",
                     )}
-                    style={{ backgroundColor: c, borderColor: newCatColor === c ? "#fff" : "transparent", boxShadow: newCatColor === c ? `0 0 0 2px ${c}` : "none" }}
-                    aria-label={`Color ${c}`}
+                    style={{ backgroundColor: color }}
+                    onClick={() => setNewCatColor(color)}
+                    aria-label={`Use ${color}`}
                   />
                 ))}
               </div>
             </div>
           </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setCreatingCategory(false)}>Cancel</Button>
-            <Button onClick={handleAddCategory}>Add Category</Button>
-          </div>
+          <Button className="h-11 w-full" onClick={() => void handleAddCategory()}>Add category</Button>
         </DialogContent>
       </Dialog>
 
-      {/* Log spending dialog */}
-      <Dialog open={!!spendingCategory} onOpenChange={(o) => !o && setSpendingCategory(null)}>
-        <DialogContent className="sm:max-w-md">
+      <Dialog open={!!limitEditingCategory} onOpenChange={(open) => !open && setLimitEditingCategory(null)}>
+        <DialogContent className={MOBILE_DIALOG_CLASS}>
           <DialogHeader>
-            <DialogTitle>Log Spending</DialogTitle>
-            <DialogDescription>
-              {spendingCategory && (
-                <>Add a charge to <strong>{spendingCategory.name}</strong>. {formatMoney(spendingCategory.remaining)} left this month.</>
-              )}
-            </DialogDescription>
+            <DialogTitle>{limitEditingCategory?.name} target</DialogTitle>
+            <DialogDescription>{formatMonthKey(viewMonthKey)}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="spend-amt">Amount ($)</Label>
-              <Input
-                id="spend-amt"
-                type="number"
-                inputMode="decimal"
-                placeholder="25"
-                value={spendAmount}
-                onChange={(e) => setSpendAmount(e.target.value)}
-                autoFocus
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="spend-note">Note (optional)</Label>
-              <Input
-                id="spend-note"
-                placeholder="What was it for?"
-                value={spendNote}
-                onChange={(e) => setSpendNote(e.target.value)}
-              />
-            </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="category-monthly-target">Monthly target</Label>
+            <Input
+              id="category-monthly-target"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="0.01"
+              placeholder="No target"
+              value={limitInput}
+              onChange={(event) => setLimitInput(event.target.value)}
+              autoFocus
+            />
           </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setSpendingCategory(null)}>Cancel</Button>
-            <Button onClick={handleAddSpending}>Log Spend</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Per-month limit override dialog */}
-      <Dialog open={!!limitEditingCategory} onOpenChange={(o) => !o && setLimitEditingCategory(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Limit for {formatMonthKey(viewMonthKey)}</DialogTitle>
-            <DialogDescription>
-              {limitEditingCategory && (
-                <>
-                  Set a custom limit for <strong>{limitEditingCategory.name}</strong> this month only. The default ({formatMoney(limitEditingCategory.monthlyLimit)}) keeps applying to every other month. Leave blank to revert.
-                </>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="limit-amt">Limit for this month ($)</Label>
-              <Input
-                id="limit-amt"
-                type="number"
-                inputMode="decimal"
-                placeholder={limitEditingCategory ? String(limitEditingCategory.monthlyLimit) : ""}
-                value={limitInput}
-                onChange={(e) => setLimitInput(e.target.value)}
-                autoFocus
-              />
-              <p className="text-[11px] text-muted-foreground">Default: {limitEditingCategory ? formatMoney(limitEditingCategory.monthlyLimit) : ""}</p>
-            </div>
-          </div>
-          <div className="flex justify-between gap-2">
-            {limitEditingCategory?.hasOverride ? (
+          <div className="flex gap-2">
+            {limitEditingCategory?.hasOverride && (
               <Button
-                variant="ghost"
-                className="gap-1.5 text-muted-foreground"
+                variant="outline"
+                className="h-11 gap-1.5"
                 onClick={async () => {
-                  if (!limitEditingCategory) return;
                   await setCategoryLimitForMonth(limitEditingCategory.clientId, null);
-                  toast.success("Reverted to default limit");
                   setLimitEditingCategory(null);
                   setLimitInput("");
+                  toast.success("Category target reset");
                 }}
               >
-                <RotateCcw className="h-3.5 w-3.5" />
-                Revert
+                <RotateCcw className="h-4 w-4" />
+                Reset
               </Button>
-            ) : <span />}
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setLimitEditingCategory(null)}>Cancel</Button>
-              <Button onClick={handleSaveLimit}>Save</Button>
-            </div>
+            )}
+            <Button className="h-11 flex-1" onClick={() => void saveCategoryTarget()}>Save target</Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Monthly history dialog */}
-      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent className="sm:max-w-lg">
+      <Dialog open={billsOpen} onOpenChange={setBillsOpen}>
+        <DialogContent className={cn(MOBILE_DIALOG_CLASS, "sm:max-w-lg")}>
           <DialogHeader>
-            <DialogTitle>Spending History</DialogTitle>
-            <DialogDescription>
-              Tap a month to view it in detail.
-            </DialogDescription>
+            <DialogTitle>Scheduled bills</DialogTitle>
+            <DialogDescription>Assign each bill to the category it belongs to.</DialogDescription>
           </DialogHeader>
-          <div className="max-h-[60vh] overflow-y-auto -mx-6 px-6">
-            {availableMonths.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4">No months tracked yet.</p>
-            ) : (
-              <div className="divide-y">
-                {monthSummaries.map((m) => (
-                  <button
-                    key={m.monthKey}
-                    onClick={() => { setViewMonthKey(m.monthKey); setHistoryOpen(false); }}
-                    className="flex w-full items-center justify-between py-3 text-left hover:bg-muted/50 -mx-2 px-2 rounded"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">{formatMonthKey(m.monthKey)}</p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {m.topCategoryName
-                          ? <>Top: {m.topCategoryName} · {formatMoney(m.topCategorySpent)}</>
-                          : "No spending"}
-                      </p>
-                    </div>
-                    <span className="tabular-nums font-medium">{formatMoney(m.totalSpent)}</span>
-                  </button>
-                ))}
+
+          {creatingBill ? (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="bill-category">Category</Label>
+                <Select value={newBillCategoryId} onValueChange={setNewBillCategoryId}>
+                  <SelectTrigger id="bill-category" className="h-11 w-full">
+                    <SelectValue placeholder="Choose category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories.map((category) => (
+                      <SelectItem key={category.clientId} value={category.clientId}>{category.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-            )}
+              <div className="space-y-1.5">
+                <Label htmlFor="bill-name">Bill name</Label>
+                <Input id="bill-name" value={newBillName} onChange={(event) => setNewBillName(event.target.value)} placeholder="Gas bill" />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="bill-amount">Amount</Label>
+                  <Input id="bill-amount" type="number" inputMode="decimal" value={newBillAmount} onChange={(event) => setNewBillAmount(event.target.value)} placeholder="80" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="bill-date">Due date</Label>
+                  <Input id="bill-date" type="date" value={newBillDue} onChange={(event) => setNewBillDue(event.target.value)} />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" className="h-11" onClick={() => setCreatingBill(false)}>Cancel</Button>
+                <Button className="h-11 flex-1" onClick={() => void handleAddBill()}>Add bill</Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Button variant="outline" className="h-11 w-full gap-1.5" onClick={startAddingBill}>
+                <Plus className="h-4 w-4" />
+                Add scheduled bill
+              </Button>
+              {unpaidBills.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">No scheduled bills.</p>
+              ) : (
+                <div className="max-h-[40vh] divide-y overflow-y-auto">
+                  {unpaidBills.map((bill) => (
+                    <div key={bill.clientId} className="flex min-h-14 items-center gap-3 py-2">
+                      <button className="flex h-11 w-11 shrink-0 items-center justify-center" onClick={() => void handleMarkPaid(bill)} aria-label={`Mark ${bill.name} paid`}>
+                        <Circle className="h-5 w-5 text-muted-foreground" />
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{bill.name}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {categoryNameById.get(bill.categoryId ?? "") ?? "Uncategorized"}
+                          {bill.dueDate ? ` · ${shortDate(bill.dueDate)}` : ""}
+                        </p>
+                      </div>
+                      <span className="shrink-0 text-sm font-semibold tabular-nums">{formatMoney(bill.amount)}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-11 w-11 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => void removeBill(bill.clientId)}
+                        aria-label={`Delete ${bill.name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {paidBills.length > 0 && (
+                <div className="border-t pt-2">
+                  <button className="flex min-h-11 w-full items-center justify-between text-sm text-muted-foreground" onClick={() => setShowPaidBills((current) => !current)}>
+                    <span>Paid bills ({paidBills.length})</span>
+                    <ChevronRight className={cn("h-4 w-4 transition-transform", showPaidBills && "rotate-90")} />
+                  </button>
+                  {showPaidBills && paidBills.slice(0, 20).map((bill) => (
+                    <div key={bill.clientId} className="flex min-h-12 items-center gap-3 py-1.5 opacity-70">
+                      <CheckCircle2 className="h-5 w-5 shrink-0 text-green-500" />
+                      <span className="min-w-0 flex-1 truncate text-sm line-through">{bill.name}</span>
+                      <span className="shrink-0 text-sm tabular-nums line-through">{formatMoney(bill.amount)}</span>
+                      <Button variant="ghost" size="icon" className="h-11 w-11" onClick={() => void unmarkPaid(bill.clientId)} aria-label={`Mark ${bill.name} unpaid`}>
+                        <Undo2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className={cn(MOBILE_DIALOG_CLASS, "sm:max-w-lg")}>
+          <DialogHeader>
+            <DialogTitle>Spending history</DialogTitle>
+            <DialogDescription>Choose a month to review its categories.</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] divide-y overflow-y-auto">
+            {availableMonths.map((summaryMonth) => {
+              const summary = monthSummaries.find((item) => item.monthKey === summaryMonth);
+              return (
+                <button
+                  key={summaryMonth}
+                  className="flex min-h-14 w-full items-center gap-3 py-2 text-left"
+                  onClick={() => {
+                    setViewMonthKey(summaryMonth);
+                    setHistoryOpen(false);
+                  }}
+                >
+                  <CalendarDays className="h-5 w-5 text-muted-foreground" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium">{formatMonthKey(summaryMonth)}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {summary?.topCategoryName ? `Top: ${summary.topCategoryName}` : "No spending"}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums">{formatMoney(summary?.totalSpent ?? 0)}</span>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </button>
+              );
+            })}
           </div>
         </DialogContent>
       </Dialog>

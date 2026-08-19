@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "check:note-folders": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/check-note-folder-contract.mjs",
     "electron:dev": "concurrently \"next dev -p 5467\" \"wait-on http://localhost:5467 && NODE_ENV=development electron .\"",
     "electron:build": "electron-builder --win --publish never",
     "electron:build:mac": "electron-builder --mac --publish never && node scripts/notarize-dmg.js",

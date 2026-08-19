@@ -16,6 +16,15 @@ import {
 import { getDeviceId, saveDeviceNameMapping, getDeviceName } from "@/lib/device";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import {
+  DEFAULT_FOLDER_CREATE_ERROR,
+  DEFAULT_FOLDER_DELETE_ERROR,
+  DEFAULT_FOLDER_RENAME_ERROR,
+  DEFAULT_NOTES_FOLDER_COLOR,
+  DEFAULT_NOTES_FOLDER_NAME,
+  getCanonicalDefaultNotesFolder,
+  isReservedDefaultFolderName,
+} from "@/lib/note-folders";
 
 const SYNC_KEY = "notico_last_sync";
 
@@ -439,16 +448,42 @@ async function resolveHouseholdIdFromFolder(folderId: string | undefined): Promi
   return folder?.householdId ?? undefined;
 }
 
+let defaultNotesFolderPromise: Promise<LocalFolder> | null = null;
+
+export async function ensureDefaultNotesFolder(): Promise<LocalFolder> {
+  if (defaultNotesFolderPromise) return defaultNotesFolderPromise;
+
+  defaultNotesFolderPromise = (async () => {
+    const existing = getCanonicalDefaultNotesFolder(await db.folders.toArray());
+    if (existing) return existing;
+
+    return createFolderRecord({
+      name: DEFAULT_NOTES_FOLDER_NAME,
+      color: DEFAULT_NOTES_FOLDER_COLOR,
+    });
+  })();
+
+  try {
+    return await defaultNotesFolderPromise;
+  } finally {
+    defaultNotesFolderPromise = null;
+  }
+}
+
 export async function createItem(
   item: Omit<LocalItem, "id" | "clientId" | "createdAt" | "updatedAt" | "deleted">
 ): Promise<LocalItem> {
   const now = new Date().toISOString();
   const clientId = uuidv4();
   const deviceId = getDeviceId();
-  const householdId = item.householdId ?? (await resolveHouseholdIdFromFolder(item.folderId));
+  const folderId = item.type === "note" && !item.folderId
+    ? (await ensureDefaultNotesFolder()).clientId
+    : item.folderId;
+  const householdId = item.householdId ?? (await resolveHouseholdIdFromFolder(folderId));
 
   const localItem: LocalItem = {
     ...item,
+    folderId,
     clientId,
     deviceId,
     householdId,
@@ -489,15 +524,21 @@ export async function updateItem(
   const item = await db.items.where("clientId").equals(clientId).first();
   if (!item) return undefined;
 
+  const folderWasUpdated = Object.prototype.hasOwnProperty.call(updates, "folderId");
+  const requestedFolderId = folderWasUpdated ? updates.folderId : item.folderId;
+  const normalizedUpdates = item.type === "note" && !requestedFolderId
+    ? { ...updates, folderId: (await ensureDefaultNotesFolder()).clientId }
+    : updates;
+
   // If the folder changed (or this is the first save and householdId wasn't
   // set explicitly), re-resolve the householdId from the destination folder.
   // Moving a note into the family folder → shares it. Moving out → un-shares.
   let householdIdPatch: { householdId?: string } = {};
-  if (updates.folderId !== undefined && updates.folderId !== item.folderId) {
-    householdIdPatch = { householdId: await resolveHouseholdIdFromFolder(updates.folderId) };
+  if (normalizedUpdates.folderId !== undefined && normalizedUpdates.folderId !== item.folderId) {
+    householdIdPatch = { householdId: await resolveHouseholdIdFromFolder(normalizedUpdates.folderId) };
   }
 
-  const updatedData = { ...updates, ...householdIdPatch, updatedAt: now };
+  const updatedData = { ...normalizedUpdates, ...householdIdPatch, updatedAt: now };
   await db.items.where("clientId").equals(clientId).modify((i) => {
     Object.assign(i, updatedData);
   });
@@ -550,7 +591,10 @@ export async function getItems(
   items = items.filter((item) => !item.deleted && item.type !== "envvar" && item.type !== "credential");
 
   if (folderId) {
-    items = items.filter((item) => item.folderId === folderId);
+    const canonicalDefault = getCanonicalDefaultNotesFolder(await db.folders.toArray());
+    items = items.filter(
+      (item) => item.folderId === folderId || (canonicalDefault?.clientId === folderId && item.type === "note" && !item.folderId),
+    );
   }
 
   if (searchQuery) {
@@ -625,7 +669,7 @@ export async function purgeOldTrash(): Promise<void> {
 
 // ─── FOLDER OPERATIONS ───
 
-export async function createFolder(
+async function createFolderRecord(
   folder: Omit<LocalFolder, "id" | "clientId" | "createdAt" | "updatedAt" | "deleted">
 ): Promise<LocalFolder> {
   const now = new Date().toISOString();
@@ -653,6 +697,15 @@ export async function createFolder(
   return localFolder;
 }
 
+export async function createFolder(
+  folder: Omit<LocalFolder, "id" | "clientId" | "createdAt" | "updatedAt" | "deleted">
+): Promise<LocalFolder> {
+  if (!folder.householdId && isReservedDefaultFolderName(folder.name)) {
+    throw new Error(DEFAULT_FOLDER_CREATE_ERROR);
+  }
+  return createFolderRecord(folder);
+}
+
 export async function updateFolder(
   clientId: string,
   updates: Partial<LocalFolder>
@@ -660,6 +713,17 @@ export async function updateFolder(
   const now = new Date().toISOString();
   const folder = await db.folders.where("clientId").equals(clientId).first();
   if (!folder) return undefined;
+
+  const canonicalDefault = getCanonicalDefaultNotesFolder(await db.folders.toArray());
+  if (canonicalDefault?.clientId === clientId && updates.name !== undefined) {
+    throw new Error(DEFAULT_FOLDER_RENAME_ERROR);
+  }
+  if (canonicalDefault?.clientId === clientId && updates.deleted === true) {
+    throw new Error(DEFAULT_FOLDER_DELETE_ERROR);
+  }
+  if (!folder.householdId && updates.name !== undefined && isReservedDefaultFolderName(updates.name)) {
+    throw new Error(DEFAULT_FOLDER_CREATE_ERROR);
+  }
 
   const updatedData = { ...updates, updatedAt: now };
   await db.folders.where("clientId").equals(clientId).modify((f) => {
@@ -680,6 +744,11 @@ export async function updateFolder(
 
 export async function deleteFolder(clientId: string): Promise<void> {
   const now = new Date().toISOString();
+
+  const canonicalDefault = getCanonicalDefaultNotesFolder(await db.folders.toArray());
+  if (canonicalDefault?.clientId === clientId) {
+    throw new Error(DEFAULT_FOLDER_DELETE_ERROR);
+  }
 
   await db.folders.where("clientId").equals(clientId).modify((f) => {
     f.deleted = true;
@@ -1502,7 +1571,9 @@ export async function initialSync(): Promise<void> {
   localStorage.removeItem(SYNC_KEY);
   try {
     await pullChanges(userId);
+    await ensureDefaultNotesFolder();
     setLastSync(new Date().toISOString());
+    if (onSyncComplete) onSyncComplete();
   } catch (error) {
     if (previousLastSync) localStorage.setItem(SYNC_KEY, previousLastSync);
     console.error("Initial sync error:", error);

@@ -499,7 +499,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
         onEscapeKeyDown={(e) => { e.preventDefault(); finalizeAndClose(); }}
         onPointerDownOutside={(e) => { e.preventDefault(); finalizeAndClose(); }}
         onInteractOutside={(e) => { e.preventDefault(); }}
-        className="item-editor-shell !fixed !inset-0 !left-0 !top-0 !flex !h-[var(--visual-viewport-height,100dvh)] !max-h-none !w-screen !max-w-none !translate-x-0 !translate-y-0 flex-col !gap-0 !overflow-hidden !rounded-none !border-0 !p-0 bg-background md:!inset-auto md:!left-1/2 md:!top-1/2 md:!h-[min(760px,calc(100dvh-3rem))] md:!w-[min(720px,calc(100vw-3rem))] md:!-translate-x-1/2 md:!-translate-y-1/2 md:!rounded-lg md:!border"
+        className="item-editor-shell !fixed !inset-0 !left-0 !top-0 !flex !h-[var(--visual-viewport-height,100dvh)] !max-h-full !w-screen !max-w-none !translate-x-0 !translate-y-0 flex-col !gap-0 !overflow-hidden !rounded-none !border-0 !p-0 bg-background md:!inset-auto md:!left-1/2 md:!top-1/2 md:!h-[min(760px,calc(100dvh-3rem))] md:!w-[min(720px,calc(100vw-3rem))] md:!-translate-x-1/2 md:!-translate-y-1/2 md:!rounded-lg md:!border"
       >
         <DialogTitle className="sr-only">
           {editingItem ? `Edit ${type}` : `New ${type}`}
