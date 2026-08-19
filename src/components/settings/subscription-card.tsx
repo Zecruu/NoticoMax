@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { CreditCard, RefreshCw, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { CreditCard, ExternalLink as ExternalLinkIcon, RefreshCw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -10,12 +10,17 @@ import {
   presentPaywall,
   restorePurchases,
 } from "@/lib/iap/revenuecat-client";
+import {
+  getSubscriptionPlanName,
+  refreshEntitlementWithRetries,
+} from "@/lib/iap/subscription-billing";
+import { openInBrowser } from "@/lib/capacitor/auth-helpers";
 import { toast } from "@/lib/native-toast";
 
 interface SubscriptionCardProps {
   isIOSBilling: boolean;
   isPro: boolean;
-  onRefresh: () => Promise<void>;
+  onRefresh: () => Promise<boolean>;
 }
 
 interface SubscriptionStatus {
@@ -24,21 +29,64 @@ interface SubscriptionStatus {
   productId: string | null;
 }
 
-const PLAN_NAMES: Record<string, string> = {
-  "com.noticomax.app.plus.monthly": "NoticoMax Plus",
-  "com.noticomax.app.platinum.monthly": "NoticoMax Platinum",
-  "com.noticomax.app.maxxed.monthly": "NoticoMax MAXXED",
-  "com.noticomax.pro.monthly": "NoticoMax Pro",
-};
+interface PublicLinkProps {
+  children: ReactNode;
+  className?: string;
+  href: string;
+  native: boolean;
+}
+
+function PublicLink({ children, className, href, native }: PublicLinkProps) {
+  const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (!native) return;
+    event.preventDefault();
+    void openInBrowser(href)
+      .then((opened) => {
+        if (!opened) toast.error("Unable to open this link");
+      })
+      .catch((error) => {
+        console.error("[subscription] external link failed", error);
+        toast.error("Unable to open this link");
+      });
+  };
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={className}
+      onClick={handleClick}
+    >
+      {children}
+    </a>
+  );
+}
 
 export function SubscriptionCard({ isIOSBilling, isPro, onRefresh }: SubscriptionCardProps) {
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
   const [action, setAction] = useState<"paywall" | "manage" | "restore" | null>(null);
+  const mountedRef = useRef(false);
+  const retryTimersRef = useRef(new Map<number, (mounted: boolean) => void>());
+
+  useEffect(() => {
+    const retryTimers = retryTimersRef.current;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      for (const [timerId, resolve] of retryTimers) {
+        window.clearTimeout(timerId);
+        resolve(false);
+      }
+      retryTimers.clear();
+    };
+  }, []);
 
   const loadStatus = useCallback(async () => {
     if (!isIOSBilling) return;
     try {
-      setStatus(await getSubscriptionStatus());
+      const nextStatus = await getSubscriptionStatus();
+      if (mountedRef.current) setStatus(nextStatus);
     } catch (error) {
       console.warn("[subscription] failed to load RevenueCat status", error);
     }
@@ -48,27 +96,46 @@ export function SubscriptionCard({ isIOSBilling, isPro, onRefresh }: Subscriptio
     void loadStatus();
   }, [loadStatus]);
 
+  const waitForRetry = useCallback((delayMs: number) => {
+    return new Promise<boolean>((resolve) => {
+      if (!mountedRef.current) {
+        resolve(false);
+        return;
+      }
+      const timerId = window.setTimeout(() => {
+        retryTimersRef.current.delete(timerId);
+        resolve(mountedRef.current);
+      }, delayMs);
+      retryTimersRef.current.set(timerId, resolve);
+    });
+  }, []);
+
   const refreshAccess = async () => {
     await loadStatus();
-    await onRefresh();
-    window.setTimeout(() => void onRefresh(), 1500);
+    return refreshEntitlementWithRetries(onRefresh, waitForRetry);
   };
 
   const handlePaywall = async () => {
     setAction("paywall");
     try {
       const outcome = await presentPaywall();
+      if (!mountedRef.current) return;
       if (outcome === "purchased" || outcome === "restored") {
-        await refreshAccess();
-        toast.success(outcome === "purchased" ? "Subscription activated" : "Purchases restored");
+        const accessReady = await refreshAccess();
+        if (!mountedRef.current) return;
+        if (accessReady) {
+          toast.success(outcome === "purchased" ? "Subscription activated" : "Purchases restored");
+        } else {
+          toast.info("Purchase confirmed. Lyte and sync are still activating.");
+        }
       } else if (outcome === "error" || outcome === "not_presented") {
         toast.error("Unable to open subscription plans");
       }
     } catch (error) {
       console.error("[subscription] paywall failed", error);
-      toast.error("Unable to open subscription plans");
+      if (mountedRef.current) toast.error("Unable to open subscription plans");
     } finally {
-      setAction(null);
+      if (mountedRef.current) setAction(null);
     }
   };
 
@@ -76,34 +143,44 @@ export function SubscriptionCard({ isIOSBilling, isPro, onRefresh }: Subscriptio
     setAction("manage");
     try {
       await presentCustomerCenter();
-      await refreshAccess();
+      if (!mountedRef.current) return;
+      await loadStatus();
+      await onRefresh();
     } catch (error) {
       console.error("[subscription] customer center failed", error);
-      toast.error("Unable to open subscription management");
+      if (mountedRef.current) toast.error("Unable to open subscription management");
     } finally {
-      setAction(null);
+      if (mountedRef.current) setAction(null);
     }
   };
 
   const handleRestore = async () => {
     setAction("restore");
     try {
-      if (await restorePurchases()) {
-        await refreshAccess();
-        toast.success("Purchases restored");
+      const restored = await restorePurchases();
+      if (!mountedRef.current) return;
+      if (restored) {
+        const accessReady = await refreshAccess();
+        if (!mountedRef.current) return;
+        if (accessReady) {
+          toast.success("Purchases restored");
+        } else {
+          toast.info("Purchase restored. Lyte and sync are still activating.");
+        }
       } else {
         toast.info("No active subscription was found");
       }
     } catch (error) {
       console.error("[subscription] restore failed", error);
-      toast.error("Unable to restore purchases");
+      if (mountedRef.current) toast.error("Unable to restore purchases");
     } finally {
-      setAction(null);
+      if (mountedRef.current) setAction(null);
     }
   };
 
   const active = status?.proActive || isPro;
-  const planName = status?.productId ? PLAN_NAMES[status.productId] ?? "NoticoMax subscription" : null;
+  const planName = getSubscriptionPlanName(status?.productId ?? null);
+  const serverAccessPending = Boolean(status?.proActive && !isPro);
   const renewalDate = status?.expiresAt
     ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(status.expiresAt))
     : null;
@@ -122,7 +199,9 @@ export function SubscriptionCard({ isIOSBilling, isPro, onRefresh }: Subscriptio
             <p className="text-sm font-medium">{active ? planName ?? "Pro access active" : "Free plan"}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
               {active
-                ? renewalDate
+                ? serverAccessPending
+                  ? "Purchase confirmed. Lyte and sync are still activating."
+                  : renewalDate
                   ? `Renews or expires ${renewalDate}`
                   : "Lyte and online sync are unlocked."
                 : "Choose Plus, Platinum, or MAXXED for Lyte and online sync."}
@@ -171,25 +250,34 @@ export function SubscriptionCard({ isIOSBilling, isPro, onRefresh }: Subscriptio
             </Button>
           </div>
         ) : (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">
-              Apple subscriptions can be purchased and managed in NoticoMax on iPhone or iPad.
-            </p>
-            <Button variant="outline" className="min-h-11" asChild>
-              <a href="https://noticomax.com/pricing" target="_blank" rel="noopener noreferrer">
-                View plan details
-              </a>
-            </Button>
-          </div>
+          <p className="text-xs text-muted-foreground">
+            Apple subscriptions can be purchased and managed in NoticoMax on iPhone or iPad.
+          </p>
         )}
 
-        <div className="flex gap-4 border-t pt-3 text-xs text-muted-foreground">
-          <a href="https://noticomax.com/terms" target="_blank" rel="noopener noreferrer" className="hover:text-foreground">
+        <div className="flex flex-wrap gap-x-4 border-t pt-1 text-xs text-muted-foreground">
+          <PublicLink
+            href="https://noticomax.com/pricing"
+            native={isIOSBilling}
+            className="inline-flex min-h-11 items-center gap-1.5 hover:text-foreground"
+          >
+            <ExternalLinkIcon className="h-3.5 w-3.5" />
+            Plan details
+          </PublicLink>
+          <PublicLink
+            href="https://noticomax.com/terms"
+            native={isIOSBilling}
+            className="inline-flex min-h-11 items-center hover:text-foreground"
+          >
             Terms of Use
-          </a>
-          <a href="https://noticomax.com/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-foreground">
+          </PublicLink>
+          <PublicLink
+            href="https://noticomax.com/privacy"
+            native={isIOSBilling}
+            className="inline-flex min-h-11 items-center hover:text-foreground"
+          >
             Privacy Policy
-          </a>
+          </PublicLink>
         </div>
       </CardContent>
     </Card>

@@ -117,7 +117,7 @@ export function useLicense() {
       import("@/lib/iap/revenuecat-client")
         .then(({ resetIAPUser }) => resetIAPUser())
         .catch(() => { /* iap optional */ });
-      return;
+      return false;
     }
 
     // We have a local session. Seed UI from it + cached entitlements right
@@ -136,13 +136,16 @@ export function useLicense() {
       if (raw) cachedEntitlements = JSON.parse(raw) as ComputedEntitlements;
     } catch {}
     setEntitlements(cachedEntitlements);
+    let refreshedProActive = cachedEntitlements.proActive;
 
     import("@/lib/iap/revenuecat-client")
       .then(({ identifyIAPUser }) => identifyIAPUser(cachedUserId))
       .catch(() => { /* iap optional */ });
 
     // Skip the server hit when we know we're offline.
-    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      return refreshedProActive;
+    }
 
     // Primary path: query entitlements directly via the Supabase client.
     // This uses the bearer JWT (not cookies) so it survives any SSR/cookie
@@ -172,6 +175,7 @@ export function useLicense() {
           storagePlan: (ent?.storage_plan as ComputedEntitlements["storagePlan"]) ?? "free",
           storageBytesUsed: ent?.storage_bytes_used ?? 0,
         };
+        refreshedProActive = computed.proActive;
         setEntitlements(computed);
         try { localStorage.setItem(ENTITLEMENTS_KEY, JSON.stringify(computed)); } catch {}
       }
@@ -184,6 +188,7 @@ export function useLicense() {
     const result = await fetchMe();
     if (result.kind === "ok" && result.data.authenticated) {
       const ent = result.data.entitlements ?? FREE_ENTITLEMENTS;
+      refreshedProActive = ent.proActive;
       setEntitlements(ent);
       try { localStorage.setItem(ENTITLEMENTS_KEY, JSON.stringify(ent)); } catch {}
     } else if (result.kind === "unauthenticated") {
@@ -195,8 +200,10 @@ export function useLicense() {
       import("@/lib/iap/revenuecat-client")
         .then(({ resetIAPUser }) => resetIAPUser())
         .catch(() => { /* iap optional */ });
+      refreshedProActive = false;
     }
     // network-error → silently keep whatever the primary path set
+    return refreshedProActive;
   }, []);
 
   // Subscribe to Supabase auth state and seed initial state.

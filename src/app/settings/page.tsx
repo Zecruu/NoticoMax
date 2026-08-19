@@ -46,7 +46,7 @@ export default function SettingsPage() {
   const [savingPassword, setSavingPassword] = useState(false);
   const [licenseInput, setLicenseInput] = useState("");
   const [activating, setActivating] = useState(false);
-  const isIOSBilling = typeof window !== "undefined" && isIOS();
+  const [isIOSBilling, setIsIOSBilling] = useState(false);
 
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -63,6 +63,10 @@ export default function SettingsPage() {
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
   const sidebarPrefs = useSidebarPrefs();
+
+  useEffect(() => {
+    setIsIOSBilling(isIOS());
+  }, []);
 
   useEffect(() => {
     if (window.electronAPI?.isElectron) {

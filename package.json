@@ -10,6 +10,7 @@
     "lint": "eslint",
     "check:note-folders": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/check-note-folder-contract.mjs",
     "check:external-browser": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/check-external-browser-contract.mjs",
+    "check:subscription-billing": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/check-subscription-billing-contract.mjs",
     "electron:dev": "concurrently \"next dev -p 5467\" \"wait-on http://localhost:5467 && NODE_ENV=development electron .\"",
     "electron:build": "electron-builder --win --publish never",
     "electron:build:mac": "electron-builder --mac --publish never && node scripts/notarize-dmg.js",
