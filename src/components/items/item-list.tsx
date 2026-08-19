@@ -69,102 +69,117 @@ export function ItemList({
       (item) => item.type === "url" && getUrlCategoryLabel(item.tags) === activeCategory,
     );
   }, [activeCategory, activeFilter, items]);
-
-  if (loading) {
-    return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-4 md:p-6">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div
-            key={i}
-            className="h-36 rounded-xl bg-muted animate-pulse"
-          />
-        ))}
-      </div>
-    );
-  }
-
   const addBtn = addButtonConfig[activeFilter];
-
-  if (items.length === 0) {
-    const key = activeFolder ? "folder" : activeFilter;
-    const empty = emptyMessages[key] || emptyMessages.all;
-    const Icon = empty.icon;
-
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-        <Icon className="h-12 w-12 mb-4 opacity-40" />
-        <p className="text-sm">{empty.message}</p>
-        {activeFolder && onCreateNew && (
-          <Button size="sm" className="mt-4 gap-1.5" onClick={onCreateNew}>
-            <Plus className="h-3.5 w-3.5" />
-            Add Item
-          </Button>
-        )}
-        {!activeFolder && addBtn && onCreateWithType && (
-          <Button size="sm" className="mt-4 gap-1.5" onClick={() => onCreateWithType(addBtn.type)}>
-            <Plus className="h-3.5 w-3.5" />
-            {addBtn.label}
-          </Button>
-        )}
-        {!activeFolder && !addBtn && onCreateNew && (
-          <Button size="sm" className="mt-4 gap-1.5" onClick={onCreateNew}>
-            <Plus className="h-3.5 w-3.5" />
-            Add Item
-          </Button>
-        )}
-      </div>
-    );
-  }
+  const activeFolderRecord = activeFolder ? folderMap.get(activeFolder) : undefined;
+  const pageTitle = activeFolderRecord?.name ?? ({
+    all: "All items",
+    note: "Notes",
+    url: "URLs",
+    reminder: "Reminders",
+  }[activeFilter] || "Items");
+  const countLabel = `${visibleItems.length} ${
+    activeFilter === "note"
+      ? visibleItems.length === 1 ? "note" : "notes"
+      : activeFilter === "url"
+        ? visibleItems.length === 1 ? "bookmark" : "bookmarks"
+        : activeFilter === "reminder"
+          ? visibleItems.length === 1 ? "reminder" : "reminders"
+          : visibleItems.length === 1 ? "item" : "items"
+  }`;
+  const emptyKey = activeFolder ? "folder" : activeFilter;
+  const empty = emptyMessages[emptyKey] || emptyMessages.all;
+  const EmptyIcon = empty.icon;
 
   return (
-    <div className="p-4 md:p-6 space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        {activeFilter === "url" ? (
-          <Select value={activeCategory} onValueChange={setActiveCategory}>
-            <SelectTrigger className="h-8 w-[min(11rem,55vw)]" aria-label="Filter bookmarks by category">
-              <SelectValue placeholder="All categories" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All categories</SelectItem>
-              {categoryOptions.map((category) => (
-                <SelectItem key={category} value={category}>{category}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : <span />}
-        {activeFolder && onCreateNew && (
-          <Button size="sm" variant="outline" className="gap-1.5" onClick={onCreateNew}>
-            <Plus className="h-3.5 w-3.5" />
-            Add Item
-          </Button>
-        )}
-        {!activeFolder && addBtn && onCreateWithType && (
-          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onCreateWithType(addBtn.type)}>
-            <Plus className="h-3.5 w-3.5" />
-            {addBtn.label}
-          </Button>
-        )}
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        {visibleItems.map((item) => (
-          <ItemCard
-            key={item.clientId}
-            item={item}
-            folder={item.folderId ? folderMap.get(item.folderId) : undefined}
-            onEdit={onEdit}
-            onDelete={onDelete}
-            onTogglePin={onTogglePin}
-            onToggleComplete={onToggleComplete}
-            onUpdateContent={onUpdateContent}
-          />
-        ))}
-        {visibleItems.length === 0 && activeFilter === "url" && (
-          <div className="py-14 text-center text-sm text-muted-foreground">
-            No bookmarks in {activeCategory}.
+    <div className="pb-4 md:space-y-4 md:p-6">
+      <div className="px-4 py-4 md:px-0 md:py-0">
+        <div className="flex min-h-11 items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="truncate text-xl font-semibold md:text-2xl">{pageTitle}</h1>
+            <p className="text-xs text-muted-foreground">{loading ? "Loading…" : countLabel}</p>
+          </div>
+          <div className="hidden md:flex">
+            {activeFolder && onCreateNew && (
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={onCreateNew}>
+                <Plus className="h-3.5 w-3.5" />
+                Add Item
+              </Button>
+            )}
+            {!activeFolder && addBtn && onCreateWithType && (
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onCreateWithType(addBtn.type)}>
+                <Plus className="h-3.5 w-3.5" />
+                {addBtn.label}
+              </Button>
+            )}
+          </div>
+        </div>
+        {activeFilter === "url" && (
+          <div className="mt-2">
+            <Select value={activeCategory} onValueChange={setActiveCategory}>
+              <SelectTrigger className="h-9 w-[min(12rem,65vw)]" aria-label="Filter bookmarks by category">
+                <SelectValue placeholder="All categories" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All categories</SelectItem>
+                {categoryOptions.map((category) => (
+                  <SelectItem key={category} value={category}>{category}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
       </div>
+
+      {loading ? (
+        <div className="divide-y border-y md:grid md:grid-cols-2 md:gap-3 md:divide-y-0 md:border-0 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div key={index} className="h-24 animate-pulse bg-muted/50 md:h-32 md:rounded-lg" />
+          ))}
+        </div>
+      ) : items.length === 0 ? (
+        <div className="flex flex-col items-center justify-center px-6 py-20 text-center text-muted-foreground">
+          <EmptyIcon className="mb-4 h-10 w-10 opacity-40" />
+          <p className="text-sm">{empty.message}</p>
+          {activeFolder && onCreateNew && (
+            <Button size="sm" className="mt-4 gap-1.5" onClick={onCreateNew}>
+              <Plus className="h-3.5 w-3.5" />
+              Add Item
+            </Button>
+          )}
+          {!activeFolder && addBtn && onCreateWithType && (
+            <Button size="sm" className="mt-4 gap-1.5" onClick={() => onCreateWithType(addBtn.type)}>
+              <Plus className="h-3.5 w-3.5" />
+              {addBtn.label}
+            </Button>
+          )}
+          {!activeFolder && !addBtn && onCreateNew && (
+            <Button size="sm" className="mt-4 gap-1.5" onClick={onCreateNew}>
+              <Plus className="h-3.5 w-3.5" />
+              Add Item
+            </Button>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-col border-t md:gap-1.5 md:border-0">
+          {visibleItems.map((item) => (
+            <ItemCard
+              key={item.clientId}
+              item={item}
+              folder={item.folderId ? folderMap.get(item.folderId) : undefined}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onTogglePin={onTogglePin}
+              onToggleComplete={onToggleComplete}
+              onUpdateContent={onUpdateContent}
+            />
+          ))}
+          {visibleItems.length === 0 && activeFilter === "url" && (
+            <div className="py-14 text-center text-sm text-muted-foreground">
+              No bookmarks in {activeCategory}.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

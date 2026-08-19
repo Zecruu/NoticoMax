@@ -62,14 +62,13 @@ function formatRelative(iso: string): string {
   return d.toLocaleDateString([], { month: "numeric", day: "numeric", year: "2-digit" });
 }
 
-// First non-empty line of content with markdown prefixes stripped, for the
-// muted preview snippet beside the date.
+// Compact plain-text preview with markdown list prefixes removed.
 function firstLinePreview(content: string): string {
-  const line = content
+  return content
     .split("\n")
     .map((l) => l.replace(/^(?:- \[[ xX]\] |- |\d+\. |[a-z]\. |#+\s+)/, "").trim())
-    .find((l) => l.length > 0);
-  return line ?? "";
+    .filter(Boolean)
+    .join(" ");
 }
 
 // What "Copy" yields per item type. URLs hand back the link; everything
@@ -148,16 +147,22 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
   const hasTaskList = /^\s*[-*+]\s+\[[ xX]\]/m.test(item.content);
   const preview = item.type === "note" && !hasTaskList ? firstLinePreview(item.content) : "";
   const displayDate = formatRelative(item.updatedAt);
+  const handleOpen = (event: React.MouseEvent) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, a, [role='menuitem']")) return;
+    onEdit(item);
+  };
 
   return (
     <Card
+      onClick={handleOpen}
       className={cn(
-        "group relative transition-colors hover:bg-muted/40 rounded-lg",
-        item.pinned && "ring-1 ring-primary/20",
-        isOverdue && "ring-1 ring-destructive/30",
+        "group relative cursor-pointer gap-0 rounded-none border-x-0 border-t-0 py-0 shadow-none transition-colors hover:bg-muted/40 md:rounded-lg md:border md:shadow-sm",
+        item.pinned && "bg-primary/[0.03] md:ring-1 md:ring-primary/20",
+        isOverdue && "md:ring-1 md:ring-destructive/30",
       )}
     >
-      <div className="flex items-start gap-2 p-3">
+      <div className="flex min-h-20 items-start gap-2 px-4 py-3 md:min-h-0 md:p-3">
         {/* Reminder check toggle pulls to the very left so it lines up with the row */}
         {item.type === "reminder" && onToggleComplete && (
           <button
@@ -166,7 +171,7 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
               onToggleComplete(item.clientId, item.reminderCompleted || false);
             }}
             aria-label={item.reminderCompleted ? "Mark incomplete" : "Mark complete"}
-            className="mt-0.5 shrink-0 transition-transform active:scale-95"
+            className="-ml-2 flex h-11 w-11 shrink-0 items-center justify-center transition-transform active:scale-95 md:ml-0 md:mt-0.5 md:h-7 md:w-7"
           >
             {item.reminderCompleted ? (
               <CheckCircle2 className="h-5 w-5 text-green-500" />
@@ -185,11 +190,11 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
               )}
               <h3
                 className={cn(
-                  "font-semibold text-sm truncate",
+                  "truncate text-[15px] font-semibold md:text-sm",
                   item.reminderCompleted && "line-through text-muted-foreground",
                 )}
               >
-                {item.title}
+                {item.title || "Untitled note"}
               </h3>
             </div>
             {folder && (
@@ -203,15 +208,9 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
             )}
           </div>
 
-          {/* Date · preview line (Apple-Notes style) */}
+          {/* Date and type-specific timing metadata */}
           <div className="flex items-baseline gap-1.5 text-[11px] text-muted-foreground mt-0.5">
             <span className="shrink-0 tabular-nums">{displayDate}</span>
-            {preview && (
-              <>
-                <span aria-hidden>·</span>
-                <span className="truncate">{preview}</span>
-              </>
-            )}
             {item.type === "reminder" && item.reminderDate && (
               <>
                 <span aria-hidden>·</span>
@@ -231,6 +230,12 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
               </>
             )}
           </div>
+
+          {preview && (
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+              {preview}
+            </p>
+          )}
 
           {/* URL bookmarks: surface the link */}
           {item.type === "url" && item.url && (
@@ -272,13 +277,13 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
 
         </div>
 
-        {/* Right-side action column: maximize (open full-screen editor) + pencil + kebab */}
+        {/* Mobile keeps one 44px overflow target; desktop retains direct shortcuts. */}
         <div className="flex items-center gap-0.5 shrink-0 -mr-1">
           {hasExpandableContent && (
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              className="hidden h-7 w-7 text-muted-foreground hover:text-foreground md:inline-flex"
               onClick={(e) => {
                 e.stopPropagation();
                 onEdit(item);
@@ -292,7 +297,7 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            className="hidden h-7 w-7 text-muted-foreground hover:text-foreground md:inline-flex"
             onClick={(e) => {
               e.stopPropagation();
               onEdit(item);
@@ -305,7 +310,7 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            className="hidden h-7 w-7 text-muted-foreground hover:text-foreground md:inline-flex"
             onClick={handleCopy}
             aria-label="Copy"
             title={item.type === "url" ? "Copy URL" : "Copy note"}
@@ -317,7 +322,7 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                className="h-11 w-11 text-muted-foreground hover:text-foreground md:h-7 md:w-7"
                 aria-label="More"
               >
                 <MoreVertical className="h-3.5 w-3.5" />
@@ -325,6 +330,7 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem
+                className="min-h-11 md:min-h-0"
                 onClick={(e) => {
                   e.stopPropagation();
                   onTogglePin(item.clientId, item.pinned);
@@ -344,6 +350,7 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
               </DropdownMenuItem>
               {item.type === "reminder" && onToggleComplete && (
                 <DropdownMenuItem
+                  className="min-h-11 md:min-h-0"
                   onClick={(e) => {
                     e.stopPropagation();
                     onToggleComplete(item.clientId, item.reminderCompleted || false);
@@ -353,11 +360,12 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
                   {item.reminderCompleted ? "Mark incomplete" : "Mark complete"}
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem onClick={handleCopy}>
+              <DropdownMenuItem className="min-h-11 md:min-h-0" onClick={handleCopy}>
                 <Copy className="h-3.5 w-3.5 mr-2" />
                 {item.type === "url" ? "Copy URL" : "Copy"}
               </DropdownMenuItem>
               <DropdownMenuItem
+                className="min-h-11 md:min-h-0"
                 onClick={async (e) => {
                   e.stopPropagation();
                   try {
@@ -380,7 +388,7 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
                 Share
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="text-destructive"
+                className="min-h-11 text-destructive md:min-h-0"
                 onClick={(e) => {
                   e.stopPropagation();
                   if (confirm(`Move "${item.title}" to trash?`)) {

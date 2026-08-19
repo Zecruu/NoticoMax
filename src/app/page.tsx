@@ -312,6 +312,7 @@ export default function Dashboard() {
               onOpenLocations={() => setActiveView("locations")}
               onOpenPasswords={() => setActiveView("passwords")}
               onOpenFamily={() => setActiveView("family")}
+              onOpenItem={handleEdit}
               onCreateNew={handleCreateNew}
               familyPlanActive={entitlements?.familyPlanActive}
             />
