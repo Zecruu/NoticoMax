@@ -53,7 +53,7 @@ export async function showBannerAd(): Promise<void> {
     );
     await AdMob.showBanner({
       adId: getBannerAdUnitId(),
-      adSize: BannerAdSize.ADAPTIVE_BANNER,
+      adSize: BannerAdSize.BANNER,
       position: BannerAdPosition.BOTTOM_CENTER,
       margin: 0,
       isTesting: !process.env.NEXT_PUBLIC_ADMOB_IOS_BANNER_ID,

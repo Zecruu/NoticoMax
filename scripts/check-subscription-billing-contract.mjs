@@ -68,5 +68,17 @@ assert.match(revenueCatSource, /isPluginAvailable\("RevenueCatUI"\)/);
 assert.match(revenueCatSource, /withBillingTimeout\([\s\S]*Purchases\.getOfferings\(\)/);
 assert.match(revenueCatSource, /current\.availablePackages\.length === 0/);
 assert.match(revenueCatSource, /RevenueCatUI\.presentPaywall\(\{[\s\S]*offering/);
+assert.match(revenueCatSource, /addListener\("paywallDismissed"/);
+assert.match(revenueCatSource, /Promise\.race\(/);
+
+const homeSource = await readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8");
+assert.match(homeSource, /return \(\) => \{[\s\S]*hideBannerAd\(\)/);
+
+const admobSource = await readFile(
+  new URL("../src/lib/ads/admob-client.ts", import.meta.url),
+  "utf8",
+);
+assert.match(admobSource, /adSize: BannerAdSize\.BANNER/);
+assert.doesNotMatch(admobSource, /adSize: BannerAdSize\.ADAPTIVE_BANNER/);
 
 console.log("subscription billing contract: ok");

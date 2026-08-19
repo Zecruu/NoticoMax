@@ -130,6 +130,12 @@ export function SubscriptionCard({ isIOSBilling, isPro, onRefresh }: Subscriptio
         }
       } else if (outcome === "error" || outcome === "not_presented") {
         toast.error("Unable to open subscription plans");
+      } else if (outcome === "cancelled") {
+        // The RevenueCat Capacitor plugin can report dismissal before its
+        // presentation promise settles. Refresh quietly in case a completed
+        // purchase propagated through the native entitlement listener first.
+        await loadStatus();
+        await onRefresh();
       }
     } catch (error) {
       console.error("[subscription] paywall failed", error);

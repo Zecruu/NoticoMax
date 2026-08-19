@@ -90,7 +90,10 @@ export default function Dashboard() {
         await showBannerAd();
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      void import("@/lib/ads/admob-client").then(({ hideBannerAd }) => hideBannerAd());
+    };
   }, [isPro, isLoggedIn]);
 
   const {

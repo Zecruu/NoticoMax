@@ -186,15 +186,10 @@ async function loadRCUI() {
 
 export type PaywallOutcome = "purchased" | "restored" | "cancelled" | "not_presented" | "error";
 
-/** Present the RevenueCat-hosted paywall. */
-export async function presentPaywall(): Promise<PaywallOutcome> {
-  if (!isIOS()) return "not_presented";
-  const offering = await getCurrentOffering();
-  const { RevenueCatUI, PAYWALL_RESULT } = await loadRCUI();
-  const { result } = await RevenueCatUI.presentPaywall({
-    offering,
-    displayCloseButton: true,
-  });
+function mapPaywallResult(
+  result: string,
+  PAYWALL_RESULT: Record<string, string>,
+): PaywallOutcome {
   switch (result) {
     case PAYWALL_RESULT.PURCHASED: return "purchased";
     case PAYWALL_RESULT.RESTORED: return "restored";
@@ -205,23 +200,59 @@ export async function presentPaywall(): Promise<PaywallOutcome> {
   }
 }
 
+async function waitForPaywallResult(
+  RevenueCatUI: Awaited<ReturnType<typeof loadRCUI>>["RevenueCatUI"],
+  PAYWALL_RESULT: Awaited<ReturnType<typeof loadRCUI>>["PAYWALL_RESULT"],
+  presentation: Promise<{ result: string }>,
+): Promise<PaywallOutcome> {
+  let resolveDismissed: (() => void) | null = null;
+  const dismissed = new Promise<void>((resolve) => {
+    resolveDismissed = resolve;
+  });
+  const listener = await RevenueCatUI.addListener("paywallDismissed", () => {
+    resolveDismissed?.();
+  });
+
+  try {
+    return await Promise.race([
+      presentation.then(({ result }) => mapPaywallResult(result, PAYWALL_RESULT)),
+      dismissed.then(async () => {
+        // Give the native result callback a brief chance to report a purchase
+        // before treating a plain close gesture as cancellation.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        return "cancelled" as const;
+      }),
+    ]);
+  } finally {
+    await listener.remove();
+  }
+}
+
+/** Present the RevenueCat-hosted paywall. */
+export async function presentPaywall(): Promise<PaywallOutcome> {
+  if (!isIOS()) return "not_presented";
+  const offering = await getCurrentOffering();
+  const { RevenueCatUI, PAYWALL_RESULT } = await loadRCUI();
+  return waitForPaywallResult(
+    RevenueCatUI,
+    PAYWALL_RESULT,
+    RevenueCatUI.presentPaywall({ offering, displayCloseButton: true }),
+  );
+}
+
 /** Present the paywall only if the user does not already have Pro. */
 export async function presentPaywallIfNeeded(): Promise<PaywallOutcome> {
   if (!isIOS()) return "not_presented";
   const offering = await getCurrentOffering();
   const { RevenueCatUI, PAYWALL_RESULT } = await loadRCUI();
-  const { result } = await RevenueCatUI.presentPaywallIfNeeded({
-    requiredEntitlementIdentifier: PRO_ENTITLEMENT_ID,
-    offering,
-  });
-  switch (result) {
-    case PAYWALL_RESULT.PURCHASED: return "purchased";
-    case PAYWALL_RESULT.RESTORED: return "restored";
-    case PAYWALL_RESULT.CANCELLED: return "cancelled";
-    case PAYWALL_RESULT.NOT_PRESENTED: return "not_presented";
-    case PAYWALL_RESULT.ERROR: return "error";
-    default: return "error";
-  }
+  return waitForPaywallResult(
+    RevenueCatUI,
+    PAYWALL_RESULT,
+    RevenueCatUI.presentPaywallIfNeeded({
+      requiredEntitlementIdentifier: PRO_ENTITLEMENT_ID,
+      offering,
+    }),
+  );
 }
 
 /** Open RevenueCat's hosted Customer Center (manage subscription, refund, etc). */
