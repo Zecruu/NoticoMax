@@ -203,7 +203,7 @@ function mapPaywallResult(
 async function waitForPaywallResult(
   RevenueCatUI: Awaited<ReturnType<typeof loadRCUI>>["RevenueCatUI"],
   PAYWALL_RESULT: Awaited<ReturnType<typeof loadRCUI>>["PAYWALL_RESULT"],
-  presentation: Promise<{ result: string }>,
+  present: () => Promise<{ result: string }>,
 ): Promise<PaywallOutcome> {
   let resolveDismissed: (() => void) | null = null;
   const dismissed = new Promise<void>((resolve) => {
@@ -214,6 +214,9 @@ async function waitForPaywallResult(
   });
 
   try {
+    // Register the dismissal listener before asking native code to present.
+    // Fast close gestures can otherwise happen before JavaScript is listening.
+    const presentation = present();
     return await Promise.race([
       presentation.then(({ result }) => mapPaywallResult(result, PAYWALL_RESULT)),
       dismissed.then(async () => {
@@ -236,7 +239,7 @@ export async function presentPaywall(): Promise<PaywallOutcome> {
   return waitForPaywallResult(
     RevenueCatUI,
     PAYWALL_RESULT,
-    RevenueCatUI.presentPaywall({ offering, displayCloseButton: true }),
+    () => RevenueCatUI.presentPaywall({ offering, displayCloseButton: true }),
   );
 }
 
@@ -248,7 +251,7 @@ export async function presentPaywallIfNeeded(): Promise<PaywallOutcome> {
   return waitForPaywallResult(
     RevenueCatUI,
     PAYWALL_RESULT,
-    RevenueCatUI.presentPaywallIfNeeded({
+    () => RevenueCatUI.presentPaywallIfNeeded({
       requiredEntitlementIdentifier: PRO_ENTITLEMENT_ID,
       offering,
     }),

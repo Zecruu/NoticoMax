@@ -29,6 +29,8 @@ interface SubscriptionStatus {
   productId: string | null;
 }
 
+const PAYWALL_OPENING_STATE_MS = 3_000;
+
 interface PublicLinkProps {
   children: ReactNode;
   className?: string;
@@ -68,12 +70,19 @@ export function SubscriptionCard({ isIOSBilling, isPro, onRefresh }: Subscriptio
   const [action, setAction] = useState<"paywall" | "manage" | "restore" | null>(null);
   const mountedRef = useRef(false);
   const retryTimersRef = useRef(new Map<number, (mounted: boolean) => void>());
+  const paywallOpeningTimerRef = useRef<number | null>(null);
+  const paywallRunRef = useRef(0);
 
   useEffect(() => {
     const retryTimers = retryTimersRef.current;
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      paywallRunRef.current += 1;
+      if (paywallOpeningTimerRef.current !== null) {
+        window.clearTimeout(paywallOpeningTimerRef.current);
+        paywallOpeningTimerRef.current = null;
+      }
       for (const [timerId, resolve] of retryTimers) {
         window.clearTimeout(timerId);
         resolve(false);
@@ -116,10 +125,21 @@ export function SubscriptionCard({ isIOSBilling, isPro, onRefresh }: Subscriptio
   };
 
   const handlePaywall = async () => {
+    const runId = paywallRunRef.current + 1;
+    paywallRunRef.current = runId;
     setAction("paywall");
+    if (paywallOpeningTimerRef.current !== null) {
+      window.clearTimeout(paywallOpeningTimerRef.current);
+    }
+    paywallOpeningTimerRef.current = window.setTimeout(() => {
+      paywallOpeningTimerRef.current = null;
+      if (mountedRef.current && paywallRunRef.current === runId) {
+        setAction(null);
+      }
+    }, PAYWALL_OPENING_STATE_MS);
     try {
       const outcome = await presentPaywall();
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || paywallRunRef.current !== runId) return;
       if (outcome === "purchased" || outcome === "restored") {
         const accessReady = await refreshAccess();
         if (!mountedRef.current) return;
@@ -139,9 +159,17 @@ export function SubscriptionCard({ isIOSBilling, isPro, onRefresh }: Subscriptio
       }
     } catch (error) {
       console.error("[subscription] paywall failed", error);
-      if (mountedRef.current) toast.error("Unable to open subscription plans");
+      if (mountedRef.current && paywallRunRef.current === runId) {
+        toast.error("Unable to open subscription plans");
+      }
     } finally {
-      if (mountedRef.current) setAction(null);
+      if (paywallRunRef.current === runId) {
+        if (paywallOpeningTimerRef.current !== null) {
+          window.clearTimeout(paywallOpeningTimerRef.current);
+          paywallOpeningTimerRef.current = null;
+        }
+        if (mountedRef.current) setAction(null);
+      }
     }
   };
 

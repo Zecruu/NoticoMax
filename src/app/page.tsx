@@ -77,14 +77,14 @@ export default function Dashboard() {
 
   const { isActivated, isPro, isLoading, isLoggedIn, entitlements, login, loginWithApple, register } = useLicense();
 
-  // Bottom banner ads for non-Pro users on native platforms only.
+  // Bottom banner ads for non-Pro users on the dashboard only.
   // Pro removes ads (entitlements.adsRemoved). Web/Electron get no ads.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const { showBannerAd, hideBannerAd } = await import("@/lib/ads/admob-client");
       if (cancelled) return;
-      if (isPro || !isLoggedIn) {
+      if (isPro || !isLoggedIn || activeView !== "dashboard") {
         await hideBannerAd();
       } else {
         await showBannerAd();
@@ -92,9 +92,14 @@ export default function Dashboard() {
     })();
     return () => {
       cancelled = true;
+    };
+  }, [activeView, isPro, isLoggedIn]);
+
+  useEffect(() => {
+    return () => {
       void import("@/lib/ads/admob-client").then(({ hideBannerAd }) => hideBannerAd());
     };
-  }, [isPro, isLoggedIn]);
+  }, []);
 
   const {
     items,

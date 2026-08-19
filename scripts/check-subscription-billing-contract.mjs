@@ -57,6 +57,8 @@ const cardSource = await readFile(
 assert.match(cardSource, /if \(!isIOSBilling\) return;[\s\S]*getSubscriptionStatus\(\)/);
 assert.match(cardSource, /openInBrowser\(href\)/);
 assert.match(cardSource, /window\.clearTimeout\(timerId\)[\s\S]*resolve\(false\)/);
+assert.match(cardSource, /PAYWALL_OPENING_STATE_MS = 3_000/);
+assert.match(cardSource, /paywallOpeningTimerRef[\s\S]*window\.clearTimeout/);
 assert.doesNotMatch(cardSource, /com\.noticomax\.pro\.monthly/);
 
 const revenueCatSource = await readFile(
@@ -69,10 +71,13 @@ assert.match(revenueCatSource, /withBillingTimeout\([\s\S]*Purchases\.getOfferin
 assert.match(revenueCatSource, /current\.availablePackages\.length === 0/);
 assert.match(revenueCatSource, /RevenueCatUI\.presentPaywall\(\{[\s\S]*offering/);
 assert.match(revenueCatSource, /addListener\("paywallDismissed"/);
+assert.match(revenueCatSource, /const presentation = present\(\)/);
 assert.match(revenueCatSource, /Promise\.race\(/);
 
 const homeSource = await readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8");
 assert.match(homeSource, /return \(\) => \{[\s\S]*hideBannerAd\(\)/);
+assert.match(homeSource, /activeView !== "dashboard"/);
+assert.match(homeSource, /\[activeView, isPro, isLoggedIn\]/);
 
 const admobSource = await readFile(
   new URL("../src/lib/ads/admob-client.ts", import.meta.url),
