@@ -24,12 +24,7 @@ import { ChevronLeft, X, Eye, Pencil, List, ListOrdered, ALargeSmall, ListChecks
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
-import {
-  DEFAULT_URL_CATEGORIES,
-  getUrlCategoryLabel,
-  withUrlCategory,
-  withoutUrlCategoryTags,
-} from "@/lib/url-categories";
+import { withoutUrlCategoryTags } from "@/lib/url-categories";
 
 interface ItemDialogProps {
   open: boolean;
@@ -63,9 +58,6 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
   const [recurrence, setRecurrence] = useState<RecurrenceRule>("none");
   const [tagInput, setTagInput] = useState("");
   const [tags, setTags] = useState<string[]>([]);
-  const [urlCategory, setUrlCategory] = useState("General");
-  const [customCategoryOpen, setCustomCategoryOpen] = useState(false);
-  const [customCategory, setCustomCategory] = useState("");
   const [pinned, setPinned] = useState(false);
   const [folderId, setFolderId] = useState<string | undefined>(undefined);
   const [previewing, setPreviewing] = useState(false);
@@ -211,7 +203,6 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
         editingItem.reminderDate ? toLocalDatetimeValue(editingItem.reminderDate) : "",
       );
       setTags(withoutUrlCategoryTags(editingItem.tags));
-      setUrlCategory(getUrlCategoryLabel(editingItem.tags));
       setPinned(editingItem.pinned);
       setFolderId(editingItem.folderId || undefined);
       setRecurrence(editingItem.recurrence || "none");
@@ -222,7 +213,6 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
       setUrl("");
       setReminderDate(defaultType === "reminder" && defaultReminderDate ? defaultReminderDate : "");
       setTags([]);
-      setUrlCategory("General");
       setPinned(false);
       setFolderId(defaultFolderId || undefined);
       setRecurrence("none");
@@ -230,8 +220,6 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
     setPreviewing(false);
     setActiveListMode(null);
     setDetailsOpen(false);
-    setCustomCategoryOpen(false);
-    setCustomCategory("");
     closingRef.current = false;
   }, [editingItem, open, defaultFolderId, defaultType, defaultReminderDate]);
 
@@ -278,7 +266,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
       reminderDate: reminderIso,
       reminderCompleted: editingItem?.reminderCompleted || false,
       recurrence: type === "reminder" ? recurrence : undefined,
-      tags: type === "url" ? withUrlCategory(tags, urlCategory) : tags,
+      tags,
       pinned,
       color: editingItem?.color,
       folderId: folderId || undefined,
@@ -348,14 +336,6 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
     } catch {
       toast.error("Failed to create share link");
     }
-  };
-
-  const applyCustomCategory = () => {
-    const value = customCategory.trim();
-    if (!value) return;
-    setUrlCategory(value.slice(0, 40));
-    setCustomCategory("");
-    setCustomCategoryOpen(false);
   };
 
   const detailsContent = (
@@ -616,72 +596,16 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
             />
 
             {type === "url" && (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="url">URL</Label>
-                  <Input
-                    id="url"
-                    type="url"
-                    inputMode="url"
-                    placeholder="https://..."
-                    value={url}
-                    onChange={(event) => setUrl(event.target.value)}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Category</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {DEFAULT_URL_CATEGORIES.map((category) => (
-                      <button
-                        key={category}
-                        type="button"
-                        onClick={() => {
-                          setUrlCategory(category);
-                          setCustomCategoryOpen(false);
-                        }}
-                        className={cn(
-                          "h-8 rounded-md border px-3 text-xs font-medium transition-colors",
-                          urlCategory === category
-                            ? "border-primary bg-primary text-primary-foreground"
-                            : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
-                        )}
-                      >
-                        {category}
-                      </button>
-                    ))}
-                    {!DEFAULT_URL_CATEGORIES.includes(urlCategory as typeof DEFAULT_URL_CATEGORIES[number]) && (
-                      <button type="button" className="h-8 rounded-md border border-primary bg-primary px-3 text-xs font-medium text-primary-foreground">
-                        {urlCategory}
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setCustomCategoryOpen((value) => !value)}
-                      className="h-8 rounded-md border px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    >
-                      Custom
-                    </button>
-                  </div>
-                  {customCategoryOpen && (
-                    <div className="flex gap-2">
-                      <Input
-                        value={customCategory}
-                        onChange={(event) => setCustomCategory(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            applyCustomCategory();
-                          }
-                        }}
-                        placeholder="Category name"
-                        maxLength={40}
-                        autoFocus
-                      />
-                      <Button type="button" variant="secondary" onClick={applyCustomCategory}>Set</Button>
-                    </div>
-                  )}
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="url">URL</Label>
+                <Input
+                  id="url"
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://..."
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                />
               </div>
             )}
 

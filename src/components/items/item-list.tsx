@@ -1,12 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
 import { type LocalItem, type LocalFolder } from "@/lib/db/indexed-db";
 import { ItemCard } from "./item-card";
 import { Button } from "@/components/ui/button";
 import { Bell, ChevronLeft, FileText, FolderOpen, Inbox, Link2, Plus } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getUrlCategoryLabel } from "@/lib/url-categories";
 
 interface ItemListProps {
   items: LocalItem[];
@@ -53,24 +50,8 @@ export function ItemList({
   onCreateNew,
   onBackToFolders,
 }: ItemListProps) {
-  const [activeCategory, setActiveCategory] = useState("all");
   // Build a folder lookup map
   const folderMap = new Map(folders.map((f) => [f.clientId, f]));
-  const categoryOptions = useMemo(() => {
-    const categories = new Set(
-      items
-        .filter((item) => item.type === "url")
-        .map((item) => getUrlCategoryLabel(item.tags)),
-    );
-    if (activeCategory !== "all") categories.add(activeCategory);
-    return Array.from(categories).sort((a, b) => a.localeCompare(b));
-  }, [activeCategory, items]);
-  const visibleItems = useMemo(() => {
-    if (activeFilter !== "url" || activeCategory === "all") return items;
-    return items.filter(
-      (item) => item.type === "url" && getUrlCategoryLabel(item.tags) === activeCategory,
-    );
-  }, [activeCategory, activeFilter, items]);
   const addBtn = addButtonConfig[activeFilter];
   const activeFolderRecord = activeFolder ? folderMap.get(activeFolder) : undefined;
   const pageTitle = activeFolderRecord?.name ?? ({
@@ -79,14 +60,14 @@ export function ItemList({
     url: "URLs",
     reminder: "Reminders",
   }[activeFilter] || "Items");
-  const countLabel = `${visibleItems.length} ${
+  const countLabel = `${items.length} ${
     activeFilter === "note"
-      ? visibleItems.length === 1 ? "note" : "notes"
+      ? items.length === 1 ? "note" : "notes"
       : activeFilter === "url"
-        ? visibleItems.length === 1 ? "bookmark" : "bookmarks"
+        ? items.length === 1 ? "bookmark" : "bookmarks"
         : activeFilter === "reminder"
-          ? visibleItems.length === 1 ? "reminder" : "reminders"
-          : visibleItems.length === 1 ? "item" : "items"
+          ? items.length === 1 ? "reminder" : "reminders"
+          : items.length === 1 ? "item" : "items"
   }`;
   const emptyKey = activeFolder ? "folder" : activeFilter;
   const empty = emptyMessages[emptyKey] || emptyMessages.all;
@@ -97,7 +78,7 @@ export function ItemList({
       <div className="px-4 py-4 md:px-0 md:py-0">
         <div className="flex min-h-11 items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-1">
-            {activeFilter === "note" && activeFolder && onBackToFolders && (
+            {(activeFilter === "note" || activeFilter === "url") && activeFolder && onBackToFolders && (
               <button
                 type="button"
                 onClick={onBackToFolders}
@@ -127,21 +108,6 @@ export function ItemList({
             )}
           </div>
         </div>
-        {activeFilter === "url" && (
-          <div className="mt-2">
-            <Select value={activeCategory} onValueChange={setActiveCategory}>
-              <SelectTrigger className="h-9 w-[min(12rem,65vw)]" aria-label="Filter bookmarks by category">
-                <SelectValue placeholder="All categories" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All categories</SelectItem>
-                {categoryOptions.map((category) => (
-                  <SelectItem key={category} value={category}>{category}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
       </div>
 
       {loading ? (
@@ -175,7 +141,7 @@ export function ItemList({
         </div>
       ) : (
         <div className="flex flex-col border-t md:gap-1.5 md:border-0">
-          {visibleItems.map((item) => (
+          {items.map((item) => (
             <ItemCard
               key={item.clientId}
               item={item}
@@ -187,11 +153,6 @@ export function ItemList({
               onUpdateContent={onUpdateContent}
             />
           ))}
-          {visibleItems.length === 0 && activeFilter === "url" && (
-            <div className="py-14 text-center text-sm text-muted-foreground">
-              No bookmarks in {activeCategory}.
-            </div>
-          )}
         </div>
       )}
     </div>
