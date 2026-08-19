@@ -5,6 +5,28 @@ const PLAN_NAMES: Record<string, string> = {
 };
 
 export const ENTITLEMENT_REFRESH_DELAYS_MS = [0, 1000, 2000, 4000] as const;
+export const BILLING_PREFLIGHT_TIMEOUT_MS = 12_000;
+
+export function withBillingTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs = BILLING_PREFLIGHT_TIMEOUT_MS,
+  message = "Subscription plans took too long to load",
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+
+    operation.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 export function getSubscriptionPlanName(productId: string | null): string | null {
   if (!productId) return null;

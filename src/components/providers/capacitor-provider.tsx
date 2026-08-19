@@ -28,7 +28,9 @@ export function CapacitorProvider({ children }: { children: React.ReactNode }) {
 
     if (isIOS()) {
       import("@/lib/iap/revenuecat-client").then(({ initIAP }) => {
-        initIAP();
+        void initIAP().catch((error) => {
+          console.warn("[iap] RevenueCat initialization failed", error);
+        });
       });
     }
 

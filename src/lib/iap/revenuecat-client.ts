@@ -12,6 +12,7 @@
  *   5. On logout:   resetIAPUser() — back to anonymous
  */
 import { isIOS } from "@/lib/platform";
+import { withBillingTimeout } from "@/lib/iap/subscription-billing";
 
 // IMPORTANT: Must match the entitlement identifier configured in the RevenueCat
 // dashboard exactly (case-sensitive).
@@ -22,6 +23,9 @@ let initPromise: Promise<void> | null = null;
 async function loadPurchases() {
   if (!isIOS()) {
     throw new Error("RevenueCat is only available on iOS");
+  }
+  if (!window.Capacitor?.isPluginAvailable("Purchases")) {
+    throw new Error("RevenueCat Purchases is not available in this app build");
   }
   const mod = await import("@revenuecat/purchases-capacitor");
   return mod.Purchases;
@@ -37,15 +41,19 @@ export async function initIAP(): Promise<void> {
 
   const apiKey = process.env.NEXT_PUBLIC_REVENUECAT_IOS_KEY;
   if (!apiKey) {
-    console.warn("[iap] NEXT_PUBLIC_REVENUECAT_IOS_KEY not set — IAP disabled");
-    return;
+    throw new Error("RevenueCat is not configured for this app build");
   }
 
   initPromise = (async () => {
     const Purchases = await loadPurchases();
     await Purchases.configure({ apiKey });
   })();
-  return initPromise;
+  try {
+    await initPromise;
+  } catch (error) {
+    initPromise = null;
+    throw error;
+  }
 }
 
 /** Alias the current (likely anonymous) RC user to our backend user id. */
@@ -73,14 +81,25 @@ export interface IAPPackage {
   period: string | null;        // e.g. "P1M"
 }
 
-/** Fetch the configured offering from RevenueCat. Returns null if unavailable. */
-export async function getOfferings(): Promise<IAPPackage[] | null> {
-  if (!isIOS()) return null;
+async function getCurrentOffering() {
   await initIAP();
   const Purchases = await loadPurchases();
-  const result = await Purchases.getOfferings();
+  const result = await withBillingTimeout(
+    Purchases.getOfferings(),
+    undefined,
+    "Subscription plans took too long to load from the App Store",
+  );
   const current = result.current;
-  if (!current) return null;
+  if (!current || current.availablePackages.length === 0) {
+    throw new Error("No purchasable subscription plans are available from the App Store");
+  }
+  return current;
+}
+
+/** Fetch the configured offering from RevenueCat. Returns null on web. */
+export async function getOfferings(): Promise<IAPPackage[] | null> {
+  if (!isIOS()) return null;
+  const current = await getCurrentOffering();
   return current.availablePackages.map((p) => ({
     identifier: p.identifier,
     productId: p.product.identifier,
@@ -158,6 +177,9 @@ async function loadRCUI() {
   if (!isIOS()) {
     throw new Error("RevenueCat UI is only available on iOS");
   }
+  if (!window.Capacitor?.isPluginAvailable("RevenueCatUI")) {
+    throw new Error("RevenueCat paywalls are not available in this app build");
+  }
   const mod = await import("@revenuecat/purchases-capacitor-ui");
   return { RevenueCatUI: mod.RevenueCatUI, PAYWALL_RESULT: mod.PAYWALL_RESULT };
 }
@@ -167,9 +189,12 @@ export type PaywallOutcome = "purchased" | "restored" | "cancelled" | "not_prese
 /** Present the RevenueCat-hosted paywall. */
 export async function presentPaywall(): Promise<PaywallOutcome> {
   if (!isIOS()) return "not_presented";
-  await initIAP();
+  const offering = await getCurrentOffering();
   const { RevenueCatUI, PAYWALL_RESULT } = await loadRCUI();
-  const { result } = await RevenueCatUI.presentPaywall();
+  const { result } = await RevenueCatUI.presentPaywall({
+    offering,
+    displayCloseButton: true,
+  });
   switch (result) {
     case PAYWALL_RESULT.PURCHASED: return "purchased";
     case PAYWALL_RESULT.RESTORED: return "restored";
@@ -183,10 +208,11 @@ export async function presentPaywall(): Promise<PaywallOutcome> {
 /** Present the paywall only if the user does not already have Pro. */
 export async function presentPaywallIfNeeded(): Promise<PaywallOutcome> {
   if (!isIOS()) return "not_presented";
-  await initIAP();
+  const offering = await getCurrentOffering();
   const { RevenueCatUI, PAYWALL_RESULT } = await loadRCUI();
   const { result } = await RevenueCatUI.presentPaywallIfNeeded({
     requiredEntitlementIdentifier: PRO_ENTITLEMENT_ID,
+    offering,
   });
   switch (result) {
     case PAYWALL_RESULT.PURCHASED: return "purchased";

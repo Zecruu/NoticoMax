@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
+  BILLING_PREFLIGHT_TIMEOUT_MS,
   ENTITLEMENT_REFRESH_DELAYS_MS,
   getSubscriptionPlanName,
   refreshEntitlementWithRetries,
+  withBillingTimeout,
 } from "../src/lib/iap/subscription-billing.ts";
 
 assert.deepEqual(ENTITLEMENT_REFRESH_DELAYS_MS, [0, 1000, 2000, 4000]);
+assert.equal(BILLING_PREFLIGHT_TIMEOUT_MS, 12_000);
 assert.equal(getSubscriptionPlanName("com.noticomax.app.plus.monthly"), "NoticoMax Plus");
 assert.equal(getSubscriptionPlanName("com.noticomax.app.platinum.monthly"), "NoticoMax Platinum");
 assert.equal(getSubscriptionPlanName("com.noticomax.app.maxxed.monthly"), "NoticoMax MAXXED");
@@ -37,6 +40,12 @@ const cancelled = await refreshEntitlementWithRetries(
 assert.equal(cancelled, false);
 assert.equal(cancelledRefreshes, 1, "Unmount cancellation stops bounded retries");
 
+assert.equal(await withBillingTimeout(Promise.resolve("ready"), 50), "ready");
+await assert.rejects(
+  withBillingTimeout(new Promise(() => {}), 5, "billing timeout"),
+  /billing timeout/,
+);
+
 const settingsSource = await readFile(new URL("../src/app/settings/page.tsx", import.meta.url), "utf8");
 assert.match(settingsSource, /useState\(false\)[\s\S]*setIsIOSBilling\(isIOS\(\)\)/);
 assert.doesNotMatch(settingsSource, /const isIOSBilling = typeof window/);
@@ -49,5 +58,15 @@ assert.match(cardSource, /if \(!isIOSBilling\) return;[\s\S]*getSubscriptionStat
 assert.match(cardSource, /openInBrowser\(href\)/);
 assert.match(cardSource, /window\.clearTimeout\(timerId\)[\s\S]*resolve\(false\)/);
 assert.doesNotMatch(cardSource, /com\.noticomax\.pro\.monthly/);
+
+const revenueCatSource = await readFile(
+  new URL("../src/lib/iap/revenuecat-client.ts", import.meta.url),
+  "utf8",
+);
+assert.match(revenueCatSource, /isPluginAvailable\("Purchases"\)/);
+assert.match(revenueCatSource, /isPluginAvailable\("RevenueCatUI"\)/);
+assert.match(revenueCatSource, /withBillingTimeout\([\s\S]*Purchases\.getOfferings\(\)/);
+assert.match(revenueCatSource, /current\.availablePackages\.length === 0/);
+assert.match(revenueCatSource, /RevenueCatUI\.presentPaywall\(\{[\s\S]*offering/);
 
 console.log("subscription billing contract: ok");
