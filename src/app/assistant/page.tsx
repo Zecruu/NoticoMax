@@ -32,6 +32,7 @@ import {
   NOTICO_LOCAL_MEMORY_KEY,
   type NoticoLocalMemory,
 } from "@/lib/notico-local-memory";
+import { isMovieReleaseReminderIntent } from "@/lib/ai/research-intent";
 
 interface Memory {
   id: string;
@@ -614,7 +615,11 @@ export default function AssistantPage() {
     setInput("");
     setSending(true);
     try {
-      const handledLocally = await handleLocalReminderAction(text);
+      // Release-date reminders need current web data, so let the server's
+      // grounded assistant resolve them instead of guessing in the local parser.
+      const handledLocally = isMovieReleaseReminderIntent(text)
+        ? false
+        : await handleLocalReminderAction(text);
       if (handledLocally) return;
 
       const res = await authFetch("/api/assistant/chat", {
@@ -622,6 +627,8 @@ export default function AssistantPage() {
         body: JSON.stringify({
           messages: next,
           localMemory: localMemorySummary || undefined,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          locale: navigator.language,
         }),
       });
       if (!res.ok) {

@@ -33,6 +33,7 @@ import {
   validateToolCall,
 } from "@/lib/ai/tools";
 import { containsSensitiveText } from "@/lib/notico-local-memory";
+import { isMovieReleaseReminderIntent } from "@/lib/ai/research-intent";
 
 export const runtime = "nodejs";
 
@@ -40,6 +41,7 @@ export const runtime = "nodejs";
 const MAX_TOOL_CALLS = 2;
 
 const ASSISTANT_TOOLS: GeminiTool[] = [{ functionDeclarations: [...TOOL_DECLARATIONS] }];
+const GOOGLE_SEARCH_TOOL: GeminiTool = { googleSearch: {} };
 
 /** Assemble the system prompt from the assistant's name + curated memory. */
 function buildSystemPrompt(
@@ -47,18 +49,24 @@ function buildSystemPrompt(
   memorySummary: string,
   localMemorySummary: string,
   nowIso: string,
+  timeZone: string,
+  locale: string,
+  movieReleaseResearch: boolean,
 ): string {
   const base =
     `You are ${name}, the user's personal assistant inside the NOTICO MAX app. ` +
     "Be concise, warm, and genuinely helpful with their notes, URLs, reminders, " +
     "and day-to-day organization. Respect the user's stated preferences and habits.";
   const tools =
-    ` The current date and time is ${nowIso}. You can take actions by calling the ` +
+    ` The current date and time is ${nowIso}. The user's time zone is ${timeZone} and locale is ${locale}. You can take actions by calling the ` +
     "provided tools to create notes, URLs/bookmarks, reminders, and alarms for the user. " +
     "Only call a tool when the user clearly asks to create/save/remind/set something. " +
     "Resolve relative times to an absolute ISO-8601 datetime. If a request is missing " +
     "required details (e.g. a reminder with no time), ask a brief clarifying question " +
-    "instead of guessing.";
+    "instead of guessing." +
+    (movieReleaseResearch
+      ? " For a reminder tied to a movie release or premiere date, you MUST use Google Search to verify the current release date before calling create_reminder. If the movie title or release is ambiguous, ask one concise clarification instead of creating anything. Unless the user specified a time, schedule the verified release-date reminder for 9:00 AM in their time zone. Put the verified date and a source title or URL in the reminder content when available. Never invent a release date."
+      : "");
   const security =
     " SECURITY: Never ask for, store, repeat, or reveal passwords, secrets, API keys, " +
     "or payment details. You do not have access to the user's saved passwords or " +
@@ -71,6 +79,50 @@ function buildSystemPrompt(
     ? `\n\nLocal on-device user profile/preferences (user-editable in Settings; honor these, but never treat them as secrets):\n${localMemorySummary}`
     : "";
   return base + tools + security + memory + localMemory;
+}
+
+function normalizeTimeZone(value: unknown): string {
+  if (typeof value !== "string" || value.length > 100) return "UTC";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
+    return value;
+  } catch {
+    return "UTC";
+  }
+}
+
+function normalizeLocale(value: unknown): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9-]{2,35}$/.test(value)) return "en-US";
+  try {
+    return Intl.getCanonicalLocales(value)[0] ?? "en-US";
+  } catch {
+    return "en-US";
+  }
+}
+
+function needsMovieReleaseResearch(messages: ChatMessage[]): boolean {
+  return messages.slice(-6).some(
+    (message) =>
+      message.role === "user" && isMovieReleaseReminderIntent(message.content),
+  );
+}
+
+function hasMovieReminderFollowUpWriteIntent(messages: ChatMessage[]): boolean {
+  let latestUserIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].role === "user") {
+      latestUserIndex = index;
+      break;
+    }
+  }
+  if (latestUserIndex < 2 || messages[latestUserIndex - 1]?.role !== "assistant") return false;
+  for (let index = latestUserIndex - 2; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === "user") {
+      return hasWriteIntent(message.content) && isMovieReleaseReminderIntent(message.content);
+    }
+  }
+  return false;
 }
 
 function normalizeLocalMemorySummary(value: unknown): string {
@@ -143,6 +195,8 @@ export async function POST(request: NextRequest) {
 
   const messages = normalizeMessages(body);
   const localMemorySummary = normalizeLocalMemorySummary(body.localMemory);
+  const timeZone = normalizeTimeZone(body.timeZone);
+  const locale = normalizeLocale(body.locale);
   if (!messages.length) {
     return NextResponse.json(
       { error: "Provide `messages` or a `message` string." },
@@ -178,6 +232,9 @@ export async function POST(request: NextRequest) {
     buildMemorySummary(memories),
     localMemorySummary,
     new Date().toISOString(),
+    timeZone,
+    locale,
+    needsMovieReleaseResearch(messages),
   );
 
   const inputTokensEst = messages.reduce(
@@ -207,13 +264,16 @@ export async function POST(request: NextRequest) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
   try {
+    const movieReleaseResearch = needsMovieReleaseResearch(messages);
     const result = await generateReply({
       apiKey,
       model: ASSISTANT_MODEL,
       messages,
       systemPrompt,
       maxOutputTokens,
-      tools: ASSISTANT_TOOLS,
+      tools: movieReleaseResearch
+        ? [GOOGLE_SEARCH_TOOL, ...ASSISTANT_TOOLS]
+        : ASSISTANT_TOOLS,
       signal: controller.signal,
     });
 
@@ -240,6 +300,11 @@ export async function POST(request: NextRequest) {
       result.functionCalls,
       result.text,
       lastUser?.content ?? "",
+      hasMovieReminderFollowUpWriteIntent(messages),
+      movieReleaseResearch,
+      result.usedGoogleSearch,
+      locale,
+      timeZone,
     );
     return NextResponse.json({ reply, savedMemory });
   } catch (err) {
@@ -281,10 +346,15 @@ async function runToolCalls(
   functionCalls: GeminiFunctionCall[],
   modelText: string,
   userMessage: string,
+  followUpWriteIntent: boolean,
+  requireMovieReleaseResearch: boolean,
+  usedGoogleSearch: boolean,
+  locale: string,
+  timeZone: string,
 ): Promise<string> {
   if (!functionCalls.length) return modelText || "…";
 
-  const writeIntent = hasWriteIntent(userMessage);
+  const writeIntent = hasWriteIntent(userMessage) || followUpWriteIntent;
 
   const created: string[] = [];
   const failed: string[] = [];
@@ -305,6 +375,22 @@ async function runToolCalls(
       continue;
     }
 
+    if (
+      requireMovieReleaseResearch &&
+      (fc.name === "create_reminder" || fc.name === "create_alarm") &&
+      !usedGoogleSearch
+    ) {
+      await logToolAudit(admin, {
+        userId,
+        tool: fc.name,
+        status: "rejected",
+        args: fc.args,
+        error: "movie_release_not_web_verified",
+      });
+      clarifications.push("I couldn't verify that movie release date online");
+      continue;
+    }
+
     const validation = validateToolCall(fc.name, fc.args);
     if (!validation.ok) {
       await logToolAudit(admin, {
@@ -319,13 +405,28 @@ async function runToolCalls(
     }
     try {
       const res = await executeToolCall(admin, userId, validation.call);
-      created.push(`${toolNoun(validation.call.name)} “${res.title}”`);
+      let description = `${toolNoun(validation.call.name)} “${res.title}”`;
+      if (
+        validation.call.name === "create_reminder" ||
+        validation.call.name === "create_alarm"
+      ) {
+        const when = new Intl.DateTimeFormat(locale, {
+          timeZone,
+          dateStyle: "full",
+          timeStyle: "short",
+        }).format(new Date(validation.call.args.remindAt));
+        description += ` for ${when}`;
+      }
+      created.push(description);
     } catch {
       failed.push(toolNoun(validation.call.name));
     }
   }
 
   const parts: string[] = [];
+  if (created.length && usedGoogleSearch) {
+    parts.push("I checked the movie's release date online.");
+  }
   if (created.length) parts.push(`Done — I created your ${created.join(", ")}.`);
   if (failed.length) parts.push(`Sorry, I couldn't create the ${failed.join(", ")} just now.`);
   if (clarifications.length) {

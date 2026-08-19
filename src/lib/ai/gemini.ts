@@ -23,16 +23,19 @@ export interface GeminiResult {
   functionCalls: GeminiFunctionCall[];
   inputTokens: number;
   outputTokens: number;
+  usedGoogleSearch: boolean;
 }
 
-/** Gemini `tools` entry — a set of callable function declarations. */
-export interface GeminiTool {
-  functionDeclarations: Array<{
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  }>;
-}
+/** Gemini `tools` entry — custom functions or a bounded built-in search tool. */
+export type GeminiTool =
+  | {
+      functionDeclarations: Array<{
+        name: string;
+        description: string;
+        parameters: Record<string, unknown>;
+      }>;
+    }
+  | { googleSearch: Record<string, never> };
 
 interface GeminiContent {
   role: "user" | "model";
@@ -73,6 +76,9 @@ export async function generateReply(opts: {
   }
   if (opts.tools?.length) {
     body.tools = opts.tools;
+    if (opts.tools.some((tool) => "googleSearch" in tool)) {
+      body.toolConfig = { includeServerSideToolInvocations: true };
+    }
   }
 
   const res = await fetch(
@@ -103,13 +109,16 @@ export async function generateReply(opts: {
         parts?: {
           text?: string;
           functionCall?: { name?: string; args?: Record<string, unknown> };
+          toolCall?: { toolType?: string };
         }[];
       };
+      groundingMetadata?: { webSearchQueries?: string[] };
     }[];
     usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
   };
 
-  const parts = json.candidates?.[0]?.content?.parts ?? [];
+  const candidate = json.candidates?.[0];
+  const parts = candidate?.content?.parts ?? [];
   let text = "";
   const functionCalls: GeminiFunctionCall[] = [];
   for (const p of parts) {
@@ -118,11 +127,15 @@ export async function generateReply(opts: {
       functionCalls.push({ name: p.functionCall.name, args: p.functionCall.args ?? {} });
     }
   }
+  const usedGoogleSearch =
+    !!candidate?.groundingMetadata?.webSearchQueries?.length ||
+    parts.some((part) => part.toolCall?.toolType?.startsWith("GOOGLE_SEARCH"));
 
   return {
     text,
     functionCalls,
     inputTokens: json.usageMetadata?.promptTokenCount ?? 0,
     outputTokens: json.usageMetadata?.candidatesTokenCount ?? 0,
+    usedGoogleSearch,
   };
 }
