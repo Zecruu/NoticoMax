@@ -385,6 +385,7 @@ export function useLicense() {
     loginWithApple,
     register,
     activate,
+    refresh,
     logout,
     deleteAccount,
   };

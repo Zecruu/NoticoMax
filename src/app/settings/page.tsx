@@ -13,6 +13,7 @@ import { StorageCard } from "@/components/settings/storage-card";
 import { ClaudeTokensCard } from "@/components/settings/claude-tokens-card";
 import { BootstrapCurl } from "@/components/settings/bootstrap-curl";
 import { NoticoMemoryCard } from "@/components/settings/notico-memory-card";
+import { SubscriptionCard } from "@/components/settings/subscription-card";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -20,15 +21,13 @@ import { isCapacitorNative, isIOS } from "@/lib/platform";
 import { getDeviceName } from "@/lib/device";
 import { useSidebarPrefs } from "@/hooks/use-sidebar-prefs";
 import { checkBiometricAvailability } from "@/lib/capacitor/biometric-auth";
-import { presentCustomerCenter } from "@/lib/iap/revenuecat-client";
-import { Settings as SettingsIcon } from "lucide-react";
 import { SecondaryBottomNav } from "@/components/layout/secondary-nav";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { licenseKey, isActivated, isPro, isLoggedIn, isLoading, email, activate, logout, deleteAccount } = useLicense();
+  const { licenseKey, isActivated, isPro, isLoggedIn, isLoading, email, activate, refresh, logout, deleteAccount } = useLicense();
 
   // Sign-out (or account deletion) doesn't unmount this page — push the user
   // back home where AuthGate gates them.
@@ -47,10 +46,7 @@ export default function SettingsPage() {
   const [savingPassword, setSavingPassword] = useState(false);
   const [licenseInput, setLicenseInput] = useState("");
   const [activating, setActivating] = useState(false);
-  // Visible pricing / upgrade CTAs are hidden for now (pending the Free / Pro /
-  // Family pricing redesign). Manage-subscription stays so existing
-  // subscribers can still reach App Store billing.
-  const showManageSub = typeof window !== "undefined" && isIOS() && isPro;
+  const isIOSBilling = typeof window !== "undefined" && isIOS();
 
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -405,6 +401,8 @@ export default function SettingsPage() {
           </Card>
         )}
 
+        <SubscriptionCard isIOSBilling={isIOSBilling} isPro={isPro} onRefresh={refresh} />
+
         {/* Mobile App */}
         {isMobile && (
           <Card>
@@ -568,17 +566,6 @@ export default function SettingsPage() {
                     <p className="text-sm text-muted-foreground">
                       Cloud sync is enabled. Your data syncs across all your devices.
                     </p>
-                    {showManageSub && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5"
-                        onClick={() => presentCustomerCenter()}
-                      >
-                        <SettingsIcon className="h-3.5 w-3.5" />
-                        Manage subscription
-                      </Button>
-                    )}
                   </div>
                 ) : (
                   <div className="space-y-3">
