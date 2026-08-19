@@ -691,7 +691,7 @@ export default function AssistantPage() {
   };
 
   return (
-    <div className="flex h-[var(--visual-viewport-height,100dvh)] max-h-[var(--visual-viewport-height,100dvh)] min-h-0 flex-col overflow-hidden bg-background">
+    <div className="flex h-[var(--visual-viewport-height,100dvh)] max-h-full min-h-0 flex-col overflow-hidden bg-background">
       <header className="sticky top-0 z-40 shrink-0 border-b bg-background/95 backdrop-blur pt-[env(safe-area-inset-top)]">
         <div className="flex h-14 items-center gap-3 px-4 md:px-6">
           <Link href="/">
