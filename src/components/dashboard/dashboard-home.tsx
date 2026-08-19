@@ -2,20 +2,19 @@
 
 import { useMemo } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import db, { type LocalItem } from "@/lib/db/indexed-db";
-import { cn } from "@/lib/utils";
+import db from "@/lib/db/indexed-db";
 import {
-  FileText,
-  Link2,
   Bell,
+  Bot,
   Calendar,
-  Wallet,
-  Target,
-  MapPin,
-  Lock,
-  HeartHandshake,
-  Plus,
   ChevronRight,
+  FileText,
+  HeartHandshake,
+  Link2,
+  Lock,
+  MapPin,
+  Target,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 
@@ -24,6 +23,7 @@ interface DashboardHomeProps {
   urlCount: number;
   reminderCount: number;
   upcomingReminderCount: number;
+  onOpenAssistant: () => void;
   onOpenNotes: () => void;
   onOpenUrls: () => void;
   onOpenReminders: () => void;
@@ -33,75 +33,50 @@ interface DashboardHomeProps {
   onOpenLocations: () => void;
   onOpenPasswords: () => void;
   onOpenFamily: () => void;
-  onOpenItem: (item: LocalItem) => void;
-  onCreateNew: () => void;
   familyPlanActive?: boolean;
 }
 
-interface DestinationProps {
+interface Destination {
   icon: LucideIcon;
   label: string;
+  detail: string;
   count: string;
   accent: string;
   onClick: () => void;
 }
 
-function PrimaryDestination({ icon: Icon, label, count, accent, onClick }: DestinationProps) {
+function DestinationRow({ icon: Icon, label, detail, count, accent, onClick }: Destination) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex min-h-24 flex-col justify-between rounded-lg border bg-card p-3 text-left transition-colors hover:bg-muted/50 active:bg-muted"
+      className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/60 active:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset md:px-4"
     >
-      <span
-        className="flex h-9 w-9 items-center justify-center rounded-md"
-        style={{ backgroundColor: `${accent}1a`, color: accent }}
-      >
-        <Icon className="h-4.5 w-4.5" />
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted">
+        <Icon className="h-5 w-5" style={{ color: accent }} />
       </span>
-      <span className="flex w-full items-end justify-between gap-1.5">
-        <span className="min-w-0 truncate text-xs font-medium md:text-sm">{label}</span>
-        <span className="shrink-0 text-lg font-semibold tabular-nums md:text-xl">{count}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-base font-medium">{label}</span>
+        <span className="block truncate text-xs text-muted-foreground">{detail}</span>
       </span>
+      <span className="shrink-0 text-sm tabular-nums text-muted-foreground">{count}</span>
+      <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
     </button>
   );
 }
 
-interface SecondaryDestinationProps {
-  icon: LucideIcon;
-  label: string;
-  accent: string;
-  onClick: () => void;
-}
-
-function SecondaryDestination({ icon: Icon, label, accent, onClick }: SecondaryDestinationProps) {
+function DestinationSection({ title, items }: { title: string; items: Destination[] }) {
+  const sectionId = `home-${title.toLowerCase().replace(/\s+/g, "-")}`;
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-md px-1 py-2 text-center transition-colors hover:bg-muted active:bg-muted"
-    >
-      <Icon className="h-5 w-5" style={{ color: accent }} />
-      <span className="w-full text-[11px] font-medium leading-tight text-foreground">{label}</span>
-    </button>
+    <section className="space-y-2" aria-labelledby={sectionId}>
+      <h2 id={sectionId} className="px-4 text-xs font-medium uppercase text-muted-foreground md:px-0">
+        {title}
+      </h2>
+      <div className="divide-y border-y bg-muted/15 md:overflow-hidden md:rounded-lg md:border">
+        {items.map((item) => <DestinationRow key={item.label} {...item} />)}
+      </div>
+    </section>
   );
-}
-
-function formatRecentDate(iso: string): string {
-  const date = new Date(iso);
-  const now = new Date();
-  if (date.toDateString() === now.toDateString()) {
-    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  }
-  return date.toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
-function notePreview(item: LocalItem): string {
-  return item.content
-    .split("\n")
-    .map((line) => line.replace(/^(?:- \[[ xX]\] |- |\d+\. |[a-z]\. |#+\s+)/, "").trim())
-    .filter(Boolean)
-    .join(" ");
 }
 
 export function DashboardHome({
@@ -109,6 +84,7 @@ export function DashboardHome({
   urlCount,
   reminderCount,
   upcomingReminderCount,
+  onOpenAssistant,
   onOpenNotes,
   onOpenUrls,
   onOpenReminders,
@@ -118,32 +94,20 @@ export function DashboardHome({
   onOpenLocations,
   onOpenPasswords,
   onOpenFamily,
-  onOpenItem,
-  onCreateNew,
   familyPlanActive,
 }: DashboardHomeProps) {
   const dashboardItems = useLiveQuery(
     () => db.items.filter((item) => !item.deleted).toArray(),
     [],
   );
-  const recentNotes = useMemo(
-    () =>
-      (dashboardItems ?? [])
-        .filter((item) => item.type === "note")
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-        .slice(0, 4),
-    [dashboardItems],
-  );
   const liveCounts = useMemo(() => {
     if (!dashboardItems) return null;
     return dashboardItems.reduce(
       (counts, item) => {
-        if (item.type === "note" || item.type === "url" || item.type === "reminder") {
-          counts[item.type] += 1;
-        }
+        if (item.type in counts) counts[item.type as keyof typeof counts] += 1;
         return counts;
       },
-      { note: 0, url: 0, reminder: 0 },
+      { note: 0, url: 0, reminder: 0, credential: 0, envvar: 0 },
     );
   }, [dashboardItems]);
 
@@ -170,105 +134,48 @@ export function DashboardHome({
     0,
   );
 
-  const greeting = useMemo(() => {
-    const hour = new Date().getHours();
-    if (hour < 5) return "Up late";
-    if (hour < 12) return "Good morning";
-    if (hour < 17) return "Good afternoon";
-    return "Good evening";
-  }, []);
-
   const resolvedNoteCount = liveCounts?.note ?? noteCount;
   const resolvedUrlCount = liveCounts?.url ?? urlCount;
   const resolvedReminderCount = liveCounts?.reminder ?? reminderCount;
-  const secondaryDestinations = [
-    { icon: Calendar, label: "Calendar", accent: "#8b5cf6", onClick: onOpenCalendar },
-    { icon: Wallet, label: "Budget", accent: "#22c55e", onClick: onOpenBudget },
-    { icon: Target, label: "Goals", accent: "#ec4899", onClick: onOpenGoals },
-    { icon: MapPin, label: "Locations", accent: "#eab308", onClick: onOpenLocations },
-    { icon: Lock, label: "Passwords", accent: "#6b7280", onClick: onOpenPasswords },
+  const passwordCount = liveCounts?.credential ?? 0;
+  const savedItemCount = resolvedNoteCount + resolvedUrlCount + resolvedReminderCount;
+  const formattedSpend = new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(monthSpend ?? 0);
+
+  const primaryDestinations: Destination[] = [
+    { icon: Bot, label: "Lyte", detail: "Assistant and reminders", count: "Open", accent: "#8b5cf6", onClick: onOpenAssistant },
+    { icon: FileText, label: "Notes", detail: "Folders and writing", count: String(resolvedNoteCount), accent: "#3b82f6", onClick: onOpenNotes },
+    { icon: Link2, label: "URLs", detail: "Saved bookmarks", count: String(resolvedUrlCount), accent: "#06b6d4", onClick: onOpenUrls },
+    { icon: Bell, label: "Reminders", detail: "Tasks and alerts", count: String(resolvedReminderCount), accent: "#f97316", onClick: onOpenReminders },
+    { icon: Calendar, label: "Calendar", detail: "Due in the next 7 days", count: String(upcomingReminderCount), accent: "#8b5cf6", onClick: onOpenCalendar },
+  ];
+  const utilityDestinations: Destination[] = [
+    { icon: Wallet, label: "Budget", detail: "Spent this month", count: formattedSpend, accent: "#22c55e", onClick: onOpenBudget },
+    { icon: Lock, label: "Passwords", detail: "Saved credentials", count: String(passwordCount), accent: "#6b7280", onClick: onOpenPasswords },
+    { icon: Target, label: "Goals", detail: "Active goals", count: String(goalCount ?? 0), accent: "#ec4899", onClick: onOpenGoals },
+    { icon: MapPin, label: "Locations", detail: "Saved places", count: String(locationCount ?? 0), accent: "#eab308", onClick: onOpenLocations },
     ...(familyPlanActive
-      ? [{ icon: HeartHandshake, label: "Family", accent: "#ef4444", onClick: onOpenFamily }]
+      ? [{ icon: HeartHandshake, label: "Family", detail: "Shared household", count: "Open", accent: "#ef4444", onClick: onOpenFamily }]
       : []),
   ];
 
   return (
-    <div className="mx-auto max-w-5xl space-y-7 px-4 py-5 md:px-8 md:py-8">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold md:text-2xl">{greeting}</h1>
-        <button
-          type="button"
-          onClick={onCreateNew}
-          className="hidden h-10 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 active:bg-primary/80 md:inline-flex"
-        >
-          <Plus className="h-4 w-4" />
-          New Note
-        </button>
+    <div className="pb-4 md:p-6">
+      <div className="flex min-h-16 items-center px-4 py-3 md:px-0 md:pt-0">
+        <div>
+          <h1 className="text-2xl font-semibold md:text-3xl">Home</h1>
+          <p className="text-xs text-muted-foreground">
+            {savedItemCount} {savedItemCount === 1 ? "saved item" : "saved items"}
+          </p>
+        </div>
       </div>
-
-      <section aria-label="Primary destinations">
-        <div className="grid grid-cols-3 gap-2.5 md:gap-4">
-          <PrimaryDestination icon={FileText} label="Notes" count={String(resolvedNoteCount)} accent="#3b82f6" onClick={onOpenNotes} />
-          <PrimaryDestination icon={Bell} label="Reminders" count={String(resolvedReminderCount)} accent="#f97316" onClick={onOpenReminders} />
-          <PrimaryDestination icon={Link2} label="URLs" count={String(resolvedUrlCount)} accent="#06b6d4" onClick={onOpenUrls} />
-        </div>
-      </section>
-
-      <section aria-labelledby="recent-notes-title">
-        <div className="mb-2 flex min-h-11 items-center justify-between">
-          <div>
-            <h2 id="recent-notes-title" className="text-base font-semibold">Recent notes</h2>
-            <p className="text-xs text-muted-foreground">Continue where you left off</p>
-          </div>
-          <button type="button" onClick={onOpenNotes} className="flex h-11 items-center gap-1 rounded-md px-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-            See all
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-        {recentNotes.length > 0 ? (
-          <div className="divide-y border-y md:rounded-lg md:border">
-            {recentNotes.map((item) => {
-              const preview = notePreview(item);
-              return (
-                <button key={item.clientId} type="button" onClick={() => onOpenItem(item)} className="flex min-h-16 w-full items-center gap-3 px-1 py-3 text-left transition-colors hover:bg-muted/50 active:bg-muted md:px-3">
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-1.5">
-                      {item.pinned && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
-                      <span className="truncate text-sm font-medium">{item.title || "Untitled note"}</span>
-                    </span>
-                    <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                      <span className="shrink-0">{formatRecentDate(item.updatedAt)}</span>
-                      {preview && (
-                        <>
-                          <span aria-hidden>·</span>
-                          <span className="truncate">{preview}</span>
-                        </>
-                      )}
-                    </span>
-                  </span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <button type="button" onClick={onCreateNew} className="flex min-h-16 w-full items-center justify-between border-y px-1 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/50 md:rounded-lg md:border md:px-3">
-            Start your first note
-            <Plus className="h-4 w-4" />
-          </button>
-        )}
-      </section>
-
-      <section aria-labelledby="more-destinations-title">
-        <div className="mb-2 flex items-center justify-between">
-          <h2 id="more-destinations-title" className="text-base font-semibold">More</h2>
-          {upcomingReminderCount > 0 && <span className="text-xs text-muted-foreground">{upcomingReminderCount} due this week</span>}
-        </div>
-        <div className={cn("grid grid-cols-5 gap-1", familyPlanActive && "grid-cols-3 sm:grid-cols-6")}>
-          {secondaryDestinations.map((destination) => <SecondaryDestination key={destination.label} {...destination} />)}
-        </div>
-        <span className="sr-only">${Math.round(monthSpend ?? 0)} spent this month; {goalCount ?? 0} active goals; {locationCount ?? 0} saved locations.</span>
-      </section>
+      <div className="space-y-6 md:max-w-3xl">
+        <DestinationSection title="Library" items={primaryDestinations} />
+        <DestinationSection title="More" items={utilityDestinations} />
+      </div>
     </div>
   );
 }

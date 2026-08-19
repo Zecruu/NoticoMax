@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import {
-  ArrowLeft,
   Bot,
   Send,
   Mic,
@@ -15,13 +14,20 @@ import {
   X,
   Loader2,
   Brain,
+  Menu,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SecondaryBottomNav } from "@/components/layout/secondary-nav";
+import { Sidebar } from "@/components/layout/sidebar";
+import { MobileNav } from "@/components/layout/mobile-nav";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { RecurrenceRule } from "@/lib/db/indexed-db";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { createItem } from "@/lib/sync/sync-engine";
+import { useFolders } from "@/hooks/use-folders";
+import { useItems } from "@/hooks/use-items";
+import { useLicense } from "@/hooks/use-license";
+import { resolveDefaultFolderId } from "@/lib/note-folders";
 import { toast } from "@/lib/native-toast";
 import {
   buildNoticoLocalMemorySummary,
@@ -304,14 +310,58 @@ export default function AssistantPage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [listening, setListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
   const [voiceNotice, setVoiceNotice] = useState("");
   const [pendingReminder, setPendingReminder] = useState<PendingReminder | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const { isPro } = useLicense();
+  const { items: navigationItems } = useItems("all", "", null, isPro);
+  const { folders, addFolder, editFolder, removeFolder } = useFolders(isPro);
+  const navigationCounts = useMemo(() => {
+    const counts: Record<string, number> = { note: 0, url: 0, reminder: 0 };
+    for (const item of navigationItems ?? []) {
+      if (item.type === "note" || item.type === "url" || item.type === "reminder") {
+        counts[item.type] += 1;
+      }
+    }
+    return counts;
+  }, [navigationItems]);
+  const folderItemCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const item of navigationItems ?? []) {
+      if (item.type !== "note" && item.type !== "url" && item.type !== "reminder") continue;
+      const folderId = item.type === "note" || item.type === "url"
+        ? resolveDefaultFolderId(item.folderId, folders)
+        : item.folderId;
+      if (folderId) counts[folderId] = (counts[folderId] ?? 0) + 1;
+    }
+    return counts;
+  }, [folders, navigationItems]);
+
+  const openMainFilter = useCallback((filter: string) => {
+    window.location.assign(`/?filter=${encodeURIComponent(filter)}`);
+  }, []);
+  const openMainView = useCallback((view: string) => {
+    if (view !== "list" && view !== "assistant") {
+      window.location.assign(`/?view=${encodeURIComponent(view)}`);
+    }
+  }, []);
+  const openMainFolder = useCallback((folderId: string | null) => {
+    if (folderId) window.location.assign(`/?folder=${encodeURIComponent(folderId)}`);
+  }, []);
+  const openNewNote = useCallback(() => {
+    window.location.assign("/?new=note");
+  }, []);
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerInputRef = useRef<HTMLInputElement>(null);
-  const speechSupported = getSpeechRecognition() !== null;
   const localMemorySummary = buildNoticoLocalMemorySummary(localMemory);
+
+  useEffect(() => {
+    setSpeechSupported(getSpeechRecognition() !== null);
+  }, []);
 
   const authFetch = useCallback(async (path: string, init: RequestInit = {}) => {
     const t = tokenRef.current ?? (await getAccessToken());
@@ -701,11 +751,15 @@ export default function AssistantPage() {
     <div className="flex h-[var(--visual-viewport-height,100dvh)] max-h-full min-h-0 flex-col overflow-hidden bg-background">
       <header className="sticky top-0 z-40 shrink-0 border-b bg-background/95 backdrop-blur pt-[env(safe-area-inset-top)]">
         <div className="flex h-14 items-center gap-3 px-4 md:px-6">
-          <Link href="/">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="-ml-1 h-11 w-11 md:hidden"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open menu"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
           <Bot className="h-5 w-5 text-primary" />
           {editingName ? (
             <div className="flex items-center gap-1">
@@ -758,6 +812,48 @@ export default function AssistantPage() {
           </div>
         </div>
       </header>
+
+      <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+        <SheetContent side="left" className="w-72 p-0 md:hidden">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Navigation</SheetTitle>
+          </SheetHeader>
+          <Sidebar
+            wrapperClassName="flex h-full w-full flex-col bg-background"
+            activeFilter="all"
+            activeFolder={null}
+            onFilterChange={(filter) => { openMainFilter(filter); setSidebarOpen(false); }}
+            onFolderChange={(folderId) => { openMainFolder(folderId); if (folderId) setSidebarOpen(false); }}
+            onCreateNew={openNewNote}
+            itemCounts={navigationCounts}
+            folders={folders}
+            folderItemCounts={folderItemCounts}
+            onAddFolder={addFolder}
+            onEditFolder={editFolder}
+            onRemoveFolder={removeFolder}
+            activeView="assistant"
+            onViewChange={(view) => { openMainView(view); if (view !== "list") setSidebarOpen(false); }}
+          />
+        </SheetContent>
+      </Sheet>
+
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <Sidebar
+          activeFilter="all"
+          activeFolder={null}
+          onFilterChange={openMainFilter}
+          onFolderChange={openMainFolder}
+          onCreateNew={openNewNote}
+          itemCounts={navigationCounts}
+          folders={folders}
+          folderItemCounts={folderItemCounts}
+          onAddFolder={addFolder}
+          onEditFolder={editFolder}
+          onRemoveFolder={removeFolder}
+          activeView="assistant"
+          onViewChange={openMainView}
+        />
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 
       {status === "disabled" ? (
         <main className="flex flex-1 flex-col items-center justify-center px-6 text-center">
@@ -970,7 +1066,23 @@ export default function AssistantPage() {
         </>
       )}
 
-      <SecondaryBottomNav active="assistant" />
+        </section>
+      </div>
+
+      <MobileNav
+        activeFilter="all"
+        activeFolder={null}
+        onFilterChange={openMainFilter}
+        onFolderChange={openMainFolder}
+        onCreateNew={openNewNote}
+        folders={folders}
+        folderItemCounts={folderItemCounts}
+        onAddFolder={addFolder}
+        onEditFolder={editFolder}
+        onRemoveFolder={removeFolder}
+        activeView="assistant"
+        onViewChange={openMainView}
+      />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useItems } from "@/hooks/use-items";
 import { useFolders } from "@/hooks/use-folders";
 import { type LocalItem } from "@/lib/db/indexed-db";
@@ -10,7 +11,7 @@ import { MobileNav } from "@/components/layout/mobile-nav";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ItemList } from "@/components/items/item-list";
 import { ItemDialog } from "@/components/items/item-dialog";
-import { NotesFoldersView } from "@/components/items/notes-folders-view";
+import { ItemFoldersView } from "@/components/items/notes-folders-view";
 import { SearchCommand } from "@/components/items/search-bar";
 import { TrashView } from "@/components/items/trash-view";
 import { CalendarView } from "@/components/calendar/calendar-view";
@@ -28,9 +29,10 @@ import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
 import { toast } from "@/lib/native-toast";
 import { isUrlCategoryTag } from "@/lib/url-categories";
-import { resolveDefaultNoteFolderId } from "@/lib/note-folders";
+import { resolveDefaultFolderId } from "@/lib/note-folders";
 
 export default function Dashboard() {
+  const router = useRouter();
   const [activeFilter, setActiveFilter] = useState("all");
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   // Initial view = the new dashboard tile grid. The user's previous view is
@@ -45,6 +47,30 @@ export default function Dashboard() {
   const [defaultReminderDate, setDefaultReminderDate] = useState<string | undefined>(undefined);
   const [skippedActivation, setSkippedActivation] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedFilter = params.get("filter");
+    const requestedView = params.get("view");
+    const requestedFolder = params.get("folder");
+    const requestedNew = params.get("new");
+
+    if (requestedFilter && ["all", "note", "url", "reminder"].includes(requestedFilter)) {
+      setActiveFilter(requestedFilter);
+      setActiveView("list");
+    } else if (requestedView) {
+      setActiveView(requestedView);
+    }
+    if (requestedFolder) {
+      setActiveFolder(requestedFolder);
+      setActiveView("list");
+    }
+    if (requestedNew && ["note", "url", "reminder"].includes(requestedNew)) {
+      setEditingItem(null);
+      setDefaultType(requestedNew as "note" | "url" | "reminder");
+      setDialogOpen(true);
+    }
+  }, []);
 
   const { isActivated, isPro, isLoading, isLoggedIn, entitlements, login, loginWithApple, register } = useLicense();
 
@@ -126,8 +152,8 @@ export default function Dashboard() {
   const folderItemCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const item of items) {
-      const folderId = item.type === "note"
-        ? resolveDefaultNoteFolderId(item.folderId, folders)
+      const folderId = item.type === "note" || item.type === "url"
+        ? resolveDefaultFolderId(item.folderId, folders)
         : item.folderId;
       if (folderId) counts[folderId] = (counts[folderId] || 0) + 1;
     }
@@ -306,17 +332,16 @@ export default function Dashboard() {
               urlCount={itemCounts.url ?? 0}
               reminderCount={itemCounts.reminder ?? 0}
               upcomingReminderCount={upcomingReminderCount}
-              onOpenNotes={() => { setActiveFilter("note"); setActiveView("list"); }}
-              onOpenUrls={() => { setActiveFilter("url"); setActiveView("list"); }}
-              onOpenReminders={() => { setActiveFilter("reminder"); setActiveView("list"); }}
+              onOpenAssistant={() => router.push("/assistant")}
+              onOpenNotes={() => { setActiveFolder(null); setActiveFilter("note"); setActiveView("list"); }}
+              onOpenUrls={() => { setActiveFolder(null); setActiveFilter("url"); setActiveView("list"); }}
+              onOpenReminders={() => { setActiveFolder(null); setActiveFilter("reminder"); setActiveView("list"); }}
               onOpenCalendar={() => setActiveView("calendar")}
               onOpenBudget={() => setActiveView("budget")}
               onOpenGoals={() => setActiveView("goals")}
               onOpenLocations={() => setActiveView("locations")}
               onOpenPasswords={() => setActiveView("passwords")}
               onOpenFamily={() => setActiveView("family")}
-              onOpenItem={handleEdit}
-              onCreateNew={handleCreateNew}
               familyPlanActive={entitlements?.familyPlanActive}
             />
           ) : activeView === "trash" ? (
@@ -351,17 +376,18 @@ export default function Dashboard() {
             <LocationsView />
           ) : activeView === "family" ? (
             <FamilyView />
-          ) : activeView === "list" && activeFilter === "note" && !activeFolder ? (
-            <NotesFoldersView
+          ) : activeView === "list" && (activeFilter === "note" || activeFilter === "url") && !activeFolder ? (
+            <ItemFoldersView
               folders={folders}
-              notes={items}
+              items={items}
+              itemType={activeFilter}
               loading={loading || foldersLoading}
               onOpenFolder={(folderId) => {
                 setActiveFolder(folderId);
                 setActiveTag(null);
               }}
               onCreateFolder={addFolder}
-              onCreateNote={() => handleCreateWithType("note")}
+              onCreateItem={() => handleCreateWithType(activeFilter)}
             />
           ) : activeFolder && folders.find((f) => f.clientId === activeFolder)?.householdId ? (
             (() => {
@@ -392,7 +418,7 @@ export default function Dashboard() {
               activeFolder={activeFolder}
               onCreateWithType={handleCreateWithType}
               onCreateNew={handleCreateNew}
-              onBackToFolders={activeFilter === "note" ? () => setActiveFolder(null) : undefined}
+              onBackToFolders={activeFilter === "note" || activeFilter === "url" ? () => setActiveFolder(null) : undefined}
             />
           )}
         </main>

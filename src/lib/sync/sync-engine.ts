@@ -476,7 +476,7 @@ export async function createItem(
   const now = new Date().toISOString();
   const clientId = uuidv4();
   const deviceId = getDeviceId();
-  const folderId = item.type === "note" && !item.folderId
+  const folderId = (item.type === "note" || item.type === "url") && !item.folderId
     ? (await ensureDefaultNotesFolder()).clientId
     : item.folderId;
   const householdId = item.householdId ?? (await resolveHouseholdIdFromFolder(folderId));
@@ -526,7 +526,7 @@ export async function updateItem(
 
   const folderWasUpdated = Object.prototype.hasOwnProperty.call(updates, "folderId");
   const requestedFolderId = folderWasUpdated ? updates.folderId : item.folderId;
-  const normalizedUpdates = item.type === "note" && !requestedFolderId
+  const normalizedUpdates = (item.type === "note" || item.type === "url") && !requestedFolderId
     ? { ...updates, folderId: (await ensureDefaultNotesFolder()).clientId }
     : updates;
 
@@ -593,7 +593,11 @@ export async function getItems(
   if (folderId) {
     const canonicalDefault = getCanonicalDefaultNotesFolder(await db.folders.toArray());
     items = items.filter(
-      (item) => item.folderId === folderId || (canonicalDefault?.clientId === folderId && item.type === "note" && !item.folderId),
+      (item) =>
+        item.folderId === folderId ||
+        (canonicalDefault?.clientId === folderId &&
+          (item.type === "note" || item.type === "url") &&
+          !item.folderId),
     );
   }
 

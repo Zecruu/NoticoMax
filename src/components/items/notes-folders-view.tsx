@@ -6,32 +6,34 @@ import type { LocalFolder, LocalItem } from "@/lib/db/indexed-db";
 import {
   DEFAULT_FOLDER_CREATE_ERROR,
   isReservedDefaultFolderName,
-  resolveDefaultNoteFolderId,
+  resolveDefaultFolderId,
 } from "@/lib/note-folders";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-interface NotesFoldersViewProps {
+interface ItemFoldersViewProps {
   folders: LocalFolder[];
-  notes: LocalItem[];
+  items: LocalItem[];
+  itemType: "note" | "url";
   loading: boolean;
   onOpenFolder: (folderId: string) => void;
   onCreateFolder: (folder: { name: string; color: string }) => Promise<void>;
-  onCreateNote: () => void;
+  onCreateItem: () => void;
 }
 
 const NEW_FOLDER_COLOR = "#eab308";
 
-export function NotesFoldersView({
+export function ItemFoldersView({
   folders,
-  notes,
+  items,
+  itemType,
   loading,
   onOpenFolder,
   onCreateFolder,
-  onCreateNote,
-}: NotesFoldersViewProps) {
+  onCreateItem,
+}: ItemFoldersViewProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -47,14 +49,21 @@ export function NotesFoldersView({
   );
   const folderCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const note of notes) {
-      if (note.type !== "note") continue;
-      const folderId = resolveDefaultNoteFolderId(note.folderId, personalFolders);
+    for (const item of items) {
+      if (item.type !== itemType) continue;
+      const folderId = resolveDefaultFolderId(item.folderId, personalFolders);
       if (folderId) counts[folderId] = (counts[folderId] ?? 0) + 1;
     }
 
     return counts;
-  }, [notes, personalFolders]);
+  }, [itemType, items, personalFolders]);
+
+  const itemCount = useMemo(
+    () => items.filter((item) => item.type === itemType).length,
+    [itemType, items],
+  );
+  const singularLabel = itemType === "note" ? "note" : "bookmark";
+  const pluralLabel = itemType === "note" ? "notes" : "bookmarks";
 
   const createFolder = async () => {
     const name = folderName.trim();
@@ -77,9 +86,9 @@ export function NotesFoldersView({
   };
 
   const renderFolderSection = (title: string, sectionFolders: LocalFolder[], shared = false) => (
-    <section className="space-y-2" aria-labelledby={`notes-${shared ? "shared" : "personal"}-folders`}>
+    <section className="space-y-2" aria-labelledby={`${itemType}-${shared ? "shared" : "personal"}-folders`}>
       <h2
-        id={`notes-${shared ? "shared" : "personal"}-folders`}
+        id={`${itemType}-${shared ? "shared" : "personal"}-folders`}
         className="px-4 text-xs font-medium uppercase text-muted-foreground md:px-0"
       >
         {title}
@@ -114,7 +123,7 @@ export function NotesFoldersView({
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold md:text-3xl">Folders</h1>
           <p className="text-xs text-muted-foreground">
-            {loading ? "Loading…" : `${notes.length} ${notes.length === 1 ? "note" : "notes"}`}
+            {loading ? "Loading…" : `${itemCount} ${itemCount === 1 ? singularLabel : pluralLabel}`}
           </p>
         </div>
         <div className="flex items-center gap-1.5">
@@ -129,9 +138,9 @@ export function NotesFoldersView({
           >
             <FolderPlus className="h-5 w-5" />
           </Button>
-          <Button type="button" size="sm" className="hidden gap-1.5 md:inline-flex" onClick={onCreateNote}>
+          <Button type="button" size="sm" className="hidden gap-1.5 md:inline-flex" onClick={onCreateItem}>
             <Plus className="h-4 w-4" />
-            New note
+            New {singularLabel}
           </Button>
         </div>
       </div>
@@ -161,9 +170,9 @@ export function NotesFoldersView({
             <DialogTitle>New folder</DialogTitle>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="notes-folder-name">Name</Label>
+            <Label htmlFor={`${itemType}-folder-name`}>Name</Label>
             <Input
-              id="notes-folder-name"
+              id={`${itemType}-folder-name`}
               value={folderName}
               onChange={(event) => {
                 setFolderName(event.target.value);

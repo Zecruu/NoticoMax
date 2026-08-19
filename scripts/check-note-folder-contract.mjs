@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   getCanonicalDefaultNotesFolder,
   isReservedDefaultFolderName,
+  resolveDefaultFolderId,
   resolveDefaultNoteFolderId,
 } from "../src/lib/note-folders.ts";
 
@@ -40,12 +41,19 @@ assert.equal(
   "work",
   "Assigned notes keep their existing folder",
 );
+assert.equal(
+  resolveDefaultFolderId(undefined, legacyFolders),
+  "a-default",
+  "Legacy unfiled bookmarks use the same deterministic canonical Default",
+);
 
 const syncSource = readFileSync(new URL("../src/lib/sync/sync-engine.ts", import.meta.url), "utf8");
 const section = (start, end) => syncSource.slice(syncSource.indexOf(start), syncSource.indexOf(end));
 const createSection = section("export async function createFolder(", "export async function updateFolder(");
 const updateSection = section("export async function updateFolder(", "export async function deleteFolder(");
 const deleteSection = section("export async function deleteFolder(", "export async function getFolders(");
+const createItemSection = section("export async function createItem(", "export async function updateItem(");
+const updateItemSection = section("export async function updateItem(", "export async function deleteItem(");
 const getItemsSection = section("export async function getItems(", "export async function getDeletedItems(");
 
 assert.match(createSection, /isReservedDefaultFolderName\(folder\.name\)[\s\S]*DEFAULT_FOLDER_CREATE_ERROR/, "Public creation blocks reserved Default");
@@ -57,7 +65,9 @@ assert.ok(
   "Delete guard runs before the folder record is modified",
 );
 assert.match(deleteSection, /folderItems[\s\S]*i\.deleted = true[\s\S]*entityType: "item"/, "Ordinary folder deletion retains item-trash behavior");
-assert.match(getItemsSection, /getCanonicalDefaultNotesFolder[\s\S]*canonicalDefault\?\.clientId === folderId[\s\S]*!item\.folderId/, "Canonical Default includes legacy unfiled notes");
+assert.match(createItemSection, /item\.type === "note" \|\| item\.type === "url"[\s\S]*ensureDefaultNotesFolder/, "New notes and bookmarks default into the canonical folder");
+assert.match(updateItemSection, /item\.type === "note" \|\| item\.type === "url"[\s\S]*ensureDefaultNotesFolder/, "Updated notes and bookmarks cannot become unfiled");
+assert.match(getItemsSection, /getCanonicalDefaultNotesFolder[\s\S]*item\.type === "note" \|\| item\.type === "url"[\s\S]*!item\.folderId/, "Canonical Default includes legacy unfiled notes and bookmarks");
 
 for (const file of ["sidebar.tsx", "mobile-nav.tsx"]) {
   const source = readFileSync(new URL(`../src/components/layout/${file}`, import.meta.url), "utf8");
@@ -65,7 +75,8 @@ for (const file of ["sidebar.tsx", "mobile-nav.tsx"]) {
   assert.match(source, /isReservedDefaultFolderName\(name\)/, `${file} blocks duplicate Default creation`);
 }
 
-const notesView = readFileSync(new URL("../src/components/items/notes-folders-view.tsx", import.meta.url), "utf8");
-assert.match(notesView, /isReservedDefaultFolderName\(name\)/, "Notes folder dialog blocks duplicate Default creation");
+const foldersView = readFileSync(new URL("../src/components/items/notes-folders-view.tsx", import.meta.url), "utf8");
+assert.match(foldersView, /itemType: "note" \| "url"/, "Notes and bookmarks share the folder browser");
+assert.match(foldersView, /isReservedDefaultFolderName\(name\)/, "Item folder dialog blocks duplicate Default creation");
 
 console.log("Note folder contract checks passed");

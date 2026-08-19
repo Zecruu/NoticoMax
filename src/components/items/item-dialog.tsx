@@ -418,61 +418,63 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
         </div>
       )}
 
-      <div className="space-y-2">
-        <Label htmlFor="item-tag-input">Tags</Label>
-        <div className="flex gap-2">
-          <Input
-            id="item-tag-input"
-            placeholder="Add tag..."
-            value={tagInput}
-            onChange={(event) => setTagInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                handleAddTag();
-              }
-            }}
-          />
-          <Button type="button" variant="secondary" onClick={handleAddTag}>Add</Button>
-        </div>
-        {tags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {tags.map((tag) => (
-              <Badge key={tag} variant="secondary" className="gap-1">
-                {tag}
-                <button
-                  type="button"
-                  onClick={() => handleRemoveTag(tag)}
-                  className="ml-0.5 hover:text-destructive"
-                  aria-label={`Remove ${tag} tag`}
-                >
-                  <X className="h-2.5 w-2.5" />
-                </button>
-              </Badge>
-            ))}
+      {type !== "note" && (
+        <div className="space-y-2">
+          <Label htmlFor="item-tag-input">Tags</Label>
+          <div className="flex gap-2">
+            <Input
+              id="item-tag-input"
+              placeholder="Add tag..."
+              value={tagInput}
+              onChange={(event) => setTagInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  handleAddTag();
+                }
+              }}
+            />
+            <Button type="button" variant="secondary" onClick={handleAddTag}>Add</Button>
           </div>
-        )}
-        {allTags.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {allTags
-              .filter((tag) => !tags.includes(tag) && (!tagInput || tag.toLowerCase().includes(tagInput.toLowerCase())))
-              .slice(0, 8)
-              .map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => {
-                    setTags((current) => current.includes(tag) ? current : [...current, tag]);
-                    setTagInput("");
-                  }}
-                  className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  + {tag}
-                </button>
+          {tags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {tags.map((tag) => (
+                <Badge key={tag} variant="secondary" className="gap-1">
+                  {tag}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveTag(tag)}
+                    className="ml-0.5 hover:text-destructive"
+                    aria-label={`Remove ${tag} tag`}
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </Badge>
               ))}
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+          {allTags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {allTags
+                .filter((tag) => !tags.includes(tag) && (!tagInput || tag.toLowerCase().includes(tagInput.toLowerCase())))
+                .slice(0, 8)
+                .map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => {
+                      setTags((current) => current.includes(tag) ? current : [...current, tag]);
+                      setTagInput("");
+                    }}
+                    className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    + {tag}
+                  </button>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="space-y-2 border-t pt-4">
         {editingItem && (

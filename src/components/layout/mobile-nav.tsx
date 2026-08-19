@@ -241,7 +241,10 @@ export function MobileNav({
         {/* Notico assistant — routes to the dedicated assistant screen. */}
         <button
           onClick={() => router.push("/assistant")}
-          className="flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] text-muted-foreground transition-colors"
+          className={cn(
+            "flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] transition-colors",
+            activeView === "assistant" ? "text-primary" : "text-muted-foreground",
+          )}
         >
           <div className="flex h-8 w-8 items-center justify-center rounded-full">
             <Bot className="h-4 w-4" />

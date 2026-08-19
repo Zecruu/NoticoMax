@@ -2,9 +2,9 @@ import type { LocalFolder } from "@/lib/db/indexed-db";
 
 export const DEFAULT_NOTES_FOLDER_NAME = "Default";
 export const DEFAULT_NOTES_FOLDER_COLOR = "#eab308";
-export const DEFAULT_FOLDER_CREATE_ERROR = "Default is reserved for notes. Choose a different folder name.";
-export const DEFAULT_FOLDER_RENAME_ERROR = "The Default notes folder cannot be renamed.";
-export const DEFAULT_FOLDER_DELETE_ERROR = "The Default notes folder cannot be deleted.";
+export const DEFAULT_FOLDER_CREATE_ERROR = "Default is reserved. Choose a different folder name.";
+export const DEFAULT_FOLDER_RENAME_ERROR = "The Default folder cannot be renamed.";
+export const DEFAULT_FOLDER_DELETE_ERROR = "The Default folder cannot be deleted.";
 
 export function isReservedDefaultFolderName(name: string): boolean {
   return name.trim().toLowerCase() === DEFAULT_NOTES_FOLDER_NAME.toLowerCase();
@@ -24,6 +24,13 @@ export function getCanonicalDefaultNotesFolder(folders: LocalFolder[]): LocalFol
 }
 
 export function resolveDefaultNoteFolderId(
+  folderId: string | undefined,
+  folders: LocalFolder[],
+): string | undefined {
+  return resolveDefaultFolderId(folderId, folders);
+}
+
+export function resolveDefaultFolderId(
   folderId: string | undefined,
   folders: LocalFolder[],
 ): string | undefined {
