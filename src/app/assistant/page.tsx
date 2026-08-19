@@ -39,6 +39,7 @@ import {
   type NoticoLocalMemory,
 } from "@/lib/notico-local-memory";
 import { isMovieReleaseReminderIntent } from "@/lib/ai/research-intent";
+import { MarkdownRenderer } from "@/components/markdown-renderer";
 
 interface Memory {
   id: string;
@@ -990,7 +991,11 @@ export default function AssistantPage() {
                           : "max-w-[85%] rounded-2xl rounded-bl-sm bg-muted px-3.5 py-2 text-sm whitespace-pre-wrap"
                       }
                     >
-                      {m.content}
+                      {m.role === "assistant" ? (
+                        <MarkdownRenderer content={m.content} compact />
+                      ) : (
+                        m.content
+                      )}
                     </div>
                   </div>
                 ))}

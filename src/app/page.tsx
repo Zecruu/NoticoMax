@@ -12,6 +12,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { ItemList } from "@/components/items/item-list";
 import { ItemDialog } from "@/components/items/item-dialog";
 import { ItemFoldersView } from "@/components/items/notes-folders-view";
+import { ReminderGroupsView, REMINDER_GROUP_LABELS } from "@/components/items/reminder-groups-view";
 import { SearchCommand } from "@/components/items/search-bar";
 import { TrashView } from "@/components/items/trash-view";
 import { CalendarView } from "@/components/calendar/calendar-view";
@@ -30,11 +31,13 @@ import { Loader2 } from "lucide-react";
 import { toast } from "@/lib/native-toast";
 import { isUrlCategoryTag } from "@/lib/url-categories";
 import { resolveDefaultFolderId } from "@/lib/note-folders";
+import { filterRemindersByGroup, type ReminderGroupId } from "@/lib/reminder-groups";
 
 export default function Dashboard() {
   const router = useRouter();
   const [activeFilter, setActiveFilter] = useState("all");
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
+  const [activeReminderGroup, setActiveReminderGroup] = useState<ReminderGroupId | null>(null);
   // Initial view = the new dashboard tile grid. The user's previous view is
   // intentionally NOT persisted: every fresh launch lands on the calm
   // dashboard, not whichever sub-page they were last on.
@@ -130,6 +133,18 @@ export default function Dashboard() {
     if (!activeTag) return items;
     return items.filter((item) => item.tags.includes(activeTag));
   }, [items, activeTag]);
+
+  const reminderGroupItems = useMemo(
+    () => activeReminderGroup
+      ? filterRemindersByGroup(displayedItems, activeReminderGroup)
+      : displayedItems,
+    [activeReminderGroup, displayedItems],
+  );
+
+  const handleFilterChange = useCallback((filter: string) => {
+    setActiveFilter(filter);
+    setActiveReminderGroup(null);
+  }, []);
 
   // Get reminder items for calendar
   const reminderItems = useMemo(() => {
@@ -285,7 +300,7 @@ export default function Dashboard() {
             wrapperClassName="flex h-full w-full flex-col bg-background"
             activeFilter={activeFilter}
             activeFolder={activeFolder}
-            onFilterChange={(v) => { setActiveFilter(v); setSidebarOpen(false); }}
+            onFilterChange={(v) => { handleFilterChange(v); setSidebarOpen(false); }}
             onFolderChange={(v) => { setActiveFolder(v); setSidebarOpen(false); }}
             onCreateNew={() => { handleCreateNew(); setSidebarOpen(false); }}
             itemCounts={itemCounts}
@@ -308,7 +323,7 @@ export default function Dashboard() {
         <Sidebar
           activeFilter={activeFilter}
           activeFolder={activeFolder}
-          onFilterChange={setActiveFilter}
+          onFilterChange={handleFilterChange}
           onFolderChange={setActiveFolder}
           onCreateNew={handleCreateNew}
           itemCounts={itemCounts}
@@ -333,9 +348,9 @@ export default function Dashboard() {
               reminderCount={itemCounts.reminder ?? 0}
               upcomingReminderCount={upcomingReminderCount}
               onOpenAssistant={() => router.push("/assistant")}
-              onOpenNotes={() => { setActiveFolder(null); setActiveFilter("note"); setActiveView("list"); }}
-              onOpenUrls={() => { setActiveFolder(null); setActiveFilter("url"); setActiveView("list"); }}
-              onOpenReminders={() => { setActiveFolder(null); setActiveFilter("reminder"); setActiveView("list"); }}
+              onOpenNotes={() => { setActiveFolder(null); handleFilterChange("note"); setActiveView("list"); }}
+              onOpenUrls={() => { setActiveFolder(null); handleFilterChange("url"); setActiveView("list"); }}
+              onOpenReminders={() => { setActiveFolder(null); handleFilterChange("reminder"); setActiveView("list"); }}
               onOpenCalendar={() => setActiveView("calendar")}
               onOpenBudget={() => setActiveView("budget")}
               onOpenGoals={() => setActiveView("goals")}
@@ -376,6 +391,13 @@ export default function Dashboard() {
             <LocationsView />
           ) : activeView === "family" ? (
             <FamilyView />
+          ) : activeView === "list" && activeFilter === "reminder" && !activeReminderGroup ? (
+            <ReminderGroupsView
+              items={displayedItems}
+              loading={loading}
+              onOpenGroup={setActiveReminderGroup}
+              onCreateReminder={() => handleCreateWithType("reminder")}
+            />
           ) : activeView === "list" && (activeFilter === "note" || activeFilter === "url") && !activeFolder ? (
             <ItemFoldersView
               folders={folders}
@@ -406,7 +428,7 @@ export default function Dashboard() {
             })()
           ) : (
             <ItemList
-              items={displayedItems}
+              items={activeFilter === "reminder" ? reminderGroupItems : displayedItems}
               folders={folders}
               loading={loading}
               onEdit={handleEdit}
@@ -417,8 +439,17 @@ export default function Dashboard() {
               activeFilter={activeFilter}
               activeFolder={activeFolder}
               onCreateWithType={handleCreateWithType}
-              onCreateNew={handleCreateNew}
-              onBackToFolders={activeFilter === "note" || activeFilter === "url" ? () => setActiveFolder(null) : undefined}
+              onCreateNew={() => handleCreateWithType(
+                activeFilter === "url" ? "url" : activeFilter === "reminder" ? "reminder" : "note",
+              )}
+              onBackToFolders={
+                activeFilter === "reminder"
+                  ? () => setActiveReminderGroup(null)
+                  : activeFilter === "note" || activeFilter === "url"
+                    ? () => setActiveFolder(null)
+                    : undefined
+              }
+              title={activeReminderGroup ? REMINDER_GROUP_LABELS[activeReminderGroup] : undefined}
             />
           )}
         </main>
@@ -427,7 +458,7 @@ export default function Dashboard() {
       <MobileNav
         activeFilter={activeFilter}
         activeFolder={activeFolder}
-        onFilterChange={setActiveFilter}
+        onFilterChange={handleFilterChange}
         onFolderChange={setActiveFolder}
         onCreateNew={handleCreateNew}
         folders={folders}

@@ -6,6 +6,7 @@ import rehypeHighlight from "rehype-highlight";
 import { Copy, Check, Circle, CheckCircle2 } from "lucide-react";
 import { useState, type ComponentPropsWithoutRef } from "react";
 import "highlight.js/styles/github-dark.css";
+import { openInBrowser } from "@/lib/capacitor/auth-helpers";
 
 interface MarkdownRendererProps {
   content: string;
@@ -26,6 +27,28 @@ export function MarkdownRenderer({ content, compact, onToggleTask }: MarkdownRen
         components={{
           pre({ children }) {
             return <CodeBlockWrapper>{children}</CodeBlockWrapper>;
+          },
+          a({ href, children, onClick, ...props }: ComponentPropsWithoutRef<"a">) {
+            const external = !!href && /^https?:\/\//i.test(href);
+            return (
+              <a
+                {...props}
+                href={href}
+                target={external ? "_blank" : undefined}
+                rel={external ? "noopener noreferrer" : undefined}
+                className="font-medium text-primary underline underline-offset-2"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onClick?.(event);
+                  if (external && href && !event.defaultPrevented) {
+                    event.preventDefault();
+                    void openInBrowser(href);
+                  }
+                }}
+              >
+                {children}
+              </a>
+            );
           },
           input(props: ComponentPropsWithoutRef<"input">) {
             if (props.type === "checkbox") {

@@ -1,4 +1,5 @@
 import { isCapacitorNative } from "@/lib/platform";
+import { openExternalBrowserUrl } from "@/lib/external-browser";
 
 export async function openOAuthInBrowser(provider: string): Promise<boolean> {
   if (!isCapacitorNative()) return false;
@@ -14,12 +15,14 @@ export async function openOAuthInBrowser(provider: string): Promise<boolean> {
   return true;
 }
 
-export async function openInBrowser(url: string) {
-  if (!isCapacitorNative()) {
-    window.location.href = url;
-    return;
-  }
-
-  const { Browser } = await import("@capacitor/browser");
-  await Browser.open({ url, presentationStyle: "popover" });
+export async function openInBrowser(url: string): Promise<boolean> {
+  return openExternalBrowserUrl(url, {
+    native: isCapacitorNative(),
+    openNative: async (externalUrl) => {
+      const { Browser } = await import("@capacitor/browser");
+      await Browser.open({ url: externalUrl, presentationStyle: "popover" });
+    },
+    openWindow: (externalUrl, target, features) =>
+      window.open(externalUrl, target, features),
+  });
 }

@@ -20,11 +20,12 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { ChevronLeft, X, Eye, Pencil, List, ListOrdered, ALargeSmall, ListChecks, Trash2, ChevronDown, MoreHorizontal, Share2 } from "lucide-react";
+import { ChevronLeft, X, Eye, Pencil, List, ListOrdered, ALargeSmall, ListChecks, Trash2, ChevronDown, MoreHorizontal, Share2, ExternalLink } from "lucide-react";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
 import { withoutUrlCategoryTags } from "@/lib/url-categories";
+import { openInBrowser } from "@/lib/capacitor/auth-helpers";
 
 interface ItemDialogProps {
   open: boolean;
@@ -49,6 +50,11 @@ function toLocalDatetimeValue(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function extractHttpUrls(value: string): string[] {
+  const matches = value.match(/https?:\/\/[^\s<>"']+/gi) ?? [];
+  return Array.from(new Set(matches.map((url) => url.replace(/[),.;!?]+$/, "")))).slice(0, 3);
+}
+
 export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingItem, folders, defaultFolderId, defaultType = "note", defaultReminderDate, allTags = [] }: ItemDialogProps) {
   const [type, setType] = useState<ItemType>("note");
   const [title, setTitle] = useState("");
@@ -63,6 +69,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
   const [previewing, setPreviewing] = useState(false);
   const [activeListMode, setActiveListMode] = useState<"bullet" | "numbered" | "lettered" | "checklist" | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const reminderLinks = type === "reminder" ? extractHttpUrls(content) : [];
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const closingRef = useRef(false);
 
@@ -647,6 +654,21 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
                 onChange={(event) => setContent(event.target.value)}
                 rows={4}
               />
+              {reminderLinks.length > 0 && (
+                <div className="space-y-1" aria-label="Reminder links">
+                  {reminderLinks.map((link) => (
+                    <button
+                      key={link}
+                      type="button"
+                      onClick={() => void openInBrowser(link)}
+                      className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-xs font-medium text-primary transition-colors hover:bg-muted"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{link}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <button
               type="button"

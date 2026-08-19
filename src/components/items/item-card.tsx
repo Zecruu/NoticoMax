@@ -62,6 +62,31 @@ function formatRelative(iso: string): string {
   return d.toLocaleDateString([], { month: "numeric", day: "numeric", year: "2-digit" });
 }
 
+function formatReminderSchedule(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Date unavailable";
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(date);
+  target.setHours(0, 0, 0, 0);
+  const dayOffset = Math.round((target.getTime() - today.getTime()) / 86_400_000);
+  const dayLabel = dayOffset === 0
+    ? "Today"
+    : dayOffset === 1
+      ? "Tomorrow"
+      : date.toLocaleDateString(undefined, {
+          weekday: dayOffset > 1 && dayOffset < 7 ? "long" : undefined,
+          month: dayOffset > 1 && dayOffset < 7 ? undefined : "short",
+          day: dayOffset > 1 && dayOffset < 7 ? undefined : "numeric",
+          year: date.getFullYear() !== today.getFullYear() ? "numeric" : undefined,
+        });
+  return `${dayLabel} at ${date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  })}`;
+}
+
 // Compact plain-text preview with markdown list prefixes removed.
 function firstLinePreview(content: string): string {
   return content
@@ -208,24 +233,23 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
           </div>
 
           {/* Date and type-specific timing metadata */}
-          <div className="flex items-baseline gap-1.5 text-[11px] text-muted-foreground mt-0.5">
-            <span className="shrink-0 tabular-nums">{displayDate}</span>
-            {item.type === "reminder" && item.reminderDate && (
+          <div className="mt-0.5 flex items-baseline gap-1.5 text-[11px] text-muted-foreground">
+            {item.type === "reminder" && item.reminderDate ? (
+              <span
+                className={cn(
+                  "truncate font-medium tabular-nums",
+                  isOverdue && !item.reminderCompleted && "text-destructive",
+                )}
+              >
+                {formatReminderSchedule(item.reminderDate)}
+              </span>
+            ) : (
+              <span className="shrink-0 tabular-nums">{displayDate}</span>
+            )}
+            {item.type === "reminder" && item.recurrence && item.recurrence !== "none" && (
               <>
                 <span aria-hidden>·</span>
-                <span
-                  className={cn(
-                    "truncate",
-                    isOverdue && !item.reminderCompleted && "text-destructive",
-                  )}
-                >
-                  {new Date(item.reminderDate).toLocaleDateString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </span>
+                <span className="capitalize">{item.recurrence}</span>
               </>
             )}
           </div>
@@ -234,6 +258,12 @@ export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggle
             <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
               {preview}
             </p>
+          )}
+
+          {item.type === "reminder" && item.content && (
+            <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+              <MarkdownRenderer content={item.content} compact />
+            </div>
           )}
 
           {/* URL bookmarks: surface the link */}

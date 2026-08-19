@@ -19,6 +19,7 @@ interface ItemListProps {
   onCreateWithType?: (type: "note" | "url" | "reminder") => void;
   onCreateNew?: () => void;
   onBackToFolders?: () => void;
+  title?: string;
 }
 
 const emptyMessages: Record<string, { icon: React.ElementType; message: string }> = {
@@ -49,12 +50,13 @@ export function ItemList({
   onCreateWithType,
   onCreateNew,
   onBackToFolders,
+  title,
 }: ItemListProps) {
   // Build a folder lookup map
   const folderMap = new Map(folders.map((f) => [f.clientId, f]));
   const addBtn = addButtonConfig[activeFilter];
   const activeFolderRecord = activeFolder ? folderMap.get(activeFolder) : undefined;
-  const pageTitle = activeFolderRecord?.name ?? ({
+  const pageTitle = title ?? activeFolderRecord?.name ?? ({
     all: "All items",
     note: "Notes",
     url: "URLs",
@@ -78,7 +80,7 @@ export function ItemList({
       <div className="px-4 py-4 md:px-0 md:py-0">
         <div className="flex min-h-11 items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-1">
-            {(activeFilter === "note" || activeFilter === "url") && activeFolder && onBackToFolders && (
+            {onBackToFolders && (activeFolder || activeFilter === "reminder") && (
               <button
                 type="button"
                 onClick={onBackToFolders}
@@ -93,6 +95,19 @@ export function ItemList({
               <p className="text-xs text-muted-foreground">{loading ? "Loading…" : countLabel}</p>
             </div>
           </div>
+          {onCreateNew && (activeFolder || onBackToFolders) && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11 shrink-0 md:hidden"
+              onClick={onCreateNew}
+              aria-label={addBtn?.label ?? "Add item"}
+              title={addBtn?.label ?? "Add item"}
+            >
+              <Plus className="h-5 w-5" />
+            </Button>
+          )}
           <div className="hidden md:flex">
             {activeFolder && onCreateNew && (
               <Button size="sm" variant="outline" className="gap-1.5" onClick={onCreateNew}>
