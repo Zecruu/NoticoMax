@@ -20,7 +20,7 @@ export function PricingTable({
 }: PricingTableProps) {
   return (
     <div className="space-y-10">
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {PLANS.map((plan) => {
           const current = currentPlanId === plan.id;
           const selecting = selectingPlanId === plan.id;
@@ -90,7 +90,7 @@ export function PricingTable({
       </div>
 
       <div className="overflow-x-auto rounded-2xl border">
-        <table className="w-full min-w-[36rem] text-sm">
+        <table className="w-full min-w-[40rem] text-sm">
           <thead className="bg-muted/50">
             <tr className="border-b text-left">
               <th className="px-4 py-3 font-medium">What you get</th>
@@ -105,9 +105,9 @@ export function PricingTable({
             {PLAN_COMPARISON.map((row) => (
               <tr key={row.label} className="border-b last:border-0">
                 <td className="px-4 py-3 text-muted-foreground">{row.label}</td>
-                <ComparisonCell included={row.free} />
-                <ComparisonCell included={row.pro} />
-                <ComparisonCell included={row.family} />
+                {PLANS.map((plan) => (
+                  <ComparisonCell key={plan.id} value={row.included[plan.id]} />
+                ))}
               </tr>
             ))}
           </tbody>
@@ -117,10 +117,13 @@ export function PricingTable({
   );
 }
 
-function ComparisonCell({ included }: { included: boolean }) {
+function ComparisonCell({ value }: { value: boolean | string }) {
+  if (typeof value === "string") {
+    return <td className="px-4 py-3 tabular-nums">{value}</td>;
+  }
   return (
     <td className="px-4 py-3">
-      {included ? (
+      {value ? (
         <Check className="h-4 w-4 text-primary" aria-label="Included" />
       ) : (
         <Minus className="h-4 w-4 text-muted-foreground/50" aria-label="Not included" />

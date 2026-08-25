@@ -1,20 +1,24 @@
 /**
- * Public plan catalog. Keep this aligned with what we actually grant:
- *   Free  — local-only, ads on iOS
- *   Pro   — cloud sync + ads removed ($2.99/mo, Apple IAP)
- *   Family — household sharing add-on (entitlement exists; no published USD price)
+ * Public plan catalog. Paid tiers are Pro, Platinum, and MAXXED.
  *
- * Do not list Lyte assistant tiers or storage SKUs here until those are
- * sold in the App Store and the in-app purchase UI is live.
+ * Product IDs (RevenueCat / App Store):
+ *   Pro       → com.noticomax.app.plus.monthly
+ *   Platinum  → com.noticomax.app.platinum.monthly
+ *   MAXXED    → com.noticomax.app.maxxed.monthly
+ *
+ * Legacy $2.99 Pro (`com.noticomax.pro.monthly`) is off sale.
+ * Family household sharing is not a marketed paid tier.
  */
 
-export type PlanId = "free" | "pro" | "family";
+export type PlanId = "free" | "pro" | "platinum" | "maxxed";
+export type AssistantPlanId = "plus" | "platinum" | "maxxed";
 
 export interface PlanDefinition {
   id: PlanId;
   name: string;
   tagline: string;
-  /** Visible price, e.g. "$2.99" or "In-app". */
+  productId?: string;
+  /** Visible price, e.g. "$34.99" or "In-app". */
   priceLabel: string;
   /** Suffix such as "/ month". Null when there is no published cadence. */
   pricePeriod: string | null;
@@ -26,9 +30,7 @@ export interface PlanDefinition {
 
 export interface ComparisonRow {
   label: string;
-  free: boolean;
-  pro: boolean;
-  family: boolean;
+  included: Record<PlanId, boolean | string>;
 }
 
 export const PLANS: PlanDefinition[] = [
@@ -49,44 +51,58 @@ export const PLANS: PlanDefinition[] = [
   {
     id: "pro",
     name: "Pro",
-    tagline: "Sync everywhere. No ads.",
-    priceLabel: "$2.99",
-    pricePeriod: "/ month",
-    priceNote: "USD list price. Apple shows the localized price for your country.",
-    highlighted: true,
+    tagline: "Sync plus Lyte for everyday use.",
+    productId: "com.noticomax.app.plus.monthly",
+    priceLabel: "In-app",
+    pricePeriod: null,
+    priceNote: "Apple shows the localized price for your country.",
     ctaLabel: "Upgrade to Pro",
     features: [
-      "Everything in Free",
       "Cloud sync across iPhone, desktop, and web",
       "No ads",
-      "100 MB cloud storage when file uploads ship",
+      "Lyte: 1,000 chats / month",
+      "Lyte: 25 web lookups / month",
     ],
   },
   {
-    id: "family",
-    name: "Family",
-    tagline: "Share a household workspace.",
+    id: "platinum",
+    name: "Platinum",
+    tagline: "More Lyte room for daily work.",
+    productId: "com.noticomax.app.platinum.monthly",
     priceLabel: "In-app",
     pricePeriod: null,
-    priceNote: "Household add-on. Apple shows the price in the App Store purchase sheet.",
-    ctaLabel: "See Family details",
+    priceNote: "Apple shows the localized price for your country.",
+    highlighted: true,
+    ctaLabel: "Upgrade to Platinum",
     features: [
-      "Create a household and invite members",
-      "Shared folders, lists, and budget",
-      "Extra seats and family storage as add-ons",
-      "Lifetime Pro can create a family without this add-on",
+      "Everything in Pro",
+      "Lyte: 2,000 chats / month",
+      "Lyte: 50 web lookups / month",
+    ],
+  },
+  {
+    id: "maxxed",
+    name: "MAXXED",
+    tagline: "The highest Lyte allowance.",
+    productId: "com.noticomax.app.maxxed.monthly",
+    priceLabel: "$34.99",
+    pricePeriod: "/ month",
+    priceNote: "USD list price. Apple shows the localized price for your country.",
+    ctaLabel: "Upgrade to MAXXED",
+    features: [
+      "Everything in Platinum",
+      "Lyte: 10,000 chats / month",
+      "Lyte: 250 web lookups / month",
     ],
   },
 ];
 
 export const PLAN_COMPARISON: ComparisonRow[] = [
-  { label: "Notes, reminders, budget, goals, passwords", free: true, pro: true, family: true },
-  { label: "Works offline", free: true, pro: true, family: true },
-  { label: "Cloud sync across devices", free: false, pro: true, family: false },
-  { label: "Ad-free", free: false, pro: true, family: false },
-  { label: "100 MB cloud storage", free: false, pro: true, family: false },
-  { label: "Shared household folders and budget", free: false, pro: false, family: true },
-  { label: "Invite family members", free: false, pro: false, family: true },
+  { label: "Notes, reminders, budget, goals, passwords", included: { free: true, pro: true, platinum: true, maxxed: true } },
+  { label: "Works offline", included: { free: true, pro: true, platinum: true, maxxed: true } },
+  { label: "Cloud sync and ad-free", included: { free: false, pro: true, platinum: true, maxxed: true } },
+  { label: "Lyte monthly chats", included: { free: false, pro: "1,000", platinum: "2,000", maxxed: "10,000" } },
+  { label: "Lyte monthly web lookups", included: { free: false, pro: "25", platinum: "50", maxxed: "250" } },
 ];
 
 export function getPlan(id: PlanId): PlanDefinition {
@@ -95,12 +111,19 @@ export function getPlan(id: PlanId): PlanDefinition {
   return plan;
 }
 
+export function publicPlanIdFromAssistantPlan(plan?: AssistantPlanId | null): PlanId | null {
+  if (plan === "plus") return "pro";
+  if (plan === "platinum" || plan === "maxxed") return plan;
+  return null;
+}
+
 export function resolveCurrentPlanId(entitlements: {
   proActive?: boolean;
   lifetimePro?: boolean;
-  familyPlanActive?: boolean;
+  assistantPlan?: AssistantPlanId | null;
 }): PlanId {
-  if (entitlements.familyPlanActive) return "family";
+  const fromAssistant = publicPlanIdFromAssistantPlan(entitlements.assistantPlan);
+  if (fromAssistant) return fromAssistant;
   if (entitlements.proActive || entitlements.lifetimePro) return "pro";
   return "free";
 }

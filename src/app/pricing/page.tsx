@@ -19,11 +19,8 @@ export default function PricingPage() {
   }, []);
 
   async function handleSelectPlan(planId: PlanId) {
+    if (planId === "free") return;
     if (!iosBilling) {
-      if (planId === "family") {
-        document.getElementById("family-billing")?.scrollIntoView({ behavior: "smooth" });
-        return;
-      }
       window.location.href = "/";
       return;
     }
@@ -73,9 +70,9 @@ export default function PricingPage() {
             Plans that match what the app actually unlocks.
           </h1>
           <p className="text-sm leading-relaxed text-muted-foreground md:text-base">
-            Free stays on this device. Pro adds cloud sync and removes ads for $2.99 a month.
-            Family adds household sharing. iOS charges through Apple; desktop and web can
-            activate an existing license in Settings.
+            Free stays on this device. Paid plans are Pro, Platinum, and MAXXED — each
+            unlocks cloud sync, removes ads, and includes a Lyte allowance. iOS charges
+            through Apple; desktop and web can activate an existing license in Settings.
           </p>
         </div>
 
@@ -99,11 +96,11 @@ export default function PricingPage() {
               Settings. New Pro purchases are completed on iOS.
             </p>
           </div>
-          <div id="family-billing" className="space-y-1">
-            <h2 className="font-semibold">Family</h2>
+          <div className="space-y-1">
+            <h2 className="font-semibold">Lyte</h2>
             <p className="text-muted-foreground">
-              Family is a household add-on. Lifetime Pro accounts can create a family today.
-              Everyone else can join with an invite code.
+              Chat and web-lookup limits reset each month with your plan. MAXXED is $34.99
+              a month; Pro and Platinum show their App Store price at checkout.
             </p>
           </div>
         </section>

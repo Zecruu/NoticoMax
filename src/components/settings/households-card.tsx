@@ -445,7 +445,7 @@ export function HouseholdsCard() {
                 above.
               </p>
               <Link href="/pricing" className="inline-block text-xs font-medium text-primary hover:underline">
-                See Family plan
+                See plans
               </Link>
             </div>
           )}

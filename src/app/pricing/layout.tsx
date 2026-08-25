@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Plans and pricing — NOTICO MAX",
   description:
-    "Free stays on this device. Pro adds cloud sync and removes ads for $2.99 a month. Family adds household sharing.",
+    "Free stays on this device. Paid plans are Pro, Platinum, and MAXXED — sync, no ads, and Lyte allowances.",
 };
 
 export default function PricingLayout({ children }: { children: React.ReactNode }) {
