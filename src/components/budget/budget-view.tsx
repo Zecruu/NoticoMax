@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   useBudget,
   type BudgetCategoryWithTotals,
@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
+import type { LocalBudgetTransaction } from "@/lib/db/indexed-db";
 
 const PRESET_COLORS = [
   "#ef4444", "#f97316", "#eab308", "#22c55e",
@@ -50,6 +51,19 @@ const PRESET_COLORS = [
 function formatMoney(n: number): string {
   const sign = n < 0 ? "-" : "";
   return `${sign}$${Math.abs(n).toFixed(2)}`;
+}
+
+function expenseName(tx: LocalBudgetTransaction): string {
+  return tx.note?.trim() || "Expense";
+}
+
+function normalizeExpenseName(value: string): string | undefined {
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  return trimmed || undefined;
+}
+
+function formatTransactionDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 export function BudgetView() {
@@ -93,6 +107,7 @@ export function BudgetView() {
   const [spendingCategory, setSpendingCategory] = useState<BudgetCategoryWithTotals | null>(null);
   const [spendAmount, setSpendAmount] = useState("");
   const [spendNote, setSpendNote] = useState("");
+  const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<string>>(() => new Set());
 
   const [limitEditingCategory, setLimitEditingCategory] = useState<BudgetCategoryWithTotals | null>(null);
   const [limitInput, setLimitInput] = useState("");
@@ -274,20 +289,56 @@ export function BudgetView() {
       const [y, m] = viewMonthKey.split("-").map(Number);
       date = new Date(y, m - 1, 15, 12, 0, 0).toISOString();
     }
+    const note = normalizeExpenseName(spendNote);
     await addTransaction({
       categoryId: spendingCategory.clientId,
       amount,
-      note: spendNote.trim() || undefined,
+      note,
       date,
     });
     setSpendAmount("");
     setSpendNote("");
     setSpendingCategory(null);
-    toast.success(`${formatMoney(amount)} logged`);
+    toast.success(`${note ?? "Expense"} · ${formatMoney(amount)} logged`);
   };
 
+  const sortedMonthTransactions = useMemo(
+    () => monthTransactions.slice().sort((a, b) => b.date.localeCompare(a.date)),
+    [monthTransactions],
+  );
+  const transactionsByCategoryId = useMemo(() => {
+    const map = new Map<string, LocalBudgetTransaction[]>();
+    for (const tx of sortedMonthTransactions) {
+      const txs = map.get(tx.categoryId) ?? [];
+      txs.push(tx);
+      map.set(tx.categoryId, txs);
+    }
+    return map;
+  }, [sortedMonthTransactions]);
   const txCategoryNameById = new Map(categories.map((c) => [c.clientId, c.name]));
   const txCategoryColorById = new Map(categories.map((c) => [c.clientId, c.color]));
+
+  const toggleCategoryEntries = (categoryId: string) => {
+    setExpandedCategoryIds((current) => {
+      const next = new Set(current);
+      if (next.has(categoryId)) next.delete(categoryId);
+      else next.add(categoryId);
+      return next;
+    });
+  };
+
+  const closeSpendingDialog = () => {
+    setSpendingCategory(null);
+    setSpendAmount("");
+    setSpendNote("");
+  };
+
+  const handleDeleteTransaction = (tx: LocalBudgetTransaction) => {
+    const name = expenseName(tx);
+    if (confirm(`Remove "${name}" (${formatMoney(tx.amount)}) entry?`)) {
+      deleteTransaction(tx.clientId);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 md:px-6 md:py-8 space-y-6">
@@ -680,6 +731,12 @@ export function BudgetView() {
             {categories.map((cat) => {
               const overspent = cat.remaining < 0;
               const pct = Math.min(100, Math.max(0, cat.percent));
+              const categoryTransactions = transactionsByCategoryId.get(cat.clientId) ?? [];
+              const isExpanded = expandedCategoryIds.has(cat.clientId);
+              const visibleTransactions = isExpanded
+                ? categoryTransactions
+                : categoryTransactions.slice(0, 3);
+              const earlierCount = Math.max(0, categoryTransactions.length - 3);
               return (
                 <Card key={cat.clientId}>
                   <CardContent className="pt-4 pb-4">
@@ -740,6 +797,54 @@ export function BudgetView() {
                         }}
                       />
                     </div>
+
+                    {categoryTransactions.length > 0 && (
+                      <div className="mt-3 rounded-lg border bg-muted/20">
+                        <div className="flex items-center justify-between px-3 py-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                          <span>Recent entries</span>
+                          <span>{categoryTransactions.length}</span>
+                        </div>
+                        <div className="divide-y">
+                          {visibleTransactions.map((tx) => (
+                            <div key={tx.clientId} className="flex items-center gap-2 px-3 py-2">
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-medium">{expenseName(tx)}</p>
+                                <p className="text-xs tabular-nums text-muted-foreground">
+                                  {formatTransactionDate(tx.date)}
+                                </p>
+                              </div>
+                              <span className="shrink-0 text-sm font-medium tabular-nums">
+                                {formatMoney(tx.amount)}
+                              </span>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                                onClick={() => handleDeleteTransaction(tx)}
+                                aria-label={`Remove ${expenseName(tx)} entry`}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          ))}
+                          {earlierCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => toggleCategoryEntries(cat.clientId)}
+                              aria-expanded={isExpanded}
+                              className="flex min-h-10 w-full items-center justify-between px-3 py-2 text-left text-sm font-medium text-primary transition-colors hover:bg-primary/10 active:bg-primary/15"
+                            >
+                              <span>
+                                {isExpanded
+                                  ? `Hide ${earlierCount} earlier entr${earlierCount === 1 ? "y" : "ies"}`
+                                  : `+${earlierCount} earlier entr${earlierCount === 1 ? "y" : "ies"}`}
+                              </span>
+                              <ChevronRight className={cn("h-4 w-4 transition-transform", isExpanded && "rotate-90")} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               );
@@ -754,9 +859,7 @@ export function BudgetView() {
           <h2 className="text-lg font-semibold mb-3">Transactions ({monthTransactions.length})</h2>
           <Card>
             <CardContent className="p-0 divide-y">
-              {monthTransactions
-                .slice()
-                .sort((a, b) => b.date.localeCompare(a.date))
+              {sortedMonthTransactions
                 .slice(0, 50)
                 .map((tx) => (
                   <div key={tx.clientId} className="flex items-center gap-3 px-4 py-2.5">
@@ -765,12 +868,9 @@ export function BudgetView() {
                       style={{ backgroundColor: txCategoryColorById.get(tx.categoryId) ?? "#6b7280" }}
                     />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm truncate">
-                        {txCategoryNameById.get(tx.categoryId) ?? "(deleted category)"}
-                        {tx.note && <span className="text-muted-foreground"> · {tx.note}</span>}
-                      </p>
+                      <p className="text-sm font-medium truncate">{expenseName(tx)}</p>
                       <p className="text-xs text-muted-foreground tabular-nums">
-                        {new Date(tx.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                        {txCategoryNameById.get(tx.categoryId) ?? "(deleted category)"} · {formatTransactionDate(tx.date)}
                       </p>
                     </div>
                     <span className="text-sm font-medium tabular-nums">{formatMoney(tx.amount)}</span>
@@ -778,11 +878,8 @@ export function BudgetView() {
                       size="icon"
                       variant="ghost"
                       className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => {
-                        if (confirm(`Remove ${formatMoney(tx.amount)} entry?`)) {
-                          deleteTransaction(tx.clientId);
-                        }
-                      }}
+                      onClick={() => handleDeleteTransaction(tx)}
+                      aria-label={`Remove ${expenseName(tx)} entry`}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
@@ -849,7 +946,7 @@ export function BudgetView() {
       </Dialog>
 
       {/* Log spending dialog */}
-      <Dialog open={!!spendingCategory} onOpenChange={(o) => !o && setSpendingCategory(null)}>
+      <Dialog open={!!spendingCategory} onOpenChange={(o) => !o && closeSpendingDialog()}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Log Spending</DialogTitle>
@@ -859,31 +956,39 @@ export function BudgetView() {
               )}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem]">
+            <div className="space-y-1.5">
+              <Label htmlFor="spend-note">Expense name</Label>
+              <Input
+                id="spend-note"
+                placeholder="Groceries, gas, coffee…"
+                value={spendNote}
+                onChange={(e) => setSpendNote(e.target.value)}
+                autoFocus
+                maxLength={80}
+              />
+              <p className="text-[11px] text-muted-foreground">Optional. Blank entries show as Expense.</p>
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="spend-amt">Amount ($)</Label>
               <Input
                 id="spend-amt"
                 type="number"
                 inputMode="decimal"
-                placeholder="25"
+                placeholder="60"
                 value={spendAmount}
                 onChange={(e) => setSpendAmount(e.target.value)}
-                autoFocus
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="spend-note">Note (optional)</Label>
-              <Input
-                id="spend-note"
-                placeholder="What was it for?"
-                value={spendNote}
-                onChange={(e) => setSpendNote(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleAddSpending();
+                  }
+                }}
               />
             </div>
           </div>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setSpendingCategory(null)}>Cancel</Button>
+            <Button variant="outline" onClick={closeSpendingDialog}>Cancel</Button>
             <Button onClick={handleAddSpending}>Log Spend</Button>
           </div>
         </DialogContent>
