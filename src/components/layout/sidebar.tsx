@@ -29,6 +29,7 @@ import {
   Target,
   MapPin,
   Bot,
+  CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -767,6 +768,13 @@ export function Sidebar({
         >
           <Bot className="h-4 w-4" />
           Lyte
+        </Link>
+        <Link
+          href="/pricing"
+          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        >
+          <CreditCard className="h-4 w-4" />
+          Plans
         </Link>
         <Link
           href="/settings"

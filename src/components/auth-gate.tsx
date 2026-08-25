@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LogIn, UserPlus, Apple, Eye, EyeOff } from "lucide-react";
 import { triggerAppleSignIn } from "@/lib/auth/apple-signin-client";
+import Link from "next/link";
 
 interface AuthGateProps {
   onLogin: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
@@ -220,6 +221,11 @@ export function AuthGate({ onLogin, onLoginWithApple, onRegister, onSkip }: Auth
             </button>
             <br />
             <span className="text-xs">(local-only mode, no cloud sync)</span>
+          </p>
+          <p className="text-center text-sm">
+            <Link href="/pricing" className="text-primary hover:underline">
+              See plans and pricing
+            </Link>
           </p>
         </CardContent>
       </Card>

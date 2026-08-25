@@ -48,6 +48,7 @@ public/swe-worker-*.js
 public/fallback-*.js
 dist-electron/
 .env
+.cursorrules
 
 # Capacitor native platform build artifacts
 ios/App/Pods/

@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import db from "@/lib/db/indexed-db";
 import { cn } from "@/lib/utils";
+import { PlanStatusCard } from "@/components/billing/plan-status-card";
 import {
   FileText,
   Link2,
@@ -141,6 +142,8 @@ export function DashboardHome({
           New Note
         </button>
       </div>
+
+      <PlanStatusCard />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Tile

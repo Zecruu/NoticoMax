@@ -104,7 +104,17 @@ export function useLicense() {
   //      entitlements. A 401 means the session is genuinely revoked → log
   //      out. A network error means offline → keep the cached state.
   const refresh = useCallback(async () => {
-    const supabase = getSupabaseBrowserClient();
+    let supabase: ReturnType<typeof getSupabaseBrowserClient>;
+    try {
+      supabase = getSupabaseBrowserClient();
+    } catch (err) {
+      console.warn("[use-license] Supabase client unavailable:", err);
+      setUserId(null);
+      setEmail(null);
+      setIsLoggedIn(false);
+      setEntitlements(FREE_ENTITLEMENTS);
+      return;
+    }
     const { data: { session } } = await supabase.auth.getSession();
 
     // No local session at all → unambiguously logged out.
@@ -207,8 +217,14 @@ export function useLicense() {
       if (cached) setEntitlements(JSON.parse(cached));
     } catch {}
 
-    const supabase = getSupabaseBrowserClient();
     refresh().finally(() => setIsLoading(false));
+
+    let supabase: ReturnType<typeof getSupabaseBrowserClient>;
+    try {
+      supabase = getSupabaseBrowserClient();
+    } catch {
+      return;
+    }
 
     const { data: sub } = supabase.auth.onAuthStateChange(() => {
       refresh();
@@ -381,6 +397,7 @@ export function useLicense() {
     isLoading,
     isLoggedIn,
     email,
+    refresh,
     login,
     loginWithApple,
     register,

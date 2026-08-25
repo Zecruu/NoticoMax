@@ -8,9 +8,11 @@ let cached: ReturnType<typeof createBrowserClient> | null = null;
  */
 export function getSupabaseBrowserClient() {
   if (cached) return cached;
-  cached = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
-  );
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !key) {
+    throw new Error("Supabase browser client is not configured");
+  }
+  cached = createBrowserClient(url, key);
   return cached;
 }

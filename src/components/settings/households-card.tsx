@@ -21,6 +21,7 @@ import {
   Sparkles,
   Stethoscope,
 } from "lucide-react";
+import Link from "next/link";
 import db from "@/lib/db/indexed-db";
 import { performSync } from "@/lib/sync/sync-engine";
 import { toast } from "@/lib/native-toast";
@@ -440,9 +441,12 @@ export function HouseholdsCard() {
               </div>
               <p className="text-xs text-muted-foreground">
                 Create a shared family folder (notes, reminders, lists, passwords) and a shared
-                budget with your household. Family plans are coming soon — you can still join an
-                existing family with a code above.
+                budget with your household. You can still join an existing family with a code
+                above.
               </p>
+              <Link href="/pricing" className="inline-block text-xs font-medium text-primary hover:underline">
+                See Family plan
+              </Link>
             </div>
           )}
         </div>

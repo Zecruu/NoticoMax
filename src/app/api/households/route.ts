@@ -180,7 +180,7 @@ export async function POST(request: NextRequest) {
     .maybeSingle();
   if (!ent?.family_plan_active && !ent?.lifetime_pro) {
     return NextResponse.json(
-      { error: "Family Plan required to create a family. Upgrade in Settings → Subscription.", upgradeRequired: true },
+      { error: "Family Plan required to create a family. See Plans for details.", upgradeRequired: true },
       { status: 402 },
     );
   }
