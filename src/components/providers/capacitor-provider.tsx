@@ -32,10 +32,6 @@ export function CapacitorProvider({ children }: { children: React.ReactNode }) {
       });
     }
 
-    import("@/lib/ads/admob-client").then(({ initAdMob }) => {
-      initAdMob();
-    });
-
     // iOS Share Sheet → ShareExtension opens noticomax://share?title=&text=&url=.
     // Capacitor's App plugin fires `appUrlOpen` for any URL with our scheme;
     // we route the share params through to the existing /share-target page
