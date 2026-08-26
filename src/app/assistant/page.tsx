@@ -463,7 +463,7 @@ export default function AssistantPage() {
           {/* Composer — sits above the footer nav. */}
           <div
             data-keyboard-keep-visible
-            className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 border-t bg-background/95 px-4 py-3 backdrop-blur md:bottom-0"
+            className="fixed inset-x-0 bottom-[max(calc(4rem+env(safe-area-inset-bottom)),calc(var(--keyboard-height,0px)+0.5rem))] z-40 border-t bg-background/95 px-4 py-3 backdrop-blur md:bottom-0"
           >
             <div className="mx-auto flex max-w-2xl items-center gap-2">
               <Button
