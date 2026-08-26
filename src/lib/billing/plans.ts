@@ -45,7 +45,6 @@ export const PLANS: PlanDefinition[] = [
       "Notes, reminders, budget, goals, and passwords",
       "Works offline on this device",
       "Local storage only — no cloud sync",
-      "Ads on iOS",
     ],
   },
   {
@@ -59,7 +58,6 @@ export const PLANS: PlanDefinition[] = [
     ctaLabel: "Upgrade to Pro",
     features: [
       "Cloud sync across iPhone, desktop, and web",
-      "No ads",
       "Lyte: 1,000 chats / month",
       "Lyte: 25 web lookups / month",
     ],
@@ -100,7 +98,7 @@ export const PLANS: PlanDefinition[] = [
 export const PLAN_COMPARISON: ComparisonRow[] = [
   { label: "Notes, reminders, budget, goals, passwords", included: { free: true, pro: true, platinum: true, maxxed: true } },
   { label: "Works offline", included: { free: true, pro: true, platinum: true, maxxed: true } },
-  { label: "Cloud sync and ad-free", included: { free: false, pro: true, platinum: true, maxxed: true } },
+  { label: "Cloud sync", included: { free: false, pro: true, platinum: true, maxxed: true } },
   { label: "Lyte monthly chats", included: { free: false, pro: "1,000", platinum: "2,000", maxxed: "10,000" } },
   { label: "Lyte monthly web lookups", included: { free: false, pro: "25", platinum: "50", maxxed: "250" } },
 ];

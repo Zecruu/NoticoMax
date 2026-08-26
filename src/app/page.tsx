@@ -45,22 +45,6 @@ export default function Dashboard() {
 
   const { isActivated, isPro, isLoading, isLoggedIn, entitlements, login, loginWithApple, register } = useLicense();
 
-  // Bottom banner ads for non-Pro users on native platforms only.
-  // Pro removes ads (entitlements.adsRemoved). Web/Electron get no ads.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { showBannerAd, hideBannerAd } = await import("@/lib/ads/admob-client");
-      if (cancelled) return;
-      if (isPro || !isLoggedIn) {
-        await hideBannerAd();
-      } else {
-        await showBannerAd();
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isPro, isLoggedIn]);
-
   const { folders, addFolder, editFolder, removeFolder } = useFolders();
   const {
     items,

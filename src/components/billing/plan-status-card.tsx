@@ -40,7 +40,7 @@ export function PlanStatusCard({ className }: PlanStatusCardProps) {
       : renewal
         ? `${plan.name} renews ${renewal}.`
         : `${plan.name} is active. Cloud sync is on.`
-    : "Local-only notes on this device. Upgrade to Pro, Platinum, or MAXXED for sync, no ads, and Lyte.";
+    : "Local-only notes on this device. Upgrade to Pro, Platinum, or MAXXED for sync and Lyte.";
 
   async function handleUpgrade() {
     if (!iosBilling) return;

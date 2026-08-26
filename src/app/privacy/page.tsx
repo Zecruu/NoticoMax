@@ -42,13 +42,6 @@ export default function PrivacyPolicyPage() {
           <li>We never receive your full payment information; that is handled entirely by Apple.</li>
         </ul>
 
-        <h3 className="text-base font-semibold mt-4">Advertising and Tracking (free tier only)</h3>
-        <ul className="list-disc pl-6 space-y-1">
-          <li>If you use the free tier, we display ads from Google AdMob.</li>
-          <li>On iOS, we ask for your permission via the App Tracking Transparency prompt before AdMob can use your Identifier for Advertisers (IDFA) for personalized ads. If you decline, you still see ads, but they are non-personalized.</li>
-          <li>NOTICO MAX Pro removes all ads and any associated tracking.</li>
-        </ul>
-
         <h3 className="text-base font-semibold mt-4">Diagnostic Data</h3>
         <ul className="list-disc pl-6 space-y-1">
           <li>Crash reports and basic performance metrics may be collected to fix bugs and improve stability.</li>
@@ -59,13 +52,12 @@ export default function PrivacyPolicyPage() {
           <li>To provide, maintain, and sync the App across your devices.</li>
           <li>To authenticate you and protect your account.</li>
           <li>To process your subscription and grant access to Pro features.</li>
-          <li>To display ads and measure their effectiveness in the free tier.</li>
           <li>To diagnose and fix crashes or other issues.</li>
         </ul>
         <p>
           We do not sell your personal data, and we do not share your notes,
           reminders, passwords, or other user content with any third party for
-          advertising.
+          marketing.
         </p>
 
         <h2 className="text-xl font-semibold mt-8">3. Service Providers</h2>
@@ -75,7 +67,6 @@ export default function PrivacyPolicyPage() {
           <li><strong>Railway</strong> — application hosting.</li>
           <li><strong>Apple</strong> — Sign in with Apple, In-App Purchases, push notifications.</li>
           <li><strong>RevenueCat</strong> — subscription receipt validation.</li>
-          <li><strong>Google AdMob</strong> — ad serving for the free tier (with your consent on iOS).</li>
         </ul>
 
         <h2 className="text-xl font-semibold mt-8">4. Data Retention</h2>
