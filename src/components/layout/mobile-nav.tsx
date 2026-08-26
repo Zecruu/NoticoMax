@@ -59,6 +59,8 @@ const navItems = [
   { label: "Budget", value: "budget", icon: Wallet },
 ];
 
+const VIEW_NAV_VALUES = new Set(["dashboard", "budget", "study", "goals", "locations", "calendar"]);
+
 interface MobileNavProps {
   activeFilter: string;
   activeFolder: string | null;
@@ -72,6 +74,11 @@ interface MobileNavProps {
   onRemoveFolder: (clientId: string) => Promise<void>;
   activeView?: string;
   onViewChange?: (view: string) => void;
+  /**
+   * The dashboard uses local state; standalone pages like Lyte need the same
+   * footer UI but must navigate back into the dashboard via URLs.
+   */
+  navigationMode?: "state" | "links";
 }
 
 export function MobileNav({
@@ -87,6 +94,7 @@ export function MobileNav({
   onRemoveFolder,
   activeView,
   onViewChange,
+  navigationMode = "state",
 }: MobileNavProps) {
   const router = useRouter();
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -146,6 +154,24 @@ export function MobileNav({
     toast.success("Folder and all its items deleted");
   };
 
+  const navigateFromStandalone = (value: string) => {
+    if (value === "new") {
+      router.push("/?new=1");
+      return;
+    }
+    if (value === "dashboard") {
+      router.push("/");
+      return;
+    }
+    if (value === "budget") {
+      router.push("/?view=budget");
+      return;
+    }
+    if (value === "note" || value === "url") {
+      router.push(`/?filter=${value}`);
+    }
+  };
+
   return (
     <>
       <nav className="mobile-bottom-nav fixed bottom-0 left-0 right-0 z-50 flex md:hidden border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 pb-[env(safe-area-inset-bottom)]">
@@ -154,13 +180,16 @@ export function MobileNav({
           const isNew = item.value === "new";
           // Any nav entry that maps to a top-level view (not a type filter)
           // routes through onViewChange instead of onFilterChange.
-          const VIEW_NAV_VALUES = new Set(["dashboard", "budget", "study", "goals", "locations", "calendar"]);
           const isView = VIEW_NAV_VALUES.has(item.value);
 
           return (
             <button
               key={item.value}
               onClick={() => {
+                if (navigationMode === "links") {
+                  navigateFromStandalone(item.value);
+                  return;
+                }
                 if (isNew) {
                   onCreateNew();
                 } else if (isView) {
@@ -186,6 +215,7 @@ export function MobileNav({
                       ? "text-primary"
                       : "text-muted-foreground"
               )}
+              aria-current={!isNew && activeView === item.value ? "page" : undefined}
             >
               <div
                 className={cn(
@@ -203,7 +233,11 @@ export function MobileNav({
         {/* Lyte assistant — routes to the dedicated assistant screen. */}
         <button
           onClick={() => router.push("/assistant")}
-          className="flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] text-muted-foreground transition-colors"
+          className={cn(
+            "flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] transition-colors",
+            activeView === "assistant" ? "text-primary" : "text-muted-foreground"
+          )}
+          aria-current={activeView === "assistant" ? "page" : undefined}
         >
           <div className="flex h-8 w-8 items-center justify-center rounded-full">
             <Bot className="h-4 w-4" />
