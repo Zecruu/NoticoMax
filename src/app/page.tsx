@@ -136,6 +136,37 @@ export default function Dashboard() {
     setDialogOpen(true);
   }, []);
 
+  // Allows standalone primary footer navs (for example Lyte) to jump back into
+  // the dashboard's state-only views without adding real routes for each tab.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const filter = params.get("filter");
+    const view = params.get("view");
+    const shouldCreate = params.get("new") === "1";
+    let consumed = false;
+
+    if (filter === "note" || filter === "url") {
+      setActiveFolder(null);
+      setActiveFilter(filter);
+      setActiveView("list");
+      consumed = true;
+    } else if (view === "budget") {
+      setActiveFolder(null);
+      setActiveFilter("all");
+      setActiveView("budget");
+      consumed = true;
+    }
+
+    if (shouldCreate) {
+      handleCreateNew();
+      consumed = true;
+    }
+
+    if (consumed) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [handleCreateNew]);
+
   const handleCreateWithType = useCallback((type: "note" | "url" | "reminder") => {
     setEditingItem(null);
     setDefaultType(type);

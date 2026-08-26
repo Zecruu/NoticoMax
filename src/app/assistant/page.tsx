@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SecondaryBottomNav } from "@/components/layout/secondary-nav";
+import { MobileNav } from "@/components/layout/mobile-nav";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { toast } from "@/lib/native-toast";
 
@@ -506,7 +506,20 @@ export default function AssistantPage() {
         </>
       )}
 
-      <SecondaryBottomNav active="assistant" />
+      <MobileNav
+        activeFilter="all"
+        activeFolder={null}
+        onFilterChange={() => undefined}
+        onFolderChange={() => undefined}
+        onCreateNew={() => undefined}
+        folders={[]}
+        folderItemCounts={{}}
+        onAddFolder={async () => undefined}
+        onEditFolder={async () => undefined}
+        onRemoveFolder={async () => undefined}
+        activeView="assistant"
+        navigationMode="links"
+      />
     </div>
   );
 }
