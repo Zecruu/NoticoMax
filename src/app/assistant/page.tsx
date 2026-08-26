@@ -417,7 +417,7 @@ export default function AssistantPage() {
           {/* Transcript */}
           <div
             ref={scrollRef}
-            className="flex-1 overflow-auto px-4 py-4 md:px-6 pb-[calc(5rem+env(safe-area-inset-bottom)+var(--keyboard-height,0px))]"
+            className="flex-1 overflow-auto px-4 py-4 md:px-6"
           >
             {messages.length === 0 ? (
               <div className="mx-auto mt-10 max-w-sm text-center">
@@ -460,10 +460,10 @@ export default function AssistantPage() {
             )}
           </div>
 
-          {/* Composer — sits above the footer nav. */}
+          {/* Composer — stays in flow so keyboard avoidance can scroll the whole row. */}
           <div
             data-keyboard-keep-visible
-            className="fixed inset-x-0 bottom-[max(calc(4rem+env(safe-area-inset-bottom)),calc(var(--keyboard-height,0px)+0.5rem))] z-40 border-t bg-background/95 px-4 py-3 backdrop-blur md:bottom-0"
+            className="lyte-composer-panel shrink-0 border-t bg-background/95 px-4 py-3 backdrop-blur mb-[calc(4rem+env(safe-area-inset-bottom))] md:mb-0"
           >
             <div className="mx-auto flex max-w-2xl items-center gap-2">
               <Button
@@ -503,6 +503,11 @@ export default function AssistantPage() {
               </Button>
             </div>
           </div>
+          <div
+            aria-hidden
+            className="lyte-keyboard-spacer shrink-0 md:hidden"
+            style={{ height: "var(--keyboard-height, 0px)" }}
+          />
         </>
       )}
 
