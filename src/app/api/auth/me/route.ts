@@ -3,6 +3,19 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
+interface EntitlementRow {
+  lifetime_pro?: boolean | null;
+  pro_expires_at?: string | null;
+  pro_source?: string | null;
+  family_plan_active?: boolean | null;
+  extra_seats?: number | null;
+  storage_plan?: string | null;
+  storage_bytes_used?: number | null;
+  assistant_plan?: "plus" | "platinum" | "maxxed" | null;
+  lyte_extra_chats?: number | null;
+  lyte_extra_lookups?: number | null;
+}
+
 /**
  * Returns the current user + entitlements for the active session.
  * Replaces /api/auth/verify (which used custom session tokens).
@@ -25,17 +38,16 @@ export async function GET() {
     )
     .eq("user_id", userId)
     .maybeSingle();
-  const ent = wide.error
-    ? (
-        await supabase
-          .from("entitlements")
-          .select(
-            "lifetime_pro, pro_expires_at, pro_source, family_plan_active, extra_seats, storage_plan, storage_bytes_used",
-          )
-          .eq("user_id", userId)
-          .maybeSingle()
-      ).data
-    : wide.data;
+  const fallback = wide.error
+    ? await supabase
+        .from("entitlements")
+        .select(
+          "lifetime_pro, pro_expires_at, pro_source, family_plan_active, extra_seats, storage_plan, storage_bytes_used",
+        )
+        .eq("user_id", userId)
+        .maybeSingle()
+    : null;
+  const ent = (wide.error ? fallback?.data : wide.data) as EntitlementRow | null;
 
   const lifetimePro = ent?.lifetime_pro === true;
   const proActive =
