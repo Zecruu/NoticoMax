@@ -103,6 +103,91 @@ export const PLAN_COMPARISON: ComparisonRow[] = [
   { label: "Lyte monthly web lookups", included: { free: false, pro: "25", platinum: "50", maxxed: "250" } },
 ];
 
+/** Monthly Lyte allowance included with each plan. Extra packs add on top. */
+export const LYTE_ALLOWANCES: Record<PlanId, { chats: number; lookups: number }> = {
+  free: { chats: 0, lookups: 0 },
+  pro: { chats: 1_000, lookups: 25 },
+  platinum: { chats: 2_000, lookups: 50 },
+  maxxed: { chats: 10_000, lookups: 250 },
+};
+
+export type LyteMeterKind = "chats" | "lookups";
+
+export interface LytePack {
+  productId: string;
+  kind: LyteMeterKind;
+  amount: number;
+  usd: number;
+  name: string;
+  description: string;
+  lookupKey: string;
+}
+
+/**
+ * Consumable top-up packs. store_identifier === Apple productId.
+ * Rate: chats ≈ $0.004/chat at the 250 pack; lookups ≈ $0.04/lookup at the 25 pack.
+ */
+export const LYTE_PACKS: LytePack[] = [
+  {
+    productId: "com.noticomax.app.lyte.chats.250",
+    kind: "chats",
+    amount: 250,
+    usd: 0.99,
+    name: "250 Lyte Chats",
+    description: "250 extra Lyte chats",
+    lookupKey: "lyte_chats_250",
+  },
+  {
+    productId: "com.noticomax.app.lyte.chats.1000",
+    kind: "chats",
+    amount: 1_000,
+    usd: 2.99,
+    name: "1,000 Lyte Chats",
+    description: "1,000 extra Lyte chats",
+    lookupKey: "lyte_chats_1000",
+  },
+  {
+    productId: "com.noticomax.app.lyte.lookups.25",
+    kind: "lookups",
+    amount: 25,
+    usd: 0.99,
+    name: "25 Lyte Lookups",
+    description: "25 extra Lyte web lookups",
+    lookupKey: "lyte_lookups_25",
+  },
+  {
+    productId: "com.noticomax.app.lyte.lookups.100",
+    kind: "lookups",
+    amount: 100,
+    usd: 2.99,
+    name: "100 Lyte Lookups",
+    description: "100 extra Lyte web lookups",
+    lookupKey: "lyte_lookups_100",
+  },
+];
+
+export const LYTE_PACK_BY_PRODUCT_ID: Record<string, LytePack> = Object.fromEntries(
+  LYTE_PACKS.map((pack) => [pack.productId, pack]),
+);
+
+export const ASSISTANT_PLAN_BY_PRODUCT_ID: Record<string, AssistantPlanId> = {
+  "com.noticomax.app.plus.monthly": "plus",
+  "com.noticomax.app.platinum.monthly": "platinum",
+  "com.noticomax.app.maxxed.monthly": "maxxed",
+};
+
+export function lyteAllowanceForPlan(planId: PlanId): { chats: number; lookups: number } {
+  return LYTE_ALLOWANCES[planId];
+}
+
+export function extraColumnForKind(kind: LyteMeterKind): "lyte_extra_chats" | "lyte_extra_lookups" {
+  return kind === "chats" ? "lyte_extra_chats" : "lyte_extra_lookups";
+}
+
+export function featureForKind(kind: LyteMeterKind): "assistant_chat" | "assistant_lookup" {
+  return kind === "chats" ? "assistant_chat" : "assistant_lookup";
+}
+
 export function getPlan(id: PlanId): PlanDefinition {
   const plan = PLANS.find((item) => item.id === id);
   if (!plan) throw new Error(`Unknown plan: ${id}`);

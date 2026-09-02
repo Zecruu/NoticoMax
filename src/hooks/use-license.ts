@@ -27,6 +27,10 @@ export interface ComputedEntitlements {
   storagePlan?: StoragePlan;
   /** Bytes consumed (updated by the file-upload service; placeholder until that ships). */
   storageBytesUsed?: number;
+  /** Code plan id: plus | platinum | maxxed. Public name for plus is Pro. */
+  assistantPlan?: "plus" | "platinum" | "maxxed" | null;
+  lyteExtraChats?: number;
+  lyteExtraLookups?: number;
 }
 
 const FREE_ENTITLEMENTS: ComputedEntitlements = {
@@ -37,6 +41,9 @@ const FREE_ENTITLEMENTS: ComputedEntitlements = {
   extraSeats: 0,
   storagePlan: "free",
   storageBytesUsed: 0,
+  assistantPlan: null,
+  lyteExtraChats: 0,
+  lyteExtraLookups: 0,
 };
 
 const ENTITLEMENTS_KEY = "noticomax_entitlements";
@@ -162,7 +169,7 @@ export function useLicense() {
     try {
       const { data: ent, error } = await supabase
         .from("entitlements")
-        .select("lifetime_pro,pro_expires_at,pro_source,family_plan_active,extra_seats,storage_plan,storage_bytes_used")
+        .select("lifetime_pro,pro_expires_at,pro_source,family_plan_active,extra_seats,storage_plan,storage_bytes_used,assistant_plan,lyte_extra_chats,lyte_extra_lookups")
         .eq("user_id", cachedUserId)
         .maybeSingle();
       if (!error) {
@@ -181,6 +188,9 @@ export function useLicense() {
           extraSeats: ent?.extra_seats ?? 0,
           storagePlan: (ent?.storage_plan as ComputedEntitlements["storagePlan"]) ?? "free",
           storageBytesUsed: ent?.storage_bytes_used ?? 0,
+          assistantPlan: (ent?.assistant_plan as ComputedEntitlements["assistantPlan"]) ?? null,
+          lyteExtraChats: ent?.lyte_extra_chats ?? 0,
+          lyteExtraLookups: ent?.lyte_extra_lookups ?? 0,
         };
         setEntitlements(computed);
         try { localStorage.setItem(ENTITLEMENTS_KEY, JSON.stringify(computed)); } catch {}

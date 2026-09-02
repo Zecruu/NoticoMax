@@ -118,6 +118,30 @@ export async function purchase(packageIdentifier: string): Promise<boolean> {
   }
 }
 
+export type LytePackPurchaseResult = "purchased" | "cancelled";
+
+/**
+ * Buy a Lyte extra pack by Apple productId. Consumables have no entitlement —
+ * a resolved StoreKit purchase is the grant; the webhook adds the credits.
+ */
+export async function purchaseLytePack(productId: string): Promise<LytePackPurchaseResult> {
+  if (!isIOS()) throw new Error("Purchase only available on iOS");
+  await initIAP();
+  const Purchases = await loadPurchases();
+  const { products } = await Purchases.getProducts({ productIdentifiers: [productId] });
+  const product = products[0];
+  if (!product) throw new Error(`Lyte pack "${productId}" is not available from the App Store`);
+  try {
+    await Purchases.purchaseStoreProduct({ product });
+    return "purchased";
+  } catch (err: unknown) {
+    if (err && typeof err === "object" && "userCancelled" in err && err.userCancelled) {
+      return "cancelled";
+    }
+    throw err;
+  }
+}
+
 /** "Restore Purchases" — required by App Store. */
 export async function restorePurchases(): Promise<boolean> {
   if (!isIOS()) return false;

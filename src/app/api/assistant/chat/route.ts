@@ -10,6 +10,7 @@ import {
   maxOutputTokensForCap,
   recordUsage,
 } from "@/lib/ai/usage";
+import { consumeLyteQuota, getLyteUsage } from "@/lib/ai/lyte-quota";
 import {
   ASSISTANT_MODEL,
   generateReply,
@@ -103,9 +104,10 @@ export async function GET(request: NextRequest) {
   );
 
   const budget = migrationsReady ? await checkBudget(admin, gate.userId) : null;
+  const lyte = migrationsReady ? await getLyteUsage(admin, gate.userId) : null;
 
   return NextResponse.json({
-    enabled: configured && migrationsReady && !!budget?.allowed,
+    enabled: configured && migrationsReady && !!budget?.allowed && (lyte?.chats.remaining ?? 0) > 0,
     configured,
     migrationsReady,
     model: ASSISTANT_MODEL,
@@ -117,7 +119,13 @@ export async function GET(request: NextRequest) {
           monthlyActions: budget.monthlyActions,
         }
       : null,
-    blockedReason: budget && !budget.allowed ? budget.reason : null,
+    lyte,
+    blockedReason:
+      budget && !budget.allowed
+        ? budget.reason
+        : lyte && lyte.chats.remaining <= 0
+          ? "Monthly Lyte chat limit reached"
+          : null,
   });
 }
 
@@ -212,6 +220,23 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(
       { error: budget.reason ?? "Usage limit reached", code: "budget_exceeded" },
+      { status: 429 },
+    );
+  }
+
+  const lyteQuota = await consumeLyteQuota(admin, userId, "chats");
+  if (!lyteQuota.allowed) {
+    await recordUsage(admin, {
+      userId,
+      userEmail: email,
+      model: ASSISTANT_MODEL,
+      status: "rejected",
+      inputTokens: inputTokensEst,
+      estimatedCostCents: worstCaseCents,
+      metadata: { reason: lyteQuota.reason, lyte: lyteQuota.meter },
+    });
+    return NextResponse.json(
+      { error: lyteQuota.reason ?? "Lyte chat limit reached", code: "lyte_quota_exceeded" },
       { status: 429 },
     );
   }

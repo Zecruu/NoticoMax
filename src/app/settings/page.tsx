@@ -5,14 +5,13 @@ import { useLicense } from "@/hooks/use-license";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle, LogOut, User, Monitor, Trash2, Wand2, Terminal, Eye, EyeOff, Variable } from "lucide-react";
+import { ArrowLeft, Download, Upload, Key, Copy, RotateCw, Fingerprint, BellRing, CheckCircle2, XCircle, LogOut, User, Monitor, Trash2, Eye, EyeOff } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { exportData, importData } from "@/lib/import-export";
 import { HouseholdsCard } from "@/components/settings/households-card";
 import { StorageCard } from "@/components/settings/storage-card";
 import { PlanStatusCard } from "@/components/billing/plan-status-card";
-import { ClaudeTokensCard } from "@/components/settings/claude-tokens-card";
-import { BootstrapCurl } from "@/components/settings/bootstrap-curl";
+import { LyteUsageCard } from "@/components/settings/lyte-usage-card";
 import { toast } from "@/lib/native-toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -236,6 +235,7 @@ export default function SettingsPage() {
 
       <main className="mx-auto max-w-2xl p-4 md:p-6 space-y-6 pb-[calc(5rem+env(safe-area-inset-bottom)+var(--keyboard-height,0px))] md:pb-6 scroll-pb-[var(--keyboard-height,0px)]">
         <PlanStatusCard />
+        <LyteUsageCard />
 
         {/* App (Desktop only) */}
         {isDesktop && (
@@ -646,118 +646,6 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-
-        {/* Claude Code Integration */}
-        {isLoggedIn && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Wand2 className="h-4 w-4" />
-                Claude Code Integration
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Sync your Claude Code skills and let Claude push env vars / secrets into NoticoMax. Generate a scoped API token below and paste it when prompted by the <code className="bg-muted px-1 rounded text-xs">/noticomax</code> or <code className="bg-muted px-1 rounded text-xs">/noticomax-env</code> skill.
-              </p>
-
-              <ClaudeTokensCard />
-
-              <BootstrapCurl
-                bootstrapPath="/api/skills/bootstrap"
-                outPath="~/.claude/skills/noticomax/SKILL.md"
-              />
-
-              <div className="rounded-md border border-dashed p-3 space-y-1.5">
-                <p className="text-xs font-medium flex items-center gap-1.5">
-                  <Terminal className="h-3 w-3" />
-                  Usage
-                </p>
-                <div className="text-xs text-muted-foreground space-y-0.5">
-                  <p><code className="bg-muted px-1 rounded">/noticomax push</code> — Upload skills to cloud</p>
-                  <p><code className="bg-muted px-1 rounded">/noticomax pull</code> — Download Claude skills <em>and</em> Codex prompts</p>
-                  <p><code className="bg-muted px-1 rounded">/noticomax list</code> — View all synced skills</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Codex CLI Integration */}
-        {isLoggedIn && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Terminal className="h-4 w-4" />
-                Codex CLI Integration
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Sync your Codex CLI prompts (<code className="bg-muted px-1 rounded text-xs">~/.codex/prompts/*.md</code>) across computers using one of your NoticoMax API tokens above.
-              </p>
-
-              <BootstrapCurl
-                bootstrapPath="/api/skills/bootstrap?tool=codex"
-                outPath="~/.codex/prompts/noticomax.md"
-              />
-
-              <div className="rounded-md border border-dashed p-3 space-y-1.5">
-                <p className="text-xs font-medium flex items-center gap-1.5">
-                  <Terminal className="h-3 w-3" />
-                  Usage (inside Codex CLI)
-                </p>
-                <div className="text-xs text-muted-foreground space-y-0.5">
-                  <p><code className="bg-muted px-1 rounded">$noticomax push</code> — Upload prompts to cloud</p>
-                  <p><code className="bg-muted px-1 rounded">$noticomax pull</code> — Download Codex prompts</p>
-                  <p><code className="bg-muted px-1 rounded">$noticomax list</code> — View all synced items</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Env Vars Integration (Claude Code + Codex) */}
-        {isLoggedIn && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Variable className="h-4 w-4" />
-                Env Vars Integration
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Let Claude Code (or Codex) save and retrieve env vars — AWS keys, API tokens, database URLs — from your NoticoMax account so you stop pasting them into prompts. Requires an API token with the <strong>envvars</strong> scope.
-              </p>
-
-              <BootstrapCurl
-                bootstrapPath="/api/skills/bootstrap?tool=env"
-                outPath="~/.claude/skills/noticomax-env/SKILL.md"
-              />
-
-              <div className="rounded-md border border-dashed p-3 space-y-1.5">
-                <p className="text-xs font-medium flex items-center gap-1.5">
-                  <Terminal className="h-3 w-3" />
-                  Usage (inside Claude Code)
-                </p>
-                <div className="text-xs text-muted-foreground space-y-0.5">
-                  <p><code className="bg-muted px-1 rounded">/noticomax-env push KEY=value</code> — Save one or more env vars</p>
-                  <p><code className="bg-muted px-1 rounded">/noticomax-env push --file .env</code> — Bulk import a .env file</p>
-                  <p><code className="bg-muted px-1 rounded">/noticomax-env pull --out .env</code> — Restore a .env on a new machine</p>
-                  <p><code className="bg-muted px-1 rounded">/noticomax-env get KEY</code> — Retrieve a single value (masked by default)</p>
-                </div>
-              </div>
-
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs space-y-1">
-                <p className="font-medium">Heads up — your env vars are stored unencrypted at rest.</p>
-                <p className="text-muted-foreground">
-                  Row-level security isolates them per account, but Supabase admins (or a DB dump) could read them. Don&apos;t store keys you wouldn&apos;t paste into 1Password Convenience tier. Rotate periodically; revoke tokens fast if a machine is lost.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Data */}
         <Card>

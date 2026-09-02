@@ -18,13 +18,24 @@ export async function GET() {
   const userId = claimsData.claims.sub as string;
   const email = (claimsData.claims.email as string) || null;
 
-  const { data: ent } = await supabase
+  const wide = await supabase
     .from("entitlements")
     .select(
-      "lifetime_pro, pro_expires_at, pro_source, family_plan_active, extra_seats, storage_plan, storage_bytes_used",
+      "lifetime_pro, pro_expires_at, pro_source, family_plan_active, extra_seats, storage_plan, storage_bytes_used, assistant_plan, lyte_extra_chats, lyte_extra_lookups",
     )
     .eq("user_id", userId)
     .maybeSingle();
+  const ent = wide.error
+    ? (
+        await supabase
+          .from("entitlements")
+          .select(
+            "lifetime_pro, pro_expires_at, pro_source, family_plan_active, extra_seats, storage_plan, storage_bytes_used",
+          )
+          .eq("user_id", userId)
+          .maybeSingle()
+      ).data
+    : wide.data;
 
   const lifetimePro = ent?.lifetime_pro === true;
   const proActive =
@@ -46,6 +57,9 @@ export async function GET() {
       extraSeats: ent?.extra_seats ?? 0,
       storagePlan: ent?.storage_plan ?? "free",
       storageBytesUsed: ent?.storage_bytes_used ?? 0,
+      assistantPlan: ent?.assistant_plan ?? null,
+      lyteExtraChats: ent?.lyte_extra_chats ?? 0,
+      lyteExtraLookups: ent?.lyte_extra_lookups ?? 0,
     },
   });
 }

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  ASSISTANT_PLAN_BY_PRODUCT_ID,
+  LYTE_PACK_BY_PRODUCT_ID,
+} from "@/lib/billing/plans";
 
 export const runtime = "nodejs";
 
@@ -186,6 +190,75 @@ export async function POST(request: NextRequest) {
         .update({ extra_seats: currentSeats - 1 })
         .eq("user_id", userId);
       if (error) console.warn("[revenuecat-webhook] extra_seat decrement failed:", error);
+    }
+  }
+
+  // Paid Lyte tier (plus / platinum / maxxed) — store the code plan id so
+  // monthly chat/lookup allowances resolve correctly.
+  const assistantPlan = ASSISTANT_PLAN_BY_PRODUCT_ID[productId];
+  if (
+    assistantPlan &&
+    (event.type === "INITIAL_PURCHASE" ||
+      event.type === "PRODUCT_CHANGE" ||
+      event.type === "RENEWAL")
+  ) {
+    const { error } = await admin
+      .from("entitlements")
+      .upsert({ user_id: userId, assistant_plan: assistantPlan }, { onConflict: "user_id" });
+    if (error) console.warn("[revenuecat-webhook] assistant_plan set failed:", error);
+  } else if (
+    assistantPlan &&
+    (event.type === "EXPIRATION" || event.type === "CANCELLATION")
+  ) {
+    const { error } = await admin
+      .from("entitlements")
+      .update({ assistant_plan: null })
+      .eq("user_id", userId);
+    if (error) console.warn("[revenuecat-webhook] assistant_plan clear failed:", error);
+  }
+
+  // Lyte extra packs are consumables. Grant once per RevenueCat event id.
+  const lytePack = LYTE_PACK_BY_PRODUCT_ID[productId];
+  const lyteGrantEvent =
+    event.type === "NON_RENEWING_PURCHASE" || event.type === "INITIAL_PURCHASE";
+  if (lytePack && lyteGrantEvent) {
+    const { data: already } = await admin
+      .from("assistant_usage")
+      .select("id")
+      .eq("feature", "lyte_pack_grant")
+      .filter("metadata->>rc_event_id", "eq", event.id)
+      .limit(1)
+      .maybeSingle();
+    if (already) {
+      console.log("[revenuecat-webhook] lyte pack already granted", { eventId: event.id, productId });
+    } else {
+      const { data: remaining, error: grantErr } = await admin.rpc("grant_lyte_extra", {
+        p_user_id: userId,
+        p_kind: lytePack.kind,
+        p_amount: lytePack.amount,
+      });
+      if (grantErr) {
+        console.error("[revenuecat-webhook] lyte pack grant failed:", grantErr);
+        return NextResponse.json({ error: "Lyte grant failed" }, { status: 500 });
+      }
+      const { error: ledgerErr } = await admin.from("assistant_usage").insert({
+        user_id: userId,
+        period_key: new Date().toISOString().slice(0, 7),
+        feature: "lyte_pack_grant",
+        provider: "apple",
+        model: "iap",
+        status: "completed",
+        metadata: {
+          rc_event_id: event.id,
+          product_id: productId,
+          kind: lytePack.kind,
+          amount: lytePack.amount,
+          remaining,
+        },
+      });
+      if (ledgerErr) {
+        console.warn("[revenuecat-webhook] lyte pack ledger failed:", ledgerErr);
+      }
     }
   }
 

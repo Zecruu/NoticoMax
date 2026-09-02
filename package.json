@@ -19,6 +19,7 @@
     "cap:dev:android": "npx cap run android --livereload --external",
     "ios:build": "node scripts/build-ios.js",
     "ios:build:upload": "node scripts/build-ios.js --upload",
+    "asc:lyte-iaps": "node scripts/create-lyte-iaps.mjs",
     "postinstall": "patch-package"
   },
   "build": {

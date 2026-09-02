@@ -99,8 +99,9 @@ export default function PricingPage() {
           <div className="space-y-1">
             <h2 className="font-semibold">Lyte</h2>
             <p className="text-muted-foreground">
-              Chat and web-lookup limits reset each month with your plan. MAXXED is $34.99
-              a month; Pro and Platinum show their App Store price at checkout.
+              Chat and web-lookup limits reset each month with your plan. Extra Lyte packs
+              are one-time iPhone purchases ($0.99 / $2.99). MAXXED is $34.99 a month;
+              Pro and Platinum show their App Store price at checkout.
             </p>
           </div>
         </section>
