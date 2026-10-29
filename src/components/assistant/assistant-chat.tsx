@@ -224,7 +224,10 @@ export function AssistantChat({
     try {
       const response = await authFetch("/api/assistant/chat", {
         method: "POST",
-        body: JSON.stringify({ messages: next }),
+        body: JSON.stringify({
+          messages: next,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
       });
       const data = await response.json();
       if (!response.ok)

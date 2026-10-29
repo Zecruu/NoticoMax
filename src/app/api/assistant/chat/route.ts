@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { resolveAllowedAssistantUser } from "@/lib/ai/gate";
 import {
@@ -15,7 +14,6 @@ import {
   ASSISTANT_MODEL,
   generateReply,
   type ChatMessage,
-  type AssistantFunctionCall,
 } from "@/lib/ai/openai";
 import { getProfile } from "@/lib/ai/profile";
 import {
@@ -26,18 +24,14 @@ import {
 } from "@/lib/ai/memory";
 import {
   TOOL_DECLARATIONS,
-  executeToolCall,
-  hasWriteIntent,
-  logToolAudit,
-  toolNoun,
-  validateToolCall,
+  conversationWriteIntent,
+  runToolCalls,
 } from "@/lib/ai/tools";
 import { buildRetrievalBlock, searchLyteMemory } from "@/lib/ai/retrieval";
+import { buildSystemPrompt } from "@/lib/ai/prompt";
+import { schedulingTimeContext } from "@/lib/ai/time-context";
 
 export const runtime = "nodejs";
-
-/** At most this many tool calls are executed per chat turn (no autonomy). */
-const MAX_TOOL_CALLS = 2;
 
 /**
  * Conversation compression, first slice: only the most recent turns go to the
@@ -48,42 +42,6 @@ const MAX_TOOL_CALLS = 2;
 const MAX_HISTORY_MESSAGES = 20;
 
 const ASSISTANT_TOOLS = TOOL_DECLARATIONS;
-
-/**
- * Assemble the system prompt from the assistant's name, curated memory, and
- * the snippets retrieved for THIS request. Retrieval-first: the model only
- * ever sees these compressed snippets, never the database.
- */
-function buildSystemPrompt(
-  name: string,
-  memorySummary: string,
-  retrievalBlock: string,
-  nowIso: string,
-): string {
-  const base =
-    `You are ${name}, the user's personal memory and productivity assistant inside ` +
-    "the NoticoMax app. You are not a generic chatbot: your job is to remember what " +
-    "the user saves — notes, URLs, reminders, projects, preferences — and to help " +
-    "them find it and act on it. Be concise, warm, and specific. Respect the " +
-    "user's stated preferences and habits.";
-  const tools =
-    ` The current date and time is ${nowIso}. You can take actions by calling the ` +
-    "provided tools to create notes, URLs/bookmarks, reminders, and alarms for the user. " +
-    "Only call a tool when the user clearly asks to create/save/remind/set something. " +
-    "Resolve relative times to an absolute ISO-8601 datetime. If a request is missing " +
-    "required details (e.g. a reminder with no time), ask a brief clarifying question " +
-    "instead of guessing.";
-  const security =
-    " SECURITY: Never ask for, store, repeat, or reveal passwords, secrets, API keys, " +
-    "or payment details. You do not have access to the user's saved passwords or " +
-    "credentials, and there is no tool to read them. If asked to expose a saved password, " +
-    "politely decline.";
-  const memory = memorySummary
-    ? `\n\nWhat you remember about this user (honor these):\n${memorySummary}`
-    : "";
-  const retrieved = retrievalBlock ? `\n\n${retrievalBlock}` : "";
-  return base + tools + security + memory + retrieved;
-}
 
 /**
  * GET /api/assistant/chat — status for the UI: configured + allowed + budget.
@@ -106,7 +64,11 @@ export async function GET(request: NextRequest) {
   const lyte = migrationsReady ? await getLyteUsage(admin, gate.userId) : null;
 
   return NextResponse.json({
-    enabled: configured && migrationsReady && !!budget?.allowed && (lyte?.chats.remaining ?? 0) > 0,
+    enabled:
+      configured &&
+      migrationsReady &&
+      !!budget?.allowed &&
+      (lyte?.chats.remaining ?? 0) > 0,
     configured,
     migrationsReady,
     model: ASSISTANT_MODEL,
@@ -123,8 +85,8 @@ export async function GET(request: NextRequest) {
       budget && !budget.allowed
         ? budget.reason
         : lyte && lyte.chats.remaining <= 0
-          ? "Monthly Lyte chat limit reached"
-          : null,
+        ? "Monthly Lyte chat limit reached"
+        : null,
   });
 }
 
@@ -142,7 +104,7 @@ export async function POST(request: NextRequest) {
   if (!apiKey) {
     return NextResponse.json(
       { error: "The assistant isn't configured yet. Please try again later." },
-      { status: 503 },
+      { status: 503 }
     );
   }
 
@@ -157,7 +119,7 @@ export async function POST(request: NextRequest) {
   if (!messages.length) {
     return NextResponse.json(
       { error: "Provide `messages` or a `message` string." },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -189,24 +151,27 @@ export async function POST(request: NextRequest) {
       ? searchLyteMemory(admin, userId, lastUser.content)
       : Promise.resolve([]),
   ]);
+  // The model and the write guard receive the same bounded conversation.
+  const recentMessages = messages.slice(-MAX_HISTORY_MESSAGES);
+  const writeIntent = conversationWriteIntent(recentMessages);
   const systemPrompt = buildSystemPrompt(
     profile.displayName,
     buildMemorySummary(memories),
     buildRetrievalBlock(retrieved),
-    new Date().toISOString(),
+    schedulingTimeContext(body.timeZone),
+    writeIntent.source === "clarification"
   );
-
-  // Compression, first slice: only the most recent turns reach the model.
-  const recentMessages = messages.slice(-MAX_HISTORY_MESSAGES);
 
   const inputTokensEst = recentMessages.reduce(
     (n, m) => n + estimateInputTokens(m.content),
-    estimateInputTokens(systemPrompt),
+    estimateInputTokens(systemPrompt)
   );
   const maxOutputTokens = maxOutputTokensForCap();
   const worstCaseCents = estimateCostCents(inputTokensEst, maxOutputTokens);
 
-  const budget = await checkBudget(admin, userId, { pendingCostCents: worstCaseCents });
+  const budget = await checkBudget(admin, userId, {
+    pendingCostCents: worstCaseCents,
+  });
   if (!budget.allowed) {
     await recordUsage(admin, {
       userId,
@@ -218,8 +183,11 @@ export async function POST(request: NextRequest) {
       metadata: { reason: budget.reason },
     });
     return NextResponse.json(
-      { error: budget.reason ?? "Usage limit reached", code: "budget_exceeded" },
-      { status: 429 },
+      {
+        error: budget.reason ?? "Usage limit reached",
+        code: "budget_exceeded",
+      },
+      { status: 429 }
     );
   }
 
@@ -235,8 +203,11 @@ export async function POST(request: NextRequest) {
       metadata: { reason: lyteQuota.reason, lyte: lyteQuota.meter },
     });
     return NextResponse.json(
-      { error: lyteQuota.reason ?? "Lyte chat limit reached", code: "lyte_quota_exceeded" },
-      { status: 429 },
+      {
+        error: lyteQuota.reason ?? "Lyte chat limit reached",
+        code: "lyte_quota_exceeded",
+      },
+      { status: 429 }
     );
   }
 
@@ -249,11 +220,16 @@ export async function POST(request: NextRequest) {
       messages: recentMessages,
       systemPrompt,
       maxOutputTokens,
-      tools: ASSISTANT_TOOLS,
+      tools: ASSISTANT_TOOLS.filter((tool) =>
+        writeIntent.allowedTools.includes(tool.name)
+      ),
       signal: controller.signal,
     });
 
-    const actualCostCents = estimateCostCents(result.inputTokens, result.outputTokens);
+    const actualCostCents = estimateCostCents(
+      result.inputTokens,
+      result.outputTokens
+    );
     await recordUsage(admin, {
       userId,
       userEmail: email,
@@ -275,7 +251,7 @@ export async function POST(request: NextRequest) {
       userId,
       result.functionCalls,
       result.text,
-      lastUser?.content ?? "",
+      recentMessages
     );
     return NextResponse.json({ reply, savedMemory });
   } catch (err) {
@@ -292,95 +268,11 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(
       { error: "The assistant couldn't respond right now." },
-      { status: status && status >= 400 && status < 600 ? 502 : 500 },
+      { status: status && status >= 400 && status < 600 ? 502 : 500 }
     );
   } finally {
     clearTimeout(timeout);
   }
-}
-
-/**
- * Execute up to MAX_TOOL_CALLS validated tool calls the model requested, then
- * compose a clear reply. Bounded + non-recursive: we never feed results back
- * for another model round.
- *
- * Writes are gated on EXPLICIT user write-intent: the model is too eager to
- * call create_* on information questions ("what do I have this week?"), which
- * once produced a junk note full of meta-reasoning. If the latest user message
- * isn't an explicit ask to create/save/add/set/remind, every tool call is
- * blocked (and audited) and we answer conversationally instead — never writing
- * the model's reasoning into a note. Validation failures become a clarification.
- */
-async function runToolCalls(
-  admin: SupabaseClient,
-  userId: string,
-  functionCalls: AssistantFunctionCall[],
-  modelText: string,
-  userMessage: string,
-): Promise<string> {
-  if (!functionCalls.length) return modelText || "…";
-
-  const writeIntent = hasWriteIntent(userMessage);
-
-  const created: string[] = [];
-  const failed: string[] = [];
-  const clarifications: string[] = [];
-  let blocked = false;
-
-  for (const fc of functionCalls.slice(0, MAX_TOOL_CALLS)) {
-    // Gate: no explicit write request → refuse the write, log it, don't create.
-    if (!writeIntent) {
-      blocked = true;
-      await logToolAudit(admin, {
-        userId,
-        tool: fc.name || "unknown",
-        status: "rejected",
-        args: fc.args,
-        error: "no_explicit_write_intent",
-      });
-      continue;
-    }
-
-    const validation = validateToolCall(fc.name, fc.args);
-    if (!validation.ok) {
-      await logToolAudit(admin, {
-        userId,
-        tool: fc.name || "unknown",
-        status: "rejected",
-        args: fc.args,
-        error: validation.error,
-      });
-      clarifications.push(validation.error);
-      continue;
-    }
-    try {
-      const res = await executeToolCall(admin, userId, validation.call);
-      created.push(`${toolNoun(validation.call.name)} “${res.title}”`);
-    } catch {
-      failed.push(toolNoun(validation.call.name));
-    }
-  }
-
-  const parts: string[] = [];
-  if (created.length) parts.push(`Done — I created your ${created.join(", ")}.`);
-  if (failed.length) parts.push(`Sorry, I couldn't create the ${failed.join(", ")} just now.`);
-  if (clarifications.length) {
-    parts.push(`I need a bit more detail before I can do that: ${clarifications.join("; ")}.`);
-  }
-  if (parts.length) return parts.join(" ");
-
-  // Nothing was created. If we blocked a write on an info question, answer
-  // honestly rather than echoing the model's tool-call reasoning.
-  if (blocked) {
-    return (
-      modelText.trim() ||
-      "I can answer questions about what you've saved in NoticoMax, and create " +
-        "notes, reminders, bookmarks, and alarms when you ask me to (e.g. " +
-        "“remind me at 9am to call mom”). I couldn't find anything relevant " +
-        "for that one."
-    );
-  }
-  return modelText || "Done.";
 }
 
 /** Accept either a full `messages` array or a single `message` string. */
@@ -391,7 +283,7 @@ function normalizeMessages(body: Record<string, unknown>): ChatMessage[] {
         (m): m is { role: string; content: string } =>
           !!m &&
           typeof (m as { content?: unknown }).content === "string" &&
-          (m as { content: string }).content.trim().length > 0,
+          (m as { content: string }).content.trim().length > 0
       )
       .map((m) => ({
         role: m.role === "assistant" ? "assistant" : "user",
