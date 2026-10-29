@@ -33,6 +33,8 @@ Provider calls retain `store: false`; Supabase owns the history. Existing AI spe
 
 The new request contract requires the current web client. An already-open old client should reload before sending after this release.
 
+Production migration 0015 was applied on 2026-10-29, including its migration-ledger entry. Both tables were verified through REST, along with RLS and service-only mutation permissions. A live rollback transaction verified reservation, completion, request deduplication, and byte reclamation without retaining test data.
+
 ## Local verification
 
 `node --experimental-strip-types --test tests/conversations.test.mjs` runs the actual migration and SQL functions in an isolated in-memory PostgreSQL engine (PGlite). Its bootstrap substitutes only the existing auth/entitlements prerequisites. It covers UTF-8 accounting, quota rejection/rollback, competing reservations, request deduplication, ownership/RLS, service-only mutation permissions, oversized replies, failure/expiry, and byte reclamation. PGlite uses one connection; this is not a multi-connection production load test.
