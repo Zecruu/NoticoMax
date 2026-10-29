@@ -11,7 +11,7 @@ relationships → retrieve only what matters → help the user act.
 
 - **Storage source of truth: Supabase (Postgres).** MongoDB is not used and
   must not be introduced.
-- **Brain: Gemini** (`gemini-3.1-flash-lite` today, via `src/lib/ai/gemini.ts`).
+- **Brain: GPT-6.1 Terra** (`gpt-6.1-terra`, via `src/lib/ai/openai.ts` and the Responses API; operator decision 2026-10-29).
   Swappable behind `generateReply` without touching memory or retrieval.
 - **The model never sees the database.** It sees 3–10 compressed, ranked
   snippets per request, plus recent conversation. Nothing else.
@@ -44,7 +44,7 @@ probes `assistant_usage` and the UI surfaces a "run the migrations" state);
    types + `assistant_memory`, ranked, compressed to ≤8 snippets → system prompt.
 4. Budget check against caps (300¢/mo, 25¢/day, 5¢/req, 1000 actions/mo) with a
    worst-case estimate; rejected turns are ledgered too.
-5. One Gemini call with: system prompt (identity + curated memory summary +
+5. One server-side OpenAI call with: system prompt (identity + curated memory summary +
    retrieved snippets) + the **last 20 conversation messages only**.
 6. Bounded tool use: ≤2 validated tool calls (`create_note` / `create_url` /
    `create_reminder` / `create_alarm`), gated on **explicit write intent** in
@@ -238,7 +238,7 @@ create table assistant_permissions (
 - Server-side gate on every assistant route; model never receives `user_id`.
 - Write tools require explicit user write intent (PR #6) — keep this gate in
   front of any new tool.
-- All model calls server-side only; `GEMINI_API_KEY` lives in Railway env.
+- All model calls server-side only; `OPENAI_API_KEY` lives in Railway env.
 - Usage caps enforced *before* calls; rejected turns are also ledgered.
 
 ---
@@ -294,7 +294,7 @@ Priorities, in order:
 
 **Data boundaries painter can rely on:** all reads via `/api/assistant/*`;
 retrieval snippets have a stable shape (`RetrievedMemory`: kind/title/snippet/
-updatedAt/pinned/score); no client ever talks to Gemini or holds keys.
+updatedAt/pinned/score); no client ever talks to OpenAI or holds keys.
 
 ---
 

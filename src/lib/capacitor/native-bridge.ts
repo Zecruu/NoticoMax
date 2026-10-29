@@ -17,37 +17,19 @@ export async function initCapacitorPlugins() {
     await StatusBar.setBackgroundColor({ color: "#0a0a0a" });
   }
 
-  // Keyboard avoidance is driven by keyboard-avoidance.ts (visualViewport-based)
-  // which publishes --keyboard-height / --visual-viewport-height + the
-  // `keyboard-open` class and scrolls the focused field above the keyboard.
-  // Capacitor's keyboard events are an extra trigger; visualViewport stays
-  // authoritative when present, and we only set the vars from Capacitor's
-  // reported height as a fallback for old webviews that lack visualViewport.
-  const { initKeyboardAvoidance, applyViewportVars, nudgeScrollToFocused } =
+  // The provider owns viewport listeners on web and native. Native keyboard
+  // events also constrain the visible area when only the body is resized.
+  const { setNativeKeyboardHeight } =
     await import("./keyboard-avoidance");
-  initKeyboardAvoidance();
-
-  const root = document.documentElement;
-  const hasVisualViewport = !!window.visualViewport;
 
   Keyboard.addListener("keyboardWillShow", (info) => {
-    if (!hasVisualViewport) {
-      root.style.setProperty("--keyboard-height", `${info.keyboardHeight}px`);
-      root.classList.add("keyboard-open");
-    }
-    nudgeScrollToFocused();
+    setNativeKeyboardHeight(info.keyboardHeight);
   });
-  Keyboard.addListener("keyboardDidShow", () => {
-    applyViewportVars();
-    nudgeScrollToFocused();
+  Keyboard.addListener("keyboardDidShow", (info) => {
+    setNativeKeyboardHeight(info.keyboardHeight);
   });
-  Keyboard.addListener("keyboardWillHide", () => {
-    if (!hasVisualViewport) {
-      root.style.setProperty("--keyboard-height", "0px");
-      root.classList.remove("keyboard-open");
-    } else {
-      applyViewportVars();
-    }
+  Keyboard.addListener("keyboardDidHide", () => {
+    setNativeKeyboardHeight(0);
   });
 
   // Handle deep links

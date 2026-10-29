@@ -28,6 +28,8 @@ export function SecondaryBottomNav({ active }: { active: SecondaryNavKey }) {
           <Link
             key={item.key}
             href={item.href}
+            prefetch={item.key === "assistant" ? true : undefined}
+            aria-current={isActive ? "page" : undefined}
             className={cn(
               "flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] transition-colors",
               isActive ? "text-primary" : "text-muted-foreground"

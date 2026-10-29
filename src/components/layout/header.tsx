@@ -5,7 +5,6 @@ import { Moon, Sun, Search, Settings, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SyncStatus } from "@/components/sync-status";
-import { useEffect, useState } from "react";
 import Link from "next/link";
 
 interface HeaderProps {
@@ -18,21 +17,16 @@ interface HeaderProps {
 }
 
 export function Header({ searchQuery, onSearchChange, syncing, onSync, isActivated, onMenuClick }: HeaderProps) {
-  const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const { resolvedTheme, setTheme } = useTheme();
 
   return (
-    <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 pt-[env(safe-area-inset-top)]">
-      <div className="flex h-14 items-center gap-4 px-4 md:px-6">
+    <header className="z-40 shrink-0 border-b bg-background pt-[env(safe-area-inset-top)]">
+      <div className="flex h-16 items-center gap-2 px-4 md:gap-4 md:px-6">
         {onMenuClick && (
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden -ml-2"
+            className="size-11 shrink-0 md:hidden -ml-2"
             onClick={onMenuClick}
             aria-label="Open menu"
           >
@@ -40,37 +34,33 @@ export function Header({ searchQuery, onSearchChange, syncing, onSync, isActivat
           </Button>
         )}
 
-        <div className="relative flex-1 max-w-md">
+        <div className="relative min-w-0 flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search notes, URLs, reminders..."
+            aria-label="Search notes, links, and reminders"
+            placeholder="Search your space"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="pl-9"
+            className="h-11 rounded-xl border-transparent bg-muted/60 pl-9 shadow-none"
           />
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-1 md:gap-2">
           <SyncStatus syncing={syncing} onSync={onSync} isActivated={isActivated} />
 
-          {mounted && (
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              className="hidden md:inline-flex"
+              aria-label="Toggle theme"
+              onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
             >
-              {theme === "dark" ? (
-                <Sun className="h-4 w-4" />
-              ) : (
-                <Moon className="h-4 w-4" />
-              )}
+              <Sun className="hidden h-4 w-4 dark:block" />
+              <Moon className="h-4 w-4 dark:hidden" />
             </Button>
-          )}
 
-          <Link href="/settings">
-            <Button variant="ghost" size="icon">
+          <Link href="/settings" aria-label="Settings" className="inline-flex size-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">
               <Settings className="h-4 w-4" />
-            </Button>
           </Link>
         </div>
       </div>

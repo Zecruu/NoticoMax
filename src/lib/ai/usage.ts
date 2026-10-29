@@ -24,14 +24,14 @@ export const CAPS = {
 } as const;
 
 /**
- * Gemini gemini-3.1-flash-lite Standard token pricing in USD per 1M tokens,
- * used for budget accounting (see https://ai.google.dev/pricing). Overestimating
- * is safe (caps bite sooner); underestimating risks overspend — keep in sync if
- * Google changes the published rates.
+ * GPT-6.1 Terra Standard token pricing in USD per 1M tokens, verified 2026-10-29:
+ * https://developers.openai.com/api/docs/models/gpt-6.1-terra
+ * Count cached input at the full input rate conservatively. Output includes
+ * reasoning tokens. Keep these rates aligned with the configured model.
  */
 const PRICING_USD_PER_1M = {
-  input: 0.25,
-  output: 1.5,
+  input: 1,
+  output: 5,
 } as const;
 
 /** Convert token counts to a fractional-cent cost estimate. */

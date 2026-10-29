@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
 import db from "@/lib/db/indexed-db";
-import { cn } from "@/lib/utils";
 import {
   FileText,
   Link2,
@@ -15,6 +15,9 @@ import {
   Lock,
   HeartHandshake,
   Plus,
+  ArrowUpRight,
+  ChevronRight,
+  Bot,
   type LucideIcon,
 } from "lucide-react";
 
@@ -36,38 +39,28 @@ interface DashboardHomeProps {
   familyPlanActive?: boolean;
 }
 
-interface TileProps {
+interface NavigationRowProps {
   icon: LucideIcon;
   label: string;
   count?: string;
   sub?: string;
-  accent: string;
   onClick: () => void;
 }
 
-function Tile({ icon: Icon, label, count, sub, accent, onClick }: TileProps) {
+function NavigationRow({ icon: Icon, label, count, sub, onClick }: NavigationRowProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        "group relative flex flex-col items-start gap-2 rounded-2xl border bg-card p-4 text-left",
-        "transition-all hover:bg-muted/50 active:scale-[0.98]",
-      )}
+      className="group flex min-h-16 w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors hover:bg-muted/60 active:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     >
-      <div
-        className="flex h-10 w-10 items-center justify-center rounded-xl"
-        style={{ backgroundColor: `${accent}1a`, color: accent }}
-      >
-        <Icon className="h-5 w-5" />
+      <Icon aria-hidden="true" className="size-5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{label}</span>
+        {sub && <span className="mt-0.5 block text-xs text-muted-foreground">{sub}</span>}
       </div>
-      <div className="flex w-full items-end justify-between gap-1">
-        <span className="text-sm font-medium text-foreground">{label}</span>
-        {count !== undefined && (
-          <span className="text-2xl font-bold tabular-nums leading-none text-foreground">{count}</span>
-        )}
-      </div>
-      {sub && <span className="text-[11px] text-muted-foreground">{sub}</span>}
+      {count !== undefined && <span className="text-sm tabular-nums text-muted-foreground">{count}</span>}
+      <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground/70" />
     </button>
   );
 }
@@ -92,12 +85,12 @@ export function DashboardHome({
   // Lightweight counts pulled directly from Dexie. Reactive — they update
   // as the user adds/removes things without a manual refresh.
   const goalCount = useLiveQuery(
-    () => db.goals.toArray().then((g) => g.filter((x) => !x.deleted && !x.completed).length),
+    () => db.goals.filter((goal) => !goal.deleted && !goal.completed).count(),
     [],
     0,
   );
   const locationCount = useLiveQuery(
-    () => db.locations.toArray().then((l) => l.filter((x) => !x.deleted).length),
+    () => db.locations.filter((location) => !location.deleted).count(),
     [],
     0,
   );
@@ -108,7 +101,7 @@ export function DashboardHome({
     async () => {
       const now = new Date();
       const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-      const txs = await db.budgetTransactions.toArray();
+      const txs = await db.budgetTransactions.where("date").startsWith(monthKey).toArray();
       return txs
         .filter((t) => !t.deleted && t.date.slice(0, 7) === monthKey)
         .reduce((s, t) => s + t.amount, 0);
@@ -126,90 +119,97 @@ export function DashboardHome({
   }, []);
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6 md:px-6 md:py-8 space-y-6">
+    <div className="mx-auto max-w-4xl space-y-8 px-5 py-7 md:px-8 md:py-10">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">{greeting}</h1>
-          <p className="text-sm text-muted-foreground">Tap a tile to dive in.</p>
+          <h1 className="text-2xl font-semibold tracking-tight">{greeting}</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">What&apos;s on your mind?</p>
         </div>
         <button
           type="button"
           onClick={onCreateNew}
-          className="inline-flex h-10 items-center gap-1.5 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-95"
+          className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           <Plus className="h-4 w-4" />
           New Note
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <Tile
+      <Link href="/assistant" prefetch={true} className="flex min-h-20 items-center gap-4 rounded-xl bg-muted/60 px-4 py-4 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+        <Bot aria-hidden="true" className="size-6 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <span className="block text-sm font-medium">Ask Lyte</span>
+          <span className="mt-1 block text-sm text-muted-foreground">Find something. Remember something.</span>
+        </div>
+        <ArrowUpRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+      </Link>
+
+      <div className="grid gap-8 md:grid-cols-2 md:gap-10">
+        <section aria-labelledby="library-heading">
+          <h2 id="library-heading" className="mb-2 px-3 text-sm font-semibold">Your library</h2>
+          <div className="divide-y divide-border/60">
+        <NavigationRow
           icon={FileText}
           label="Notes"
           count={String(noteCount)}
-          accent="#3b82f6"
           onClick={onOpenNotes}
         />
-        <Tile
+        <NavigationRow
           icon={Bell}
           label="Reminders"
           count={String(reminderCount)}
           sub={upcomingReminderCount > 0 ? `${upcomingReminderCount} upcoming` : undefined}
-          accent="#f97316"
           onClick={onOpenReminders}
         />
-        <Tile
-          icon={Calendar}
-          label="Calendar"
-          count={String(upcomingReminderCount)}
-          sub="next 7 days"
-          accent="#8b5cf6"
-          onClick={onOpenCalendar}
-        />
-        <Tile
+        <NavigationRow
           icon={Link2}
-          label="URLs"
+          label="Links"
           count={String(urlCount)}
-          accent="#06b6d4"
           onClick={onOpenUrls}
         />
-        <Tile
+          </div>
+        </section>
+        <section aria-labelledby="tools-heading">
+          <h2 id="tools-heading" className="mb-2 px-3 text-sm font-semibold">Everyday tools</h2>
+          <div className="grid grid-cols-2 gap-x-2 md:grid-cols-1">
+        <NavigationRow
+          icon={Calendar}
+          label="Calendar"
+          sub={upcomingReminderCount > 0 ? `${upcomingReminderCount} this week` : undefined}
+          onClick={onOpenCalendar}
+        />
+        <NavigationRow
           icon={Wallet}
           label="Budget"
-          count={`$${monthSpend?.toFixed(0) ?? "0"}`}
-          sub="spent this month"
-          accent="#22c55e"
+          sub={`$${monthSpend?.toFixed(0) ?? "0"} this month`}
           onClick={onOpenBudget}
         />
-        <Tile
+        <NavigationRow
           icon={Target}
           label="Goals"
-          count={String(goalCount ?? 0)}
-          sub="active"
-          accent="#ec4899"
+          sub={goalCount ? `${goalCount} active` : undefined}
           onClick={onOpenGoals}
         />
-        <Tile
+        <NavigationRow
           icon={MapPin}
           label="Locations"
-          count={String(locationCount ?? 0)}
-          accent="#eab308"
+          sub={locationCount ? `${locationCount} saved` : undefined}
           onClick={onOpenLocations}
         />
-        <Tile
+        <NavigationRow
           icon={Lock}
           label="Passwords"
-          accent="#6b7280"
           onClick={onOpenPasswords}
         />
         {familyPlanActive && (
-          <Tile
+          <NavigationRow
             icon={HeartHandshake}
             label="Family"
-            accent="#ef4444"
             onClick={onOpenFamily}
           />
         )}
+          </div>
+        </section>
       </div>
     </div>
   );
