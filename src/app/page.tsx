@@ -54,6 +54,7 @@ export default function Dashboard() {
   const { folders, addFolder, editFolder, removeFolder } = useFolders();
   const {
     items,
+    allItems,
     trashedItems,
     loading,
     syncing,
@@ -69,22 +70,22 @@ export default function Dashboard() {
   // Counts for sidebar (type-based, ignoring folder filter)
   const itemCounts = useMemo(() => {
     const counts: Record<string, number> = { note: 0, url: 0, reminder: 0 };
-    for (const item of items) {
+    for (const item of allItems) {
       counts[item.type] = (counts[item.type] || 0) + 1;
     }
     return counts;
-  }, [items]);
+  }, [allItems]);
 
   // Collect all unique tags from items
   const allTags = useMemo(() => {
     const tagSet = new Set<string>();
-    for (const item of items) {
+    for (const item of allItems) {
       for (const tag of item.tags) {
         tagSet.add(tag);
       }
     }
     return Array.from(tagSet).sort();
-  }, [items]);
+  }, [allItems]);
 
   // Filter items by active tag
   const displayedItems = useMemo(() => {
@@ -94,67 +95,76 @@ export default function Dashboard() {
 
   // Get reminder items for calendar
   const reminderItems = useMemo(() => {
-    return items.filter((item) => item.type === "reminder" && item.reminderDate);
-  }, [items]);
+    return allItems.filter((item) => item.type === "reminder" && item.reminderDate);
+  }, [allItems]);
 
   // Reminders due in the next 7 days (and not yet completed). Powers the
   // Calendar tile's count + the Reminders tile's "X upcoming" subline.
+  const [reminderNow, setReminderNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setReminderNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const upcomingReminderCount = useMemo(() => {
-    const now = Date.now();
+    const now = reminderNow;
     const weekFromNow = now + 7 * 24 * 60 * 60 * 1000;
     return reminderItems.filter((item) => {
       if (item.reminderCompleted) return false;
       const t = new Date(item.reminderDate!).getTime();
       return t >= now && t <= weekFromNow;
     }).length;
-  }, [reminderItems]);
+  }, [reminderItems, reminderNow]);
 
   // Counts per folder
   const folderItemCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const item of items) {
+    for (const item of allItems) {
       if (item.folderId) {
         counts[item.folderId] = (counts[item.folderId] || 0) + 1;
       }
     }
     return counts;
-  }, [items]);
+  }, [allItems]);
 
   const handleCreateNew = useCallback(() => {
     setEditingItem(null);
     setDefaultType("note");
+    setDefaultReminderDate(undefined);
     setDialogOpen(true);
   }, []);
 
   // Allows standalone primary footer navs (for example Lyte) to jump back into
   // the dashboard's state-only views without adding real routes for each tab.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const filter = params.get("filter");
-    const view = params.get("view");
-    const shouldCreate = params.get("new") === "1";
-    let consumed = false;
+    const frame = window.requestAnimationFrame(() => {
+      const params = new URLSearchParams(window.location.search);
+      const filter = params.get("filter");
+      const view = params.get("view");
+      const shouldCreate = params.get("new") === "1";
+      let consumed = false;
 
-    if (filter === "note" || filter === "url") {
-      setActiveFolder(null);
-      setActiveFilter(filter);
-      setActiveView("list");
-      consumed = true;
-    } else if (view === "budget") {
-      setActiveFolder(null);
-      setActiveFilter("all");
-      setActiveView("budget");
-      consumed = true;
-    }
+      if (filter === "note" || filter === "url") {
+        setActiveFolder(null);
+        setActiveFilter(filter);
+        setActiveView("list");
+        consumed = true;
+      } else if (view === "budget") {
+        setActiveFolder(null);
+        setActiveFilter("all");
+        setActiveView("budget");
+        consumed = true;
+      }
 
-    if (shouldCreate) {
-      handleCreateNew();
-      consumed = true;
-    }
+      if (shouldCreate) {
+        handleCreateNew();
+        consumed = true;
+      }
 
-    if (consumed) {
-      window.history.replaceState(null, "", window.location.pathname);
-    }
+      if (consumed) {
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [handleCreateNew]);
 
   const handleCreateWithType = useCallback((type: "note" | "url" | "reminder") => {
@@ -189,7 +199,7 @@ export default function Dashboard() {
   const handleSave = useCallback(
     async (item: Omit<LocalItem, "id" | "clientId" | "createdAt" | "updatedAt" | "deleted">) => {
       await addItem(item);
-      toast.success("Item created");
+      toast.success(item.type === "url" ? "Link saved" : item.type === "reminder" ? "Reminder saved" : "Note saved");
     },
     [addItem]
   );
@@ -197,7 +207,7 @@ export default function Dashboard() {
   const handleUpdate = useCallback(
     async (clientId: string, updates: Partial<LocalItem>) => {
       await editItem(clientId, updates);
-      toast.success("Item updated");
+      toast.success("Changes saved");
     },
     [editItem]
   );
@@ -404,6 +414,9 @@ export default function Dashboard() {
               activeFolder={activeFolder}
               onCreateWithType={handleCreateWithType}
               onCreateNew={handleCreateNew}
+              searchQuery={searchQuery}
+              activeTag={activeTag}
+              onClearSearch={() => setSearchQuery("")}
             />
           )}
         </main>

@@ -1,32 +1,39 @@
 "use client";
 
-import { type LocalItem, type LocalFolder } from "@/lib/db/indexed-db";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { useRef, useState } from "react";
+import type { LocalItem, LocalFolder } from "@/lib/db/indexed-db";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   Pin,
   PinOff,
-  MoreVertical,
+  MoreHorizontal,
   Pencil,
   Trash2,
   ExternalLink,
-  Check,
   Share2,
   CheckCircle2,
   Circle,
   Copy,
-  Maximize2,
+  FileText,
+  Link2,
+  Bell,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
-import { MarkdownRenderer } from "@/components/markdown-renderer";
+import {
+  checklistTasks,
+  linkLabel,
+  normalizeWebUrl,
+  notePreview,
+  toggleChecklistTask,
+} from "@/lib/items/draft";
 
 interface ItemCardProps {
   item: LocalItem;
@@ -38,354 +45,322 @@ interface ItemCardProps {
   onUpdateContent?: (clientId: string, content: string) => void;
 }
 
-// Apple-Notes-style relative date: time today, "Yesterday", short date in
-// current year, M/D/YY for older items.
 function formatRelative(iso: string): string {
-  const d = new Date(iso);
+  const date = new Date(iso);
   const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  if (sameDay) return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (date.toDateString() === now.toDateString())
+    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
-  if (
-    d.getFullYear() === yesterday.getFullYear() &&
-    d.getMonth() === yesterday.getMonth() &&
-    d.getDate() === yesterday.getDate()
-  )
-    return "Yesterday";
-  if (d.getFullYear() === now.getFullYear())
-    return d.toLocaleDateString([], { month: "short", day: "numeric" });
-  return d.toLocaleDateString([], { month: "numeric", day: "numeric", year: "2-digit" });
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() !== now.getFullYear()
+      ? { year: "2-digit" as const }
+      : {}),
+  });
 }
 
-// First non-empty line of content with markdown prefixes stripped, for the
-// muted preview snippet beside the date.
-function firstLinePreview(content: string): string {
-  const line = content
-    .split("\n")
-    .map((l) => l.replace(/^(?:- \[[ xX]\] |- |\d+\. |[a-z]\. |#+\s+)/, "").trim())
-    .find((l) => l.length > 0);
-  return line ?? "";
-}
-
-// What "Copy" yields per item type. URLs hand back the link; everything
-// else prefers content, falling back to title when content is empty.
-function copyPayloadFor(item: LocalItem): string {
-  if (item.type === "url" && item.url) return item.url;
-  const trimmed = item.content.trim();
-  return trimmed || item.title;
-}
-
-async function copyToClipboard(text: string): Promise<boolean> {
+async function copyText(text: string): Promise<boolean> {
   try {
-    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch { /* falls through to legacy path */ }
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    /* Selection fallback for older webviews. */
+  }
+  const previous = document.activeElement;
+  const field = document.createElement("textarea");
+  field.value = text;
+  field.readOnly = true;
+  field.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+  document.body.appendChild(field);
   try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
-    return ok;
+    field.select();
+    return document.execCommand("copy");
   } catch {
     return false;
+  } finally {
+    field.remove();
+    if (previous instanceof HTMLElement)
+      previous.focus({ preventScroll: true });
   }
 }
 
-export function ItemCard({ item, folder, onEdit, onDelete, onTogglePin, onToggleComplete, onUpdateContent }: ItemCardProps) {
-  // The Maximize button shows only when there's meaningful body content beyond
-  // the one-line preview (or beyond the inline checklist for task notes). It
-  // opens the full-screen note editor (same target as the pencil).
-  const hasExpandableContent =
-    (item.content?.trim().length ?? 0) > 0 ||
-    (item.type === "url" && (item.url?.length ?? 0) > 0);
-
-  const handleCopy = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const payload = copyPayloadFor(item);
-    if (!payload) return;
-    const ok = await copyToClipboard(payload);
-    if (ok) {
-      const kind = item.type === "url" ? "URL" : "Note";
-      toast.success(`${kind} copied`);
-    } else {
-      toast.error("Copy failed");
+export function ItemCard({
+  item,
+  folder,
+  onEdit,
+  onDelete,
+  onTogglePin,
+  onToggleComplete,
+  onUpdateContent,
+}: ItemCardProps) {
+  const updatingRef = useRef(false);
+  const [updating, setUpdating] = useState(false);
+  const update = async (action: () => void | Promise<void>) => {
+    if (updatingRef.current) return;
+    updatingRef.current = true;
+    setUpdating(true);
+    try {
+      await action();
+    } catch {
+      toast.error("Couldn't save that change. Try again.");
+    } finally {
+      updatingRef.current = false;
+      setUpdating(false);
     }
   };
-
-  const handleToggleTask = onUpdateContent
-    ? (index: number) => {
-        let count = 0;
-        const next = item.content.replace(
-          /^(\s*[-*+]\s+\[)([ xX])(\])/gm,
-          (m, pre, mark, post) => {
-            if (count++ !== index) return m;
-            return pre + (mark === " " ? "x" : " ") + post;
-          },
-        );
-        if (next !== item.content) onUpdateContent(item.clientId, next);
-      }
-    : undefined;
-
-  const isOverdue =
+  const tasks = item.type === "note" ? checklistTasks(item.content) : [];
+  const preview = notePreview(item.content, item.title);
+  const safeUrl =
+    item.type === "url" && item.url ? normalizeWebUrl(item.url) : null;
+  const overdue =
     item.type === "reminder" &&
-    item.reminderDate &&
+    !!item.reminderDate &&
     !item.reminderCompleted &&
     new Date(item.reminderDate) < new Date();
-
-  const hasTaskList = /^\s*[-*+]\s+\[[ xX]\]/m.test(item.content);
-  const preview = item.type === "note" && !hasTaskList ? firstLinePreview(item.content) : "";
-  const displayDate = formatRelative(item.updatedAt);
+  const Icon =
+    item.type === "url" ? Link2 : item.type === "reminder" ? Bell : FileText;
+  const handleCopy = async () => {
+    const copied = await copyText(
+      item.type === "url" && item.url
+        ? item.url
+        : item.content.trim() || item.title
+    );
+    if (copied) toast.success(item.type === "url" ? "Link copied" : "Copied");
+    else toast.error("Couldn't copy. Open the note to select its text.");
+  };
 
   return (
-    <Card
-      className={cn(
-        "group relative transition-colors hover:bg-muted/40 rounded-lg",
-        item.pinned && "ring-1 ring-primary/20",
-        isOverdue && "ring-1 ring-destructive/30",
-      )}
-    >
-      <div className="flex items-start gap-2 p-3">
-        {/* Reminder check toggle pulls to the very left so it lines up with the row */}
-        {item.type === "reminder" && onToggleComplete && (
+    <article className="group relative border-b border-border/60 py-1 last:border-b-0">
+      <div className="flex items-start gap-1 sm:gap-2">
+        {item.type === "reminder" && onToggleComplete ? (
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleComplete(item.clientId, item.reminderCompleted || false);
-            }}
-            aria-label={item.reminderCompleted ? "Mark incomplete" : "Mark complete"}
-            className="mt-0.5 shrink-0 transition-transform active:scale-95"
+            type="button"
+            disabled={updating}
+            onClick={() =>
+              void update(() =>
+                onToggleComplete(item.clientId, item.reminderCompleted ?? false)
+              )
+            }
+            aria-label={`${
+              item.reminderCompleted ? "Mark incomplete" : "Complete"
+            }: ${item.title}`}
+            className="mt-1 flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
           >
             {item.reminderCompleted ? (
-              <CheckCircle2 className="h-5 w-5 text-green-500" />
+              <CheckCircle2 className="size-5 text-primary" />
             ) : (
-              <Circle className={cn("h-5 w-5", isOverdue ? "text-destructive" : "text-muted-foreground")} />
+              <Circle className={cn("size-5", overdue && "text-destructive")} />
             )}
           </button>
+        ) : (
+          <div
+            className="mt-1 hidden size-11 shrink-0 items-center justify-center text-muted-foreground sm:flex"
+            aria-hidden="true"
+          >
+            <Icon className="size-5" />
+          </div>
         )}
-
-        <div className="flex-1 min-w-0">
-          {/* Title row: title on the left, folder badge on the right */}
-          <div className="flex items-baseline gap-2">
-            <div className="flex items-center gap-1.5 min-w-0 flex-1">
-              {item.pinned && (
-                <Pin className="h-3 w-3 text-primary fill-primary shrink-0" />
-              )}
-              <h3
+        <div className="min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={() => onEdit(item)}
+            aria-label={`Open ${item.title}`}
+            className="block w-full rounded-lg px-2 py-3 text-left hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring sm:px-3"
+          >
+            <span className="flex items-center gap-2">
+              <span
                 className={cn(
-                  "font-semibold text-sm truncate",
-                  item.reminderCompleted && "line-through text-muted-foreground",
+                  "line-clamp-2 break-words text-base font-semibold leading-6",
+                  item.reminderCompleted && "text-muted-foreground line-through"
                 )}
               >
                 {item.title}
-              </h3>
-            </div>
-            {folder && (
-              <span className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0 max-w-[40%] truncate">
-                <span
-                  className="h-1.5 w-1.5 rounded-sm shrink-0"
-                  style={{ backgroundColor: folder.color || "#6b7280" }}
+              </span>
+              {item.pinned && (
+                <Pin
+                  aria-label="Pinned"
+                  className="size-3.5 shrink-0 text-muted-foreground"
                 />
-                <span className="truncate">{folder.name}</span>
+              )}
+            </span>
+            {!tasks.length && preview && (
+              <span className="mt-1 block line-clamp-2 break-words text-sm leading-6 text-muted-foreground">
+                {preview}
               </span>
             )}
-          </div>
-
-          {/* Date · preview line (Apple-Notes style) */}
-          <div className="flex items-baseline gap-1.5 text-[11px] text-muted-foreground mt-0.5">
-            <span className="shrink-0 tabular-nums">{displayDate}</span>
-            {preview && (
-              <>
-                <span aria-hidden>·</span>
-                <span className="truncate">{preview}</span>
-              </>
-            )}
-            {item.type === "reminder" && item.reminderDate && (
-              <>
-                <span aria-hidden>·</span>
-                <span
-                  className={cn(
-                    "truncate",
-                    isOverdue && !item.reminderCompleted && "text-destructive",
-                  )}
-                >
-                  {new Date(item.reminderDate).toLocaleDateString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
+            <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-5 text-muted-foreground">
+              <span>{formatRelative(item.updatedAt)}</span>
+              {folder && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="max-w-40 truncate">
+                    {folder.householdId ? "Shared · " : ""}
+                    {folder.name}
+                  </span>
+                </>
+              )}
+              {item.tags.slice(0, 2).map((tag) => (
+                <span key={tag} className="max-w-28 truncate">
+                  #{tag}
                 </span>
-              </>
+              ))}
+              {item.tags.length > 2 && <span>+{item.tags.length - 2}</span>}
+            </span>
+            {item.type === "reminder" && item.reminderDate && (
+              <span
+                className={cn(
+                  "mt-1 block text-sm",
+                  overdue ? "text-destructive" : "text-muted-foreground"
+                )}
+              >
+                {item.reminderCompleted
+                  ? "Completed · "
+                  : overdue
+                  ? "Overdue · "
+                  : "Due · "}
+                {new Date(item.reminderDate).toLocaleString([], {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}
+              </span>
             )}
-          </div>
-
-          {/* URL bookmarks: surface the link */}
-          {item.type === "url" && item.url && (
+          </button>
+          {safeUrl && (
             <a
-              href={item.url}
+              href={safeUrl}
               target="_blank"
               rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="flex items-center gap-1 text-xs text-primary hover:underline mt-1 truncate"
+              aria-label={`Visit ${linkLabel(safeUrl)}`}
+              className="mb-1 inline-flex min-h-11 max-w-full items-center gap-2 rounded-lg px-2 text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring sm:px-3"
             >
-              <ExternalLink className="h-3 w-3 shrink-0" />
-              <span className="truncate">{item.url}</span>
+              <Link2 className="size-4 shrink-0" />
+              <span className="truncate">{linkLabel(safeUrl)}</span>
+              <ExternalLink className="size-3.5 shrink-0" />
             </a>
           )}
-
-          {/* Task list — tappable circles inline */}
-          {hasTaskList && (
-            <div className="mt-1.5 text-xs text-muted-foreground">
-              <MarkdownRenderer content={item.content} compact onToggleTask={handleToggleTask} />
-            </div>
-          )}
-
-          {/* Tags */}
-          {item.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1.5">
-              {item.tags.map((tag) => (
-                <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0">
-                  {tag}
-                </Badge>
+          {tasks.length > 0 && (
+            <div className="mb-2 px-2 sm:px-3">
+              {tasks.slice(0, 3).map((task) => (
+                <button
+                  key={task.index}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={task.checked}
+                  aria-label={task.text}
+                  disabled={!onUpdateContent || updating}
+                  onClick={() =>
+                    void update(() =>
+                      onUpdateContent?.(
+                        item.clientId,
+                        toggleChecklistTask(item.content, task.index)
+                      )
+                    )
+                  }
+                  className="flex min-h-11 w-full items-center gap-2 rounded-md text-left text-sm hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-70"
+                >
+                  {task.checked ? (
+                    <CheckCircle2 className="size-4 shrink-0 text-primary" />
+                  ) : (
+                    <Circle className="size-4 shrink-0 text-muted-foreground" />
+                  )}
+                  <span
+                    className={cn(
+                      "line-clamp-2 break-words",
+                      task.checked && "text-muted-foreground line-through"
+                    )}
+                  >
+                    {task.text}
+                  </span>
+                </button>
               ))}
+              {tasks.length > 3 && (
+                <button
+                  type="button"
+                  onClick={() => onEdit(item)}
+                  className="min-h-11 text-sm text-muted-foreground underline-offset-4 hover:underline"
+                >
+                  View {tasks.length - 3} more{" "}
+                  {tasks.length === 4 ? "task" : "tasks"}
+                </button>
+              )}
             </div>
           )}
-
         </div>
-
-        {/* Right-side action column: maximize (open full-screen editor) + pencil + kebab */}
-        <div className="flex items-center gap-0.5 shrink-0 -mr-1">
-          {hasExpandableContent && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-              onClick={(e) => {
-                e.stopPropagation();
-                onEdit(item);
-              }}
-              aria-label="Open full note"
-              title="Open full note"
+              className="mt-1 size-11 shrink-0 text-muted-foreground"
+              aria-label={`Options for ${item.title}`}
             >
-              <Maximize2 className="h-3.5 w-3.5" />
+              <MoreHorizontal className="size-5" />
             </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit(item);
-            }}
-            aria-label="Edit"
-            title="Edit"
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="min-w-44 [&_[role=menuitem]]:min-h-11"
           >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={handleCopy}
-            aria-label="Copy"
-            title={item.type === "url" ? "Copy URL" : "Copy note"}
-          >
-            <Copy className="h-3.5 w-3.5" />
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                aria-label="More"
-              >
-                <MoreVertical className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onTogglePin(item.clientId, item.pinned);
-                }}
-              >
-                {item.pinned ? (
-                  <>
-                    <PinOff className="h-3.5 w-3.5 mr-2" />
-                    Unpin
-                  </>
-                ) : (
-                  <>
-                    <Pin className="h-3.5 w-3.5 mr-2" />
-                    Pin
-                  </>
-                )}
-              </DropdownMenuItem>
-              {item.type === "reminder" && onToggleComplete && (
-                <DropdownMenuItem
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleComplete(item.clientId, item.reminderCompleted || false);
-                  }}
-                >
-                  <Check className="h-3.5 w-3.5 mr-2" />
-                  {item.reminderCompleted ? "Mark incomplete" : "Mark complete"}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onClick={handleCopy}>
-                <Copy className="h-3.5 w-3.5 mr-2" />
-                {item.type === "url" ? "Copy URL" : "Copy"}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  try {
-                    const res = await fetch("/api/share", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ clientId: item.clientId }),
-                    });
-                    if (!res.ok) throw new Error();
-                    const { shareId } = await res.json();
-                    const url = `${window.location.origin}/shared/${shareId}`;
-                    await navigator.clipboard.writeText(url);
-                    toast.success("Share link copied to clipboard");
-                  } catch {
-                    toast.error("Failed to create share link");
-                  }
-                }}
-              >
-                <Share2 className="h-3.5 w-3.5 mr-2" />
-                Share
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="text-destructive"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (confirm(`Move "${item.title}" to trash?`)) {
-                    onDelete(item.clientId);
-                  }
-                }}
-              >
-                <Trash2 className="h-3.5 w-3.5 mr-2" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+            <DropdownMenuItem onClick={() => onEdit(item)}>
+              <Pencil />
+              Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => onTogglePin(item.clientId, item.pinned)}
+            >
+              {item.pinned ? <PinOff /> : <Pin />}
+              {item.pinned ? "Unpin" : "Pin to top"}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleCopy}>
+              <Copy />
+              {item.type === "url" ? "Copy link" : "Copy text"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={async () => {
+                try {
+                  const res = await fetch("/api/share", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ clientId: item.clientId }),
+                  });
+                  if (!res.ok) throw new Error();
+                  const { shareId } = await res.json();
+                  if (
+                    !(await copyText(
+                      `${window.location.origin}/shared/${shareId}`
+                    ))
+                  )
+                    throw new Error();
+                  toast.success("Share link copied");
+                } catch {
+                  toast.error(
+                    "Couldn't create a share link. Check your connection and try again."
+                  );
+                }
+              }}
+            >
+              <Share2 />
+              Share link
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive"
+              onClick={() => {
+                if (confirm(`Move "${item.title}" to trash?`))
+                  onDelete(item.clientId);
+              }}
+            >
+              <Trash2 />
+              Move to trash
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-    </Card>
+    </article>
   );
 }

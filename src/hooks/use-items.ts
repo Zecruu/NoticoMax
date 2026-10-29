@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { type LocalItem } from "@/lib/db/indexed-db";
 import {
   createItem,
@@ -19,6 +19,7 @@ import {
   setSyncEnabled,
 } from "@/lib/sync/sync-engine";
 import { toast } from "@/lib/native-toast";
+import { filterLibraryItems } from "@/lib/items/library";
 
 export function useItems(
   typeFilter?: string,
@@ -26,22 +27,39 @@ export function useItems(
   folderFilter?: string | null,
   syncEnabledFlag: boolean = false
 ) {
-  const [items, setItems] = useState<LocalItem[]>([]);
+  const [allItems, setAllItems] = useState<LocalItem[]>([]);
   const [trashedItems, setTrashedItems] = useState<LocalItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const items = useMemo(
+    () => filterLibraryItems(allItems, typeFilter, searchQuery, folderFilter),
+    [allItems, typeFilter, searchQuery, folderFilter]
+  );
+  const requestRef = useRef(0);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     setSyncEnabled(syncEnabledFlag);
   }, [syncEnabledFlag]);
 
   const refresh = useCallback(async () => {
-    const result = await getItems(typeFilter, searchQuery, folderFilter);
-    setItems(result);
-    const deleted = await getDeletedItems();
+    const request = ++requestRef.current;
+    const [result, deleted] = await Promise.all([
+      getItems(),
+      getDeletedItems(),
+    ]);
+    if (!mountedRef.current || request !== requestRef.current) return;
+    setAllItems(result);
     setTrashedItems(deleted);
     setLoading(false);
-  }, [typeFilter, searchQuery, folderFilter]);
+  }, []);
 
   // Initial load + sync
   useEffect(() => {
@@ -57,9 +75,12 @@ export function useItems(
       // Then sync with server (only for activated users)
       if (mounted && syncEnabledFlag) {
         setSyncing(true);
-        await initialSync();
-        if (mounted) await refresh();
-        setSyncing(false);
+        try {
+          await initialSync();
+          if (mounted) await refresh();
+        } finally {
+          if (mounted) setSyncing(false);
+        }
       }
     }
 
@@ -76,7 +97,15 @@ export function useItems(
     });
 
     const cleanupListeners = setupSyncListeners();
-    init();
+    void init().catch((error) => {
+      if (mounted) {
+        setLoading(false);
+        console.error("[items]", error);
+        toast.error(
+          "Couldn't refresh your library. Your saved items are kept on this device."
+        );
+      }
+    });
 
     return () => {
       mounted = false;
@@ -87,7 +116,12 @@ export function useItems(
   }, [refresh, syncEnabledFlag]);
 
   const addItem = useCallback(
-    async (item: Omit<LocalItem, "id" | "clientId" | "createdAt" | "updatedAt" | "deleted">) => {
+    async (
+      item: Omit<
+        LocalItem,
+        "id" | "clientId" | "createdAt" | "updatedAt" | "deleted"
+      >
+    ) => {
       await createItem(item);
       await refresh();
     },
@@ -144,6 +178,7 @@ export function useItems(
 
   return {
     items,
+    allItems,
     trashedItems,
     loading,
     syncing,

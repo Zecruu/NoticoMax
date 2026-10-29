@@ -70,3 +70,18 @@ Resolved four conflicts against main at `886b57d`, retaining the new chat and vi
 A clean install exposed main's existing lockfile mismatch. Regenerating the lockfile synchronized its package version to 2.5.12 and resolved the required `iconv-lite` version to 0.7.3. The subsequent `npm ci --no-audit --no-fund` succeeded.
 
 The merged result passed all 20 focused tests, focused ESLint, and `npm run build -- --webpack`, including TypeScript and 34 generated pages. Build output retained `/~offline`, `/pricing`, and `/api/assistant/usage`. The generated service worker was excluded from the source commit. ZecruAI's verifier continued to report missing standard-library types; the production compiler passed. Physical iPhone and live provider checks remain outstanding. The server requires `OPENAI_API_KEY` for Lyte.
+
+## Notes and links capture pass, 2026-10-29
+
+- [x] Replace the crowded item cards with readable, tappable rows and one options menu. Keep pin, copy, share, trash, reminder completion, and bounded inline checklists available.
+- [x] Give the library a contextual title, creation action, pinned/recent sections, accurate counts, and a search-specific empty state.
+- [x] Keep one complete local library snapshot. Filter it in memory so typing and category changes do not restart database loading or sync listeners; keep counts, tags, and calendar data independent of the current search.
+- [x] Give capture a visible optional title, a website-first link form, an uncluttered writing surface, accessible list tools, and optional folder/tag organization. Load Markdown rendering only for preview.
+- [x] Save an address without requiring a title; normalize bare domains to HTTPS and reject unsupported URL schemes. Await saves, lock duplicate submissions, retain failed drafts, and avoid rewriting unchanged notes when they close.
+- [x] Move notifications above the mobile navigation so save and copy feedback cannot block the next tap.
+
+Validation: `node --test tests/items.test.mjs tests/assistant.test.mjs tests/assistant-session.test.mjs tests/keyboard-avoidance.test.mjs` passed all 32 tests (12 new item tests). Focused ESLint passed on the eight changed source files. `npm run build -- --webpack` passed, including TypeScript and all 34 generated pages. Its existing middleware and Browserslist warnings remain. The generated `public/sw.js` was excluded from source changes.
+
+Browser checks at `http://127.0.0.1:5468` covered mobile 390x844, reduced-height 390x500, and desktop 1440x900 in light/dark themes. Checked note creation and title derivation, save-on-close, URL-only capture, invalid-link recovery, checklist updates, Markdown preview, pinning, pending tags saved without an extra Add tap, search/no-results recovery, stable counts across categories, reminder creation/completion, copy, and immediate navigation while a notification was showing. A temporary delayed/failing save harness verified draft retention, disabled save controls during writes, and successful retry; it was removed before building. The preview server was stopped.
+
+Impeccable guided the refinement. Its source detector reported no findings in the four changed UI components, but explicitly skipped parsed-page contrast and text-size rules for TSX; visual review supplemented that limited scan. `zecru-ide verify` ran and again reported missing standard-library types, while the repository compiler and production build passed. Authenticated sync/sharing, native builds, physical iPhone keyboard behavior, and production performance measurements were intentionally not run; the local preview has no Supabase credentials or attached iPhone.

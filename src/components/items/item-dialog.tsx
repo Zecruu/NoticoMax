@@ -1,17 +1,31 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { type LocalItem, type ItemType, type LocalFolder, type RecurrenceRule } from "@/lib/db/indexed-db";
+import { useState, useRef, useCallback } from "react";
+import dynamic from "next/dynamic";
+import {
+  type LocalItem,
+  type ItemType,
+  type LocalFolder,
+  type RecurrenceRule,
+} from "@/lib/db/indexed-db";
 import {
   Dialog,
   DialogContent,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -20,16 +34,60 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Link2, Bell, X, Eye, Pencil, List, ListOrdered, ALargeSmall, ListChecks, Trash2, ChevronDown } from "lucide-react";
-import { MarkdownRenderer } from "@/components/markdown-renderer";
+import {
+  FileText,
+  Link2,
+  Bell,
+  X,
+  Eye,
+  Pencil,
+  List,
+  ListOrdered,
+  ALargeSmall,
+  ListChecks,
+  Trash2,
+  ChevronDown,
+  ChevronLeft,
+  MoreHorizontal,
+  Pin,
+  PinOff,
+  Loader2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  hasItemChanges,
+  prepareItemDraft,
+  toggleChecklistTask,
+} from "@/lib/items/draft";
+
+const MarkdownPreview = dynamic(
+  () =>
+    import("@/components/markdown-renderer").then(
+      (module) => module.MarkdownRenderer
+    ),
+  {
+    loading: () => (
+      <p className="text-sm text-muted-foreground" role="status">
+        Loading preview…
+      </p>
+    ),
+  }
+);
 
 interface ItemDialogProps {
   open: boolean;
   onClose: () => void;
-  onSave: (item: Omit<LocalItem, "id" | "clientId" | "createdAt" | "updatedAt" | "deleted">) => void;
-  onUpdate?: (clientId: string, updates: Partial<LocalItem>) => void;
-  onDelete?: (clientId: string) => void;
+  onSave: (
+    item: Omit<
+      LocalItem,
+      "id" | "clientId" | "createdAt" | "updatedAt" | "deleted"
+    >
+  ) => void | Promise<void>;
+  onUpdate?: (
+    clientId: string,
+    updates: Partial<LocalItem>
+  ) => void | Promise<void>;
+  onDelete?: (clientId: string) => void | Promise<void>;
   editingItem?: LocalItem | null;
   folders: LocalFolder[];
   defaultFolderId?: string | null;
@@ -44,182 +102,194 @@ interface ItemDialogProps {
 function toLocalDatetimeValue(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}`;
 }
 
-export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingItem, folders, defaultFolderId, defaultType = "note", defaultReminderDate, allTags = [] }: ItemDialogProps) {
-  const [type, setType] = useState<ItemType>("note");
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [url, setUrl] = useState("");
-  const [reminderDate, setReminderDate] = useState("");
-  const [recurrence, setRecurrence] = useState<RecurrenceRule>("none");
+export function ItemDialog({
+  open,
+  onClose,
+  onSave,
+  onUpdate,
+  onDelete,
+  editingItem,
+  folders,
+  defaultFolderId,
+  defaultType = "note",
+  defaultReminderDate,
+  allTags = [],
+}: ItemDialogProps) {
+  // The parent mounts one editor per draft. Initialize once so prop refreshes
+  // (for example a background sync) cannot replace text the user is typing.
+  const [type, setType] = useState<ItemType>(editingItem?.type ?? defaultType);
+  const [title, setTitle] = useState(editingItem?.title ?? "");
+  const [content, setContent] = useState(editingItem?.content ?? "");
+  const [url, setUrl] = useState(editingItem?.url ?? "");
+  const [reminderDate, setReminderDate] = useState(
+    editingItem?.reminderDate
+      ? toLocalDatetimeValue(editingItem.reminderDate)
+      : defaultType === "reminder"
+      ? defaultReminderDate ?? ""
+      : ""
+  );
+  const [recurrence, setRecurrence] = useState<RecurrenceRule>(
+    editingItem?.recurrence ?? "none"
+  );
   const [tagInput, setTagInput] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
-  const [pinned, setPinned] = useState(false);
-  const [folderId, setFolderId] = useState<string | undefined>(undefined);
+  const [tags, setTags] = useState<string[]>(editingItem?.tags ?? []);
+  const [pinned, setPinned] = useState(editingItem?.pinned ?? false);
+  const [folderId, setFolderId] = useState<string | undefined>(
+    editingItem?.folderId ?? defaultFolderId ?? undefined
+  );
   const [previewing, setPreviewing] = useState(false);
-  const [activeListMode, setActiveListMode] = useState<"bullet" | "numbered" | "lettered" | "checklist" | null>(null);
+  const [activeListMode, setActiveListMode] = useState<
+    "bullet" | "numbered" | "lettered" | "checklist" | null
+  >(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const closingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<{
+    field?: string;
+    message: string;
+  } | null>(null);
 
-  const handleContentKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key !== "Enter") return;
+  const handleContentKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key !== "Enter" || e.nativeEvent.isComposing || e.shiftKey) return;
 
-    const ta = textareaRef.current;
-    if (!ta) return;
+      const ta = textareaRef.current;
+      if (!ta) return;
 
-    const start = ta.selectionStart;
-    const text = ta.value;
+      const start = ta.selectionStart;
+      const text = ta.value;
 
-    // Find the current line
-    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
-    const line = text.slice(lineStart, start);
+      // Find the current line
+      const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+      const line = text.slice(lineStart, start);
 
-    // Detect list prefix on current line — check task list FIRST since "- [ ] x" also matches "- " bullet
-    const taskMatch = line.match(/^(- \[[ xX]\] )(.*)/);
-    const bulletMatch = line.match(/^(- )(.*)/);
-    const numberedMatch = line.match(/^(\d+)\. (.*)/);
-    const letteredMatch = line.match(/^([a-z])\. (.*)/);
+      // Detect list prefix on current line — check task list FIRST since "- [ ] x" also matches "- " bullet
+      const taskMatch = line.match(/^(- \[[ xX]\] )(.*)/);
+      const bulletMatch = line.match(/^(- )(.*)/);
+      const numberedMatch = line.match(/^(\d+)\. (.*)/);
+      const letteredMatch = line.match(/^([a-z])\. (.*)/);
 
-    let nextPrefix = "";
-    let isEmpty = false;
+      let nextPrefix = "";
+      let isEmpty = false;
 
-    if (taskMatch) {
-      isEmpty = taskMatch[2].trim() === "";
-      nextPrefix = "- [ ] ";
-    } else if (numberedMatch) {
-      isEmpty = numberedMatch[2].trim() === "";
-      nextPrefix = `${parseInt(numberedMatch[1]) + 1}. `;
-    } else if (letteredMatch) {
-      isEmpty = letteredMatch[2].trim() === "";
-      nextPrefix = `${String.fromCharCode(letteredMatch[1].charCodeAt(0) + 1)}. `;
-    } else if (bulletMatch) {
-      isEmpty = bulletMatch[2].trim() === "";
-      nextPrefix = "- ";
-    }
+      if (taskMatch) {
+        isEmpty = taskMatch[2].trim() === "";
+        nextPrefix = "- [ ] ";
+      } else if (numberedMatch) {
+        isEmpty = numberedMatch[2].trim() === "";
+        nextPrefix = `${parseInt(numberedMatch[1]) + 1}. `;
+      } else if (letteredMatch) {
+        isEmpty = letteredMatch[2].trim() === "";
+        nextPrefix = `${String.fromCharCode(
+          letteredMatch[1].charCodeAt(0) + 1
+        )}. `;
+      } else if (bulletMatch) {
+        isEmpty = bulletMatch[2].trim() === "";
+        nextPrefix = "- ";
+      }
 
-    if (!nextPrefix) return;
+      if (!nextPrefix) return;
 
-    e.preventDefault();
+      e.preventDefault();
 
-    if (isEmpty) {
-      // Empty list item — remove the prefix and exit list mode
-      const newContent = text.slice(0, lineStart) + text.slice(start);
+      if (isEmpty) {
+        // Empty list item — remove the prefix and exit list mode
+        const newContent = text.slice(0, lineStart) + text.slice(start);
+        setContent(newContent);
+        setActiveListMode(null);
+        requestAnimationFrame(() => {
+          ta.focus();
+          ta.setSelectionRange(lineStart, lineStart);
+        });
+      } else {
+        // Continue the list with next prefix
+        const insert = "\n" + nextPrefix;
+        const newContent = text.slice(0, start) + insert + text.slice(start);
+        setContent(newContent);
+        requestAnimationFrame(() => {
+          ta.focus();
+          const newPos = start + insert.length;
+          ta.setSelectionRange(newPos, newPos);
+        });
+      }
+    },
+    []
+  );
+
+  const insertListPrefix = useCallback(
+    (mode: "bullet" | "numbered" | "lettered" | "checklist") => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const text = ta.value;
+
+      // Find the start of the first selected line and end of the last
+      const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+      const lineEnd = text.indexOf("\n", end);
+      const blockEnd = lineEnd === -1 ? text.length : lineEnd;
+
+      const selectedBlock = text.slice(lineStart, blockEnd);
+      const lines = selectedBlock.split("\n");
+
+      // Check if non-empty lines already have this prefix (for toggling off).
+      // Checklist must be tested BEFORE bullet since "- [ ] x" also matches /^- /.
+      const prefixPatterns = {
+        checklist: /^- \[[ xX]\] /,
+        bullet: /^- (?!\[[ xX]\] )/,
+        numbered: /^\d+\. /,
+        lettered: /^[a-z]\. /,
+      };
+      const nonEmptyLines = lines.filter((line) => line.trim() !== "");
+      const allHavePrefix =
+        nonEmptyLines.length > 0 &&
+        nonEmptyLines.every((line) => prefixPatterns[mode].test(line));
+
+      let newLines: string[];
+      if (allHavePrefix) {
+        // Toggle off: remove prefixes
+        newLines = lines.map((line) => line.replace(prefixPatterns[mode], ""));
+        setActiveListMode(null);
+      } else {
+        // Strip any existing list prefix first, then add new one
+        const stripAll = /^(?:- \[[ xX]\] |- |\d+\. |[a-z]\. )/;
+        newLines = lines.map((line, i) => {
+          const stripped = line.replace(stripAll, "");
+          switch (mode) {
+            case "checklist":
+              return `- [ ] ${stripped}`;
+            case "bullet":
+              return `- ${stripped}`;
+            case "numbered":
+              return `${i + 1}. ${stripped}`;
+            case "lettered":
+              return `${String.fromCharCode(97 + i)}. ${stripped}`;
+          }
+        });
+        setActiveListMode(mode);
+      }
+
+      const newBlock = newLines.join("\n");
+      const newContent =
+        text.slice(0, lineStart) + newBlock + text.slice(blockEnd);
       setContent(newContent);
-      setActiveListMode(null);
+
+      // Restore focus and cursor after React re-render
       requestAnimationFrame(() => {
         ta.focus();
-        ta.setSelectionRange(lineStart, lineStart);
+        const newEnd = lineStart + newBlock.length;
+        ta.setSelectionRange(newEnd, newEnd);
       });
-    } else {
-      // Continue the list with next prefix
-      const insert = "\n" + nextPrefix;
-      const newContent = text.slice(0, start) + insert + text.slice(start);
-      setContent(newContent);
-      requestAnimationFrame(() => {
-        ta.focus();
-        const newPos = start + insert.length;
-        ta.setSelectionRange(newPos, newPos);
-      });
-    }
-  }, []);
-
-  const insertListPrefix = useCallback((mode: "bullet" | "numbered" | "lettered" | "checklist") => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    const text = ta.value;
-
-    // Find the start of the first selected line and end of the last
-    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
-    const lineEnd = text.indexOf("\n", end);
-    const blockEnd = lineEnd === -1 ? text.length : lineEnd;
-
-    const selectedBlock = text.slice(lineStart, blockEnd);
-    const lines = selectedBlock.split("\n");
-
-    // Check if non-empty lines already have this prefix (for toggling off).
-    // Checklist must be tested BEFORE bullet since "- [ ] x" also matches /^- /.
-    const prefixPatterns = {
-      checklist: /^- \[[ xX]\] /,
-      bullet: /^- (?!\[[ xX]\] )/,
-      numbered: /^\d+\. /,
-      lettered: /^[a-z]\. /,
-    };
-    const nonEmptyLines = lines.filter((line) => line.trim() !== "");
-    const allHavePrefix = nonEmptyLines.length > 0 && nonEmptyLines.every(
-      (line) => prefixPatterns[mode].test(line)
-    );
-
-    let newLines: string[];
-    if (allHavePrefix) {
-      // Toggle off: remove prefixes
-      newLines = lines.map((line) => line.replace(prefixPatterns[mode], ""));
-      setActiveListMode(null);
-    } else {
-      // Strip any existing list prefix first, then add new one
-      const stripAll = /^(?:- \[[ xX]\] |- |\d+\. |[a-z]\. )/;
-      newLines = lines.map((line, i) => {
-        const stripped = line.replace(stripAll, "");
-        switch (mode) {
-          case "checklist":
-            return `- [ ] ${stripped}`;
-          case "bullet":
-            return `- ${stripped}`;
-          case "numbered":
-            return `${i + 1}. ${stripped}`;
-          case "lettered":
-            return `${String.fromCharCode(97 + i)}. ${stripped}`;
-        }
-      });
-      setActiveListMode(mode);
-    }
-
-    const newBlock = newLines.join("\n");
-    const newContent = text.slice(0, lineStart) + newBlock + text.slice(blockEnd);
-    setContent(newContent);
-
-    // Restore focus and cursor after React re-render
-    requestAnimationFrame(() => {
-      ta.focus();
-      const newEnd = lineStart + newBlock.length;
-      ta.setSelectionRange(newEnd, newEnd);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (editingItem) {
-      setType(editingItem.type);
-      setTitle(editingItem.title);
-      setContent(editingItem.content);
-      setUrl(editingItem.url || "");
-      setReminderDate(
-        editingItem.reminderDate ? toLocalDatetimeValue(editingItem.reminderDate) : "",
-      );
-      setTags(editingItem.tags);
-      setPinned(editingItem.pinned);
-      setFolderId(editingItem.folderId || undefined);
-      setRecurrence(editingItem.recurrence || "none");
-    } else {
-      setType(defaultType);
-      setTitle("");
-      setContent("");
-      setUrl("");
-      setReminderDate(defaultType === "reminder" && defaultReminderDate ? defaultReminderDate : "");
-      setTags([]);
-      setPinned(false);
-      setFolderId(defaultFolderId || undefined);
-      setRecurrence("none");
-    }
-    setPreviewing(false);
-    setActiveListMode(null);
-    setDetailsOpen(false);
-    closingRef.current = false;
-  }, [editingItem, open, defaultFolderId, defaultType, defaultReminderDate]);
+    },
+    []
+  );
 
   const handleAddTag = () => {
     const tag = tagInput.trim();
@@ -233,441 +303,614 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
     setTags(tags.filter((t) => t !== tag));
   };
 
-  // Auto-title from the first non-empty line of content when title is missing.
-  const computeFinalTitle = (): string => {
-    const t = title.trim();
-    if (t) return t;
-    const firstLine = content
-      .split("\n")
-      .map((l) => l.replace(/^(?:- \[[ xX]\] |- |\d+\. |[a-z]\. )/, "").trim())
-      .find((l) => l.length > 0);
-    if (firstLine) return firstLine.slice(0, 60);
-    return "";
-  };
-
-  const persist = (finalTitle: string) => {
-    // The datetime-local input value is in LOCAL wall-clock time with no
-    // timezone (e.g. "2026-07-04T01:00"). Postgres timestamptz interprets
-    // unqualified strings as UTC, which shifts the reminder by the user's
-    // offset (Jul 4 1 AM EDT would become Jul 3 9 PM when re-read). Parse it
-    // as local time and serialize as a true ISO with offset.
-    const reminderIso =
-      type === "reminder" && reminderDate
-        ? new Date(reminderDate).toISOString()
-        : undefined;
-
-    const itemData = {
-      type,
-      title: finalTitle,
-      content: content.trim(),
-      url: type === "url" ? url.trim() : undefined,
-      reminderDate: reminderIso,
-      reminderCompleted: editingItem?.reminderCompleted || false,
-      recurrence: type === "reminder" ? recurrence : undefined,
-      tags,
-      pinned,
-      color: editingItem?.color,
-      folderId: folderId || undefined,
-    };
-
-    if (editingItem && onUpdate) {
-      onUpdate(editingItem.clientId, itemData);
-    } else {
-      onSave(itemData);
+  const finalizeAndClose = async () => {
+    if (closingRef.current) return;
+    const draft = prepareItemDraft(
+      {
+        type,
+        title,
+        content,
+        url,
+        reminderDate,
+        recurrence,
+        tags: tagInput.trim() ? [...tags, tagInput] : tags,
+        pinned,
+        folderId,
+      },
+      editingItem
+    );
+    if (draft.kind === "invalid") {
+      setError(draft);
+      document.getElementById(draft.field)?.focus();
+      return;
+    }
+    if (draft.kind === "empty") {
+      onClose();
+      return;
+    }
+    if (editingItem && !hasItemChanges(draft.item, editingItem)) {
+      onClose();
+      return;
+    }
+    closingRef.current = true;
+    setSaving(true);
+    setError(null);
+    try {
+      if (editingItem) {
+        if (!onUpdate) throw new Error("Updates are unavailable");
+        await onUpdate(editingItem.clientId, draft.item);
+      } else {
+        await onSave(draft.item);
+      }
+      onClose();
+    } catch {
+      closingRef.current = false;
+      setSaving(false);
+      setError({
+        message: "Couldn't save. Your draft is still here. Try saving again.",
+      });
     }
   };
 
-  // Called on every close path (explicit X, escape, outside tap). Auto-saves
-  // if there's anything worth saving, otherwise silently discards. Idempotent
-  // via closingRef so it never double-fires (Radix can call onOpenChange twice).
-  const finalizeAndClose = () => {
-    if (closingRef.current) return;
+  const handleDelete = async () => {
+    if (!editingItem || !onDelete || closingRef.current) return;
+    if (!confirm(`Move "${editingItem.title}" to trash?`)) return;
     closingRef.current = true;
-    const finalTitle = computeFinalTitle();
-    if (finalTitle) persist(finalTitle);
-    onClose();
+    setSaving(true);
+    setError(null);
+    try {
+      await onDelete(editingItem.clientId);
+      onClose();
+    } catch {
+      closingRef.current = false;
+      setSaving(false);
+      setError({
+        message: "Couldn't move this to trash. Your note is still here.",
+      });
+    }
   };
 
-  const handleDelete = () => {
-    if (!editingItem || !onDelete) return;
-    if (!confirm(`Delete "${editingItem.title}"? This moves it to Trash.`)) return;
+  const discardChanges = () => {
     if (closingRef.current) return;
-    closingRef.current = true;
-    onDelete(editingItem.clientId);
-    onClose();
+    if (confirm(editingItem ? "Discard your changes?" : "Discard this draft?"))
+      onClose();
   };
 
-  const toggleTaskAtIndex = useCallback((index: number) => {
-    let count = 0;
-    const next = content.replace(
-      /^(\s*[-*+]\s+\[)([ xX])(\])/gm,
-      (m, pre, mark, post) => {
-        if (count++ !== index) return m;
-        return pre + (mark === " " ? "x" : " ") + post;
-      },
-    );
-    setContent(next);
-  }, [content]);
+  const toggleTaskAtIndex = (index: number) =>
+    setContent((previous) => toggleChecklistTask(previous, index));
 
   const handleTextareaInput = useCallback(() => {
     // Keep the active textarea visible above the iOS keyboard as it grows / caret moves.
     const ta = textareaRef.current;
     if (!ta) return;
     requestAnimationFrame(() => {
-      try { ta.scrollIntoView({ block: "nearest" }); } catch {}
+      try {
+        ta.scrollIntoView({ block: "nearest" });
+      } catch {}
     });
   }, []);
 
+  const kind =
+    type === "url" ? "link" : type === "reminder" ? "reminder" : "note";
+  const folder = folders.find((entry) => entry.clientId === folderId);
+
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && finalizeAndClose()}>
+    <Dialog
+      open={open}
+      onOpenChange={(isOpen) => {
+        if (!isOpen) void finalizeAndClose();
+      }}
+    >
       <DialogContent
         showCloseButton={false}
-        onEscapeKeyDown={(e) => { e.preventDefault(); finalizeAndClose(); }}
-        onPointerDownOutside={(e) => { e.preventDefault(); finalizeAndClose(); }}
-        onInteractOutside={(e) => { e.preventDefault(); }}
-        className="!fixed !inset-x-0 !bottom-auto !top-[var(--visual-viewport-top,0px)] !translate-x-0 !translate-y-0 !max-w-none !w-full !h-[var(--visual-viewport-height,100dvh)] !max-h-none !rounded-none !border-0 !p-0 !gap-0 !overflow-hidden flex flex-col bg-background"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          document
+            .getElementById(
+              type === "note" ? "content" : type === "url" ? "url" : "title"
+            )
+            ?.focus();
+        }}
+        onEscapeKeyDown={(event) => {
+          event.preventDefault();
+          void finalizeAndClose();
+        }}
+        onPointerDownOutside={(event) => {
+          event.preventDefault();
+          void finalizeAndClose();
+        }}
+        onInteractOutside={(event) => event.preventDefault()}
+        onKeyDown={(event) => {
+          if (
+            !event.nativeEvent.isComposing &&
+            (event.metaKey || event.ctrlKey) &&
+            (event.key === "s" || event.key === "Enter")
+          ) {
+            event.preventDefault();
+            void finalizeAndClose();
+          }
+        }}
+        className="!fixed !inset-x-0 !bottom-auto !top-[var(--visual-viewport-top,0px)] !translate-x-0 !translate-y-0 !max-w-none !w-full !h-[var(--visual-viewport-height,100dvh)] !max-h-none !rounded-none !border-0 !p-0 !gap-0 !overflow-hidden !animate-none flex flex-col bg-background"
       >
-        {/* Top bar */}
-        <div className="flex items-center justify-between gap-2 px-3 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] border-b shrink-0 bg-background">
-          <button
-            type="button"
-            onClick={finalizeAndClose}
-            className="inline-flex items-center justify-center h-9 w-9 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            aria-label="Close (auto-saves)"
-            title="Close (auto-saves)"
-          >
-            <X className="h-5 w-5" />
-          </button>
-          <DialogTitle className="text-sm font-semibold truncate flex-1 text-center px-2">
-            {editingItem ? "Edit Item" : "New Item"}
-          </DialogTitle>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={!editingItem || !onDelete}
-              className="inline-flex items-center justify-center h-9 w-9 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              aria-label="Delete"
-              title={editingItem ? "Delete" : "Save first to delete"}
-            >
-              <Trash2 className="h-5 w-5" />
-            </button>
+        <header className="shrink-0 border-b bg-background pt-[env(safe-area-inset-top)]">
+          <div className="mx-auto flex max-w-4xl items-center gap-2 px-3 py-2 sm:px-6">
             <Button
-              size="sm"
-              onClick={finalizeAndClose}
-              className="font-semibold h-9 px-4"
+              type="button"
+              variant="ghost"
+              disabled={saving}
+              onClick={() => void finalizeAndClose()}
+              className="min-h-11 gap-1 px-2"
+              aria-label="Save and close"
             >
-              Save
+              <ChevronLeft className="size-5" />
+              <span className="hidden sm:inline">Back</span>
+            </Button>
+            <DialogTitle className="min-w-0 flex-1 truncate text-base">
+              {editingItem
+                ? kind[0].toUpperCase() + kind.slice(1)
+                : `New ${kind}`}
+            </DialogTitle>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={saving}
+                  className="size-11 text-muted-foreground"
+                  aria-label="Note options"
+                >
+                  <MoreHorizontal className="size-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="[&_[role=menuitem]]:min-h-11"
+              >
+                <DropdownMenuItem
+                  onClick={() => setPinned((previous) => !previous)}
+                >
+                  {pinned ? <PinOff /> : <Pin />}
+                  {pinned ? "Unpin" : "Pin to top"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={discardChanges}>
+                  <X />
+                  {editingItem ? "Discard changes" : "Discard draft"}
+                </DropdownMenuItem>
+                {editingItem && onDelete && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() => void handleDelete()}
+                    >
+                      <Trash2 />
+                      Move to trash
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              disabled={saving}
+              onClick={() => void finalizeAndClose()}
+              className="min-h-11 min-w-20"
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                "Save"
+              )}
             </Button>
           </div>
-        </div>
-
-        {/* Body */}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          {!editingItem && (
-            <Tabs value={type} onValueChange={(v) => setType(v as ItemType)}>
-              <TabsList className="w-full">
-                <TabsTrigger value="note" className="flex-1 gap-1.5">
-                  <FileText className="h-3.5 w-3.5" />
-                  Note
-                </TabsTrigger>
-                <TabsTrigger value="url" className="flex-1 gap-1.5">
-                  <Link2 className="h-3.5 w-3.5" />
-                  URL
-                </TabsTrigger>
-                <TabsTrigger value="reminder" className="flex-1 gap-1.5">
-                  <Bell className="h-3.5 w-3.5" />
-                  Reminder
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="note" className="hidden" />
-              <TabsContent value="url" className="hidden" />
-              <TabsContent value="reminder" className="hidden" />
-            </Tabs>
-          )}
-
-          {/* Title — visually quiet; the body autoFocuses instead so users can
-              just start typing. Title can stay blank — it auto-derives from
-              the first line of content (see computeFinalTitle below). */}
-          {(type !== "note" || title || editingItem) && (
-            <Input
-              id="title"
-              placeholder={
-                type === "note"
-                  ? "Title (optional)"
-                  : type === "url"
-                    ? "Bookmark name..."
-                    : "Reminder title..."
-              }
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              autoFocus={type !== "note" && !editingItem}
-              className="text-lg font-semibold border-0 px-0 shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/40"
-            />
-          )}
-
-          {type === "url" && (
-            <div className="space-y-2">
-              <Label htmlFor="url">URL</Label>
-              <Input
-                id="url"
-                type="url"
-                placeholder="https://..."
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-              />
-            </div>
-          )}
-
-          {type === "reminder" && (
-            <>
-            <div className="space-y-2">
-              <Label htmlFor="reminderDate">Date & Time</Label>
-              <Input
-                id="reminderDate"
-                type="datetime-local"
-                value={reminderDate}
-                onChange={(e) => setReminderDate(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="recurrence">Repeat</Label>
-              <select
-                id="recurrence"
-                value={recurrence}
-                onChange={(e) => setRecurrence(e.target.value as RecurrenceRule)}
-                className="text-foreground bg-transparent dark:bg-input/30 border-input flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+        </header>
+        <DialogDescription className="sr-only">
+          Write a {kind}. Save or go back to keep your changes. Extra
+          organization is optional.
+        </DialogDescription>
+        {error && (
+          <div
+            role="alert"
+            id="draft-error"
+            className="shrink-0 border-b bg-destructive/10 px-5 py-3 text-sm text-destructive"
+          >
+            <p className="mx-auto max-w-3xl">{error.message}</p>
+          </div>
+        )}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[max(2rem,env(safe-area-inset-bottom))]">
+          <fieldset
+            disabled={saving}
+            className="mx-auto w-full min-w-0 max-w-3xl space-y-6 px-5 py-5 sm:px-8 sm:py-8"
+          >
+            {!editingItem && (
+              <Tabs
+                value={type}
+                onValueChange={(value) => {
+                  setType(value as ItemType);
+                  setError(null);
+                  setPreviewing(false);
+                  requestAnimationFrame(() =>
+                    document
+                      .getElementById(
+                        value === "note"
+                          ? "content"
+                          : value === "url"
+                          ? "url"
+                          : "title"
+                      )
+                      ?.focus()
+                  );
+                }}
               >
-                <option value="none">Does not repeat</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-                <option value="yearly">Yearly (birthdays, anniversaries)</option>
-              </select>
-            </div>
-            </>
-          )}
+                <TabsList className="h-auto w-full p-1 sm:w-auto">
+                  <TabsTrigger
+                    value="note"
+                    className="min-h-11 flex-1 gap-2 px-4"
+                  >
+                    <FileText className="size-4" />
+                    Note
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="url"
+                    className="min-h-11 flex-1 gap-2 px-4"
+                  >
+                    <Link2 className="size-4" />
+                    Link
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="reminder"
+                    className="min-h-11 flex-1 gap-2 px-4"
+                  >
+                    <Bell className="size-4" />
+                    Reminder
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            )}
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              {type === "note" ? <span /> : <Label htmlFor="content">Description (optional)</Label>}
-              {type === "note" && content && (
-                <div className="flex items-center gap-1 rounded-md border p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setPreviewing(false)}
-                    className={`flex items-center gap-1 rounded-sm px-2 py-0.5 text-xs transition-colors ${
-                      !previewing ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-                    }`}
+            {type === "url" && (
+              <div className="space-y-2">
+                <Label htmlFor="url">Website address</Label>
+                <Input
+                  id="url"
+                  type="url"
+                  inputMode="url"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder="Paste a link, or type example.com"
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  className="min-h-12 text-base"
+                  aria-invalid={error?.field === "url"}
+                  aria-describedby={
+                    error?.field === "url" ? "draft-error" : undefined
+                  }
+                />
+              </div>
+            )}
+            <div>
+              <Label htmlFor="title" className="sr-only">
+                {type === "note" || type === "url"
+                  ? "Title (optional)"
+                  : "Reminder title"}
+              </Label>
+              <Input
+                id="title"
+                placeholder={
+                  type === "url"
+                    ? "Title (optional)"
+                    : type === "reminder"
+                    ? "What do you need to do?"
+                    : "Title (optional)"
+                }
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                className="h-auto min-h-12 rounded-none border-0 bg-transparent px-0 text-2xl! font-semibold leading-8 shadow-none placeholder:text-muted-foreground focus-visible:ring-0 dark:bg-transparent"
+              />
+              {pinned && (
+                <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Pin className="size-3" />
+                  Pinned to top
+                </p>
+              )}
+            </div>
+            {type === "reminder" && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="min-w-0 space-y-2">
+                  <Label htmlFor="reminderDate">Date and time (optional)</Label>
+                  <Input
+                    id="reminderDate"
+                    type="datetime-local"
+                    value={reminderDate}
+                    onChange={(event) => setReminderDate(event.target.value)}
+                    className="min-h-11 max-w-full"
+                    aria-invalid={error?.field === "reminderDate"}
+                    aria-describedby={
+                      error?.field === "reminderDate"
+                        ? "draft-error"
+                        : undefined
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="recurrence">Repeat</Label>
+                  <select
+                    id="recurrence"
+                    value={recurrence}
+                    onChange={(event) =>
+                      setRecurrence(event.target.value as RecurrenceRule)
+                    }
+                    className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <Pencil className="h-3 w-3" />
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewing(true)}
-                    className={`flex items-center gap-1 rounded-sm px-2 py-0.5 text-xs transition-colors ${
-                      previewing ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <Eye className="h-3 w-3" />
-                    Preview
-                  </button>
+                    <option value="none">Does not repeat</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="yearly">Yearly</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label
+                  htmlFor="content"
+                  className={type === "note" ? "sr-only" : "text-sm"}
+                >
+                  {type === "note" ? "Note text" : "Notes (optional)"}
+                </Label>
+                {type === "note" && (
+                  <>
+                    {!previewing && (
+                      <div
+                        className="flex items-center gap-1"
+                        role="group"
+                        aria-label="List formatting"
+                      >
+                        {(
+                          [
+                            {
+                              mode: "checklist",
+                              label: "Checklist",
+                              icon: ListChecks,
+                            },
+                            {
+                              mode: "bullet",
+                              label: "Bullet list",
+                              icon: List,
+                            },
+                            {
+                              mode: "numbered",
+                              label: "Numbered list",
+                              icon: ListOrdered,
+                            },
+                            {
+                              mode: "lettered",
+                              label: "Lettered list",
+                              icon: ALargeSmall,
+                            },
+                          ] as const
+                        ).map((entry) => (
+                          <Button
+                            key={entry.mode}
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                              "size-11 text-muted-foreground",
+                              activeListMode === entry.mode &&
+                                "bg-muted text-foreground"
+                            )}
+                            aria-label={entry.label}
+                            aria-pressed={activeListMode === entry.mode}
+                            title={entry.label}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => insertListPrefix(entry.mode)}
+                          >
+                            <entry.icon className="size-4" />
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={!content}
+                      className="ml-auto min-h-11 gap-2 text-muted-foreground"
+                      onClick={() => setPreviewing((previous) => !previous)}
+                    >
+                      {previewing ? (
+                        <Pencil className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                      {previewing ? "Edit" : "Preview"}
+                    </Button>
+                  </>
+                )}
+              </div>
+              {previewing && type === "note" ? (
+                <div className="min-h-[35dvh] break-words py-2">
+                  <MarkdownPreview
+                    content={content}
+                    onToggleTask={toggleTaskAtIndex}
+                  />
+                </div>
+              ) : (
+                <Textarea
+                  ref={textareaRef}
+                  id="content"
+                  placeholder={
+                    type === "note" ? "Start writing…" : "Add a little context…"
+                  }
+                  value={content}
+                  onChange={(event) => setContent(event.target.value)}
+                  onInput={handleTextareaInput}
+                  onFocus={handleTextareaInput}
+                  onKeyDown={type === "note" ? handleContentKeyDown : undefined}
+                  rows={type === "note" ? 10 : 4}
+                  aria-invalid={error?.field === "content"}
+                  aria-describedby={
+                    error?.field === "content" ? "draft-error" : undefined
+                  }
+                  className={cn(
+                    "resize-none rounded-none border-0 bg-transparent px-0 text-base leading-7 shadow-none placeholder:text-muted-foreground focus-visible:ring-0 dark:bg-transparent",
+                    type === "note" && "min-h-[35dvh]"
+                  )}
+                />
+              )}
+            </div>
+
+            <div className="border-t pt-2">
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setDetailsOpen((previous) => !previous)}
+                className="flex min-h-12 w-full items-center gap-3 text-left text-sm text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                aria-expanded={detailsOpen}
+                aria-controls="note-organization"
+              >
+                <span className="shrink-0 font-medium">Organize</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {[
+                    folder?.name,
+                    tags.length
+                      ? `${tags.length} tag${tags.length === 1 ? "" : "s"}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "Folder and tags"}
+                </span>
+                <ChevronDown
+                  className={cn("size-4 shrink-0", detailsOpen && "rotate-180")}
+                />
+              </button>
+              {detailsOpen && (
+                <div id="note-organization" className="space-y-5 py-4">
+                  {folders.length > 0 && (
+                    <div className="space-y-2">
+                      <Label htmlFor="folder-select">Folder</Label>
+                      <Select
+                        value={folderId || "none"}
+                        onValueChange={(value) =>
+                          setFolderId(value === "none" ? undefined : value)
+                        }
+                      >
+                        <SelectTrigger
+                          id="folder-select"
+                          className="min-h-11 w-full"
+                        >
+                          <SelectValue placeholder="No folder" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No folder</SelectItem>
+                          {folders.map((entry) => (
+                            <SelectItem
+                              key={entry.clientId}
+                              value={entry.clientId}
+                            >
+                              {entry.name}
+                              {entry.householdId
+                                ? " · Shared with household"
+                                : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {folder?.householdId && (
+                        <p className="text-sm text-muted-foreground">
+                          Items in this folder are shared with your household.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  <div className="space-y-3">
+                    <Label htmlFor="note-tag">Tags</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="note-tag"
+                        placeholder="Add a tag"
+                        className="min-h-11"
+                        value={tagInput}
+                        onChange={(event) => setTagInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (
+                            event.key === "Enter" &&
+                            !event.nativeEvent.isComposing
+                          ) {
+                            event.preventDefault();
+                            handleAddTag();
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={!tagInput.trim()}
+                        className="min-h-11"
+                        onClick={handleAddTag}
+                      >
+                        Add
+                      </Button>
+                    </div>
+                    {tags.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {tags.map((tag) => (
+                          <Badge
+                            key={tag}
+                            variant="secondary"
+                            className="gap-1 py-0 pl-3 pr-0 text-sm"
+                          >
+                            {tag}
+                            <button
+                              type="button"
+                              aria-label={`Remove tag ${tag}`}
+                              className="flex size-11 items-center justify-center rounded-full hover:text-destructive"
+                              onClick={() => handleRemoveTag(tag)}
+                            >
+                              <X className="size-3.5" />
+                            </button>
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                    {allTags.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {allTags
+                          .filter(
+                            (tag) =>
+                              !tags.includes(tag) &&
+                              (!tagInput ||
+                                tag
+                                  .toLowerCase()
+                                  .includes(tagInput.toLowerCase()))
+                          )
+                          .slice(0, 8)
+                          .map((tag) => (
+                            <Button
+                              key={tag}
+                              type="button"
+                              variant="outline"
+                              className="min-h-11"
+                              onClick={() => {
+                                setTags((previous) => [...previous, tag]);
+                                setTagInput("");
+                              }}
+                            >
+                              + {tag}
+                            </Button>
+                          ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
-            {type === "note" && !previewing && (
-              <div className="flex items-center gap-0.5 rounded-md border p-0.5 w-fit">
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => insertListPrefix("checklist")}
-                  className={`flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors ${
-                    activeListMode === "checklist" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-                  title="Checklist (tap circles to tick)"
-                >
-                  <ListChecks className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => insertListPrefix("bullet")}
-                  className={`flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors ${
-                    activeListMode === "bullet" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-                  title="Bullet list"
-                >
-                  <List className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => insertListPrefix("numbered")}
-                  className={`flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors ${
-                    activeListMode === "numbered" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-                  title="Numbered list"
-                >
-                  <ListOrdered className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => insertListPrefix("lettered")}
-                  className={`flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition-colors ${
-                    activeListMode === "lettered" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-                  title="Lettered list (a, b, c)"
-                >
-                  <ALargeSmall className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
-            {previewing && type === "note" ? (
-              <div className="min-h-[150px] max-h-[60dvh] overflow-auto rounded-md border bg-background p-3">
-                <MarkdownRenderer content={content} onToggleTask={toggleTaskAtIndex} />
-              </div>
-            ) : (
-              <Textarea
-                ref={type === "note" ? textareaRef : undefined}
-                id="content"
-                autoFocus={type === "note" && !editingItem}
-                placeholder={
-                  type === "note"
-                    ? "Start typing…"
-                    : "Add a description..."
-                }
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                onInput={type === "note" ? handleTextareaInput : undefined}
-                onFocus={type === "note" ? handleTextareaInput : undefined}
-                onKeyDown={type === "note" ? handleContentKeyDown : undefined}
-                rows={type === "note" ? 14 : 3}
-                className={cn(
-                  type === "note" && "min-h-[40dvh] text-base border-0 px-0 shadow-none focus-visible:ring-0 resize-none",
-                )}
-              />
-            )}
-          </div>
-
-          {/* Collapsible Details: folder + tags */}
-          <div className="rounded-md border">
-            <button
-              type="button"
-              onClick={() => setDetailsOpen((v) => !v)}
-              className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-              aria-expanded={detailsOpen}
-            >
-              <span className="flex items-center gap-2">
-                Details
-                {(folderId || tags.length > 0) && (
-                  <span className="text-[10px] rounded-full bg-muted px-1.5 py-0.5">
-                    {[folderId ? "folder" : null, tags.length > 0 ? `${tags.length} tag${tags.length > 1 ? "s" : ""}` : null]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
-                )}
-              </span>
-              <ChevronDown className={cn("h-4 w-4 transition-transform", detailsOpen && "rotate-180")} />
-            </button>
-            {detailsOpen && (
-              <div className="border-t px-3 py-3 space-y-3">
-                {folders.length > 0 && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="folder-select" className="text-xs">Folder</Label>
-                    <Select
-                      value={folderId || "none"}
-                      onValueChange={(v) => setFolderId(v === "none" ? undefined : v)}
-                    >
-                      <SelectTrigger id="folder-select" className="h-8">
-                        <SelectValue placeholder="No folder" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">
-                          <span className="text-muted-foreground">No folder</span>
-                        </SelectItem>
-                        {folders.map((folder) => (
-                          <SelectItem key={folder.clientId} value={folder.clientId}>
-                            <div className="flex items-center gap-2">
-                              <div
-                                className="h-2.5 w-2.5 rounded-sm shrink-0"
-                                style={{ backgroundColor: folder.color || "#6b7280" }}
-                              />
-                              <span>{folder.name}</span>
-                              {folder.householdId && (
-                                <span className="text-[9px] rounded-full bg-primary/15 text-primary px-1 py-0.5 font-semibold uppercase tracking-wider">
-                                  Family
-                                </span>
-                              )}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Tags</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Add tag..."
-                      value={tagInput}
-                      onChange={(e) => setTagInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleAddTag();
-                        }
-                      }}
-                    />
-                    <Button type="button" variant="secondary" onClick={handleAddTag}>
-                      Add
-                    </Button>
-                  </div>
-                  {tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {tags.map((tag) => (
-                        <Badge key={tag} variant="secondary" className="gap-1">
-                          {tag}
-                          <button
-                            onClick={() => handleRemoveTag(tag)}
-                            className="ml-0.5 hover:text-destructive"
-                          >
-                            <X className="h-2.5 w-2.5" />
-                          </button>
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                  {allTags.length > 0 && (
-                    <div className="space-y-1">
-                      <p className="text-[10px] text-muted-foreground">Suggestions</p>
-                      <div className="flex flex-wrap gap-1">
-                        {allTags
-                          .filter((t) => !tags.includes(t) && (!tagInput || t.toLowerCase().includes(tagInput.toLowerCase())))
-                          .slice(0, 8)
-                          .map((tag) => (
-                            <button
-                              key={tag}
-                              type="button"
-                              onClick={() => {
-                                if (!tags.includes(tag)) setTags([...tags, tag]);
-                                setTagInput("");
-                              }}
-                              className="rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                            >
-                              + {tag}
-                            </button>
-                          ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+          </fieldset>
         </div>
       </DialogContent>
     </Dialog>
