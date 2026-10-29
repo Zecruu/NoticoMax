@@ -15,9 +15,8 @@ import {
   ASSISTANT_MODEL,
   generateReply,
   type ChatMessage,
-  type GeminiFunctionCall,
-  type GeminiTool,
-} from "@/lib/ai/gemini";
+  type AssistantFunctionCall,
+} from "@/lib/ai/openai";
 import { getProfile } from "@/lib/ai/profile";
 import {
   addMemory,
@@ -48,7 +47,7 @@ const MAX_TOOL_CALLS = 2;
  */
 const MAX_HISTORY_MESSAGES = 20;
 
-const ASSISTANT_TOOLS: GeminiTool[] = [{ functionDeclarations: [...TOOL_DECLARATIONS] }];
+const ASSISTANT_TOOLS = TOOL_DECLARATIONS;
 
 /**
  * Assemble the system prompt from the assistant's name, curated memory, and
@@ -93,7 +92,7 @@ export async function GET(request: NextRequest) {
   const gate = await resolveAllowedAssistantUser(request);
   if (gate.error) return gate.error;
 
-  const configured = !!process.env.GEMINI_API_KEY;
+  const configured = !!process.env.OPENAI_API_KEY;
   const admin = getSupabaseAdminClient();
 
   // Probe the assistant ledger so the UI can show a precise "run the migration"
@@ -139,7 +138,7 @@ export async function POST(request: NextRequest) {
   if (gate.error) return gate.error;
   const { userId, email } = gate;
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
       { error: "The assistant isn't configured yet. Please try again later." },
@@ -315,7 +314,7 @@ export async function POST(request: NextRequest) {
 async function runToolCalls(
   admin: SupabaseClient,
   userId: string,
-  functionCalls: GeminiFunctionCall[],
+  functionCalls: AssistantFunctionCall[],
   modelText: string,
   userMessage: string,
 ): Promise<string> {

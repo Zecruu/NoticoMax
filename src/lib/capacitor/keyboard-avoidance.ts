@@ -12,8 +12,8 @@
  * reserve room, and manually scroll the focused field above the keyboard —
  * retried across the keyboard animation because iOS reports dimensions late.
  *
- * Capacitor keyboard events (wired in native-bridge.ts) call into here as an
- * extra trigger; the visualViewport path stays authoritative when present.
+ * Capacitor keyboard events (wired in native-bridge.ts) also constrain the
+ * visible height in body-resize mode, where visualViewport may not shrink.
  */
 
 // Ignore small viewport changes (URL bar collapse, etc.) so we only react to a
@@ -21,11 +21,18 @@
 const KB_THRESHOLD_PX = 80;
 
 let cleanupFns: Array<() => void> = [];
+let pendingFrame = 0;
+let retryTimers: ReturnType<typeof setTimeout>[] = [];
+let nativeKeyboardHeight = 0;
+let restingHeight = 0;
 
 function isEditable(el: Element | null): el is HTMLElement {
   if (!el) return false;
   const tag = el.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (tag === "INPUT") {
+    return !["button", "submit", "reset", "checkbox", "radio", "range", "color", "file", "hidden"].includes((el as HTMLInputElement).type);
+  }
+  if (tag === "TEXTAREA" || tag === "SELECT") return true;
   return (el as HTMLElement).isContentEditable === true;
 }
 
@@ -47,6 +54,7 @@ function getScrollParent(el: HTMLElement): HTMLElement {
 function readKeyboardHeight(): number {
   const vv = window.visualViewport;
   if (!vv) return 0;
+  if (vv.scale !== 1 || !isEditable(document.activeElement)) return 0;
   const overlap = window.innerHeight - vv.height - vv.offsetTop;
   return overlap > KB_THRESHOLD_PX ? Math.round(overlap) : 0;
 }
@@ -56,12 +64,23 @@ export function applyViewportVars(): void {
   if (typeof window === "undefined") return;
   const root = document.documentElement;
   const vv = window.visualViewport;
-  const kb = readKeyboardHeight();
+  const kb = Math.max(nativeKeyboardHeight, readKeyboardHeight());
+  if (!kb) restingHeight = window.innerHeight;
+  // In Capacitor's body-resize mode innerHeight/visualViewport can stay full
+  // size. Use its keyboard event as an additional visible-height constraint.
+  const nativeVisibleHeight = nativeKeyboardHeight
+    ? Math.max(1, restingHeight - nativeKeyboardHeight)
+    : window.innerHeight;
+  const visibleHeight = Math.min(vv?.height ?? window.innerHeight, nativeVisibleHeight);
   root.style.setProperty("--keyboard-height", `${kb}px`);
-  if (vv) {
-    root.style.setProperty("--visual-viewport-height", `${Math.round(vv.height)}px`);
-  }
+  root.style.setProperty("--visual-viewport-height", `${Math.round(visibleHeight)}px`);
+  root.style.setProperty("--visual-viewport-top", `${Math.round(vv?.offsetTop ?? 0)}px`);
   root.classList.toggle("keyboard-open", kb > 0);
+}
+
+export function setNativeKeyboardHeight(height: number): void {
+  nativeKeyboardHeight = Math.max(0, height);
+  nudgeScrollToFocused();
 }
 
 /** Scroll the focused editable above the keyboard using visualViewport math. */
@@ -70,7 +89,8 @@ function scrollFocusedIntoView(): void {
   if (!isEditable(el)) return;
   const vv = window.visualViewport;
   const visibleTop = vv ? vv.offsetTop : 0;
-  const visibleBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+  const visibleHeight = Number.parseFloat(document.documentElement.style.getPropertyValue("--visual-viewport-height")) || window.innerHeight;
+  const visibleBottom = visibleTop + visibleHeight;
   const bottomMargin = 24;
   // Guard the top against sticky headers (~56px tall) so we don't tuck the
   // field under the header when correcting an upward overshoot.
@@ -102,7 +122,18 @@ function scrollFocusedIntoView(): void {
   }
 
   if (Math.abs(delta) < 1) return;
-  getScrollParent(el).scrollBy({ top: delta, behavior: "smooth" });
+  // Smooth scrolling retriggers visualViewport.scroll while the keyboard is
+  // animating, making the field chase its own position on iOS.
+  getScrollParent(el).scrollBy({ top: delta, behavior: "instant" });
+}
+
+function scheduleUpdate(): void {
+  if (pendingFrame) return;
+  pendingFrame = requestAnimationFrame(() => {
+    pendingFrame = 0;
+    applyViewportVars();
+    scrollFocusedIntoView();
+  });
 }
 
 /**
@@ -110,23 +141,21 @@ function scrollFocusedIntoView(): void {
  * settles dimensions over a few hundred ms, so we retry at intervals.
  */
 export function nudgeScrollToFocused(): void {
-  [0, 80, 200, 400].forEach((d) =>
+  retryTimers.forEach(clearTimeout);
+  retryTimers = [0, 80, 200, 400].map((d) =>
     setTimeout(() => {
-      applyViewportVars();
-      scrollFocusedIntoView();
+      scheduleUpdate();
     }, d),
   );
 }
 
 export function initKeyboardAvoidance(): void {
   if (typeof window === "undefined" || cleanupFns.length) return;
+  restingHeight = window.innerHeight;
 
   const vv = window.visualViewport;
   if (vv) {
-    const onViewport = () => {
-      applyViewportVars();
-      scrollFocusedIntoView();
-    };
+    const onViewport = scheduleUpdate;
     vv.addEventListener("resize", onViewport);
     vv.addEventListener("scroll", onViewport);
     cleanupFns.push(() => {
@@ -140,6 +169,12 @@ export function initKeyboardAvoidance(): void {
   };
   document.addEventListener("focusin", onFocusIn);
   cleanupFns.push(() => document.removeEventListener("focusin", onFocusIn));
+  document.addEventListener("focusout", nudgeScrollToFocused);
+  window.addEventListener("resize", scheduleUpdate);
+  cleanupFns.push(() => {
+    document.removeEventListener("focusout", nudgeScrollToFocused);
+    window.removeEventListener("resize", scheduleUpdate);
+  });
 
   applyViewportVars();
 }
@@ -147,4 +182,13 @@ export function initKeyboardAvoidance(): void {
 export function teardownKeyboardAvoidance(): void {
   cleanupFns.forEach((fn) => fn());
   cleanupFns = [];
+  retryTimers.forEach(clearTimeout);
+  retryTimers = [];
+  cancelAnimationFrame(pendingFrame);
+  pendingFrame = 0;
+  nativeKeyboardHeight = 0;
+  document.documentElement.classList.remove("keyboard-open");
+  for (const name of ["--keyboard-height", "--visual-viewport-height", "--visual-viewport-top"]) {
+    document.documentElement.style.removeProperty(name);
+  }
 }

@@ -16,9 +16,9 @@ export function SyncStatus({ syncing, onSync, isActivated }: SyncStatusProps) {
   // Not activated: show "Local only"
   if (!isActivated) {
     return (
-      <span className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400">
+      <span title="Saved on this device" aria-label="Saved on this device" className="flex size-11 items-center justify-center gap-1.5 text-xs text-muted-foreground sm:h-auto sm:w-auto sm:px-3 sm:py-1.5">
         <HardDrive className="h-3 w-3" />
-        Local only
+        <span className="hidden sm:inline">Local only</span>
       </span>
     );
   }
@@ -26,8 +26,10 @@ export function SyncStatus({ syncing, onSync, isActivated }: SyncStatusProps) {
   return (
     <button
       onClick={onSync}
+      aria-label={syncing ? "Syncing" : isOnline ? "Sync now" : "Offline"}
+      title={syncing ? "Syncing" : isOnline ? "Sync now" : "Offline"}
       className={cn(
-        "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+        "flex size-11 items-center justify-center gap-1.5 rounded-lg text-xs font-medium transition-colors sm:h-auto sm:w-auto sm:px-3 sm:py-1.5",
         isOnline
           ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
           : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
@@ -40,7 +42,7 @@ export function SyncStatus({ syncing, onSync, isActivated }: SyncStatusProps) {
       ) : (
         <WifiOff className="h-3 w-3" />
       )}
-      {syncing ? "Syncing..." : isOnline ? "Online" : "Offline"}
+      <span className="hidden sm:inline">{syncing ? "Syncing..." : isOnline ? "Online" : "Offline"}</span>
     </button>
   );
 }

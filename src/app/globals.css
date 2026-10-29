@@ -53,7 +53,9 @@
   --safe-area-left: env(safe-area-inset-left, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);
   --keyboard-height: 0px;
-  --visual-viewport-height: 100vh;
+  --visual-viewport-height: 100dvh;
+  --visual-viewport-top: 0px;
+  --bottom-nav-height: calc(4rem + env(safe-area-inset-bottom, 0px));
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -149,8 +151,59 @@ html.keyboard-open .mobile-bottom-nav {
   display: none !important;
 }
 
-html.keyboard-open .lyte-composer-panel {
-  margin-bottom: 0;
+html.keyboard-open {
+  --bottom-nav-height: 0px;
+}
+
+.app-viewport {
+  height: var(--visual-viewport-height, 100dvh);
+}
+
+.lyte-message {
+  font-size: 0.9375rem;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.lyte-message > :first-child { margin-top: 0; }
+.lyte-message > :last-child { margin-bottom: 0; }
+.lyte-message p { margin: 0.75em 0; }
+.lyte-message :is(h1, h2, h3, h4) { margin: 1.5em 0 0.5em; font-size: 1.125em; font-weight: 600; line-height: 1.4; }
+.lyte-message :is(ul, ol) { padding-left: 1.5em; margin: 0.75em 0; }
+.lyte-message ul { list-style: disc; }
+.lyte-message ol { list-style: decimal; }
+.lyte-message li { padding-left: 0.25em; margin: 0.35em 0; }
+.lyte-message a { text-decoration: underline; text-underline-offset: 3px; }
+.lyte-message pre { max-width: 100%; overflow-x: auto; padding: 1rem; margin: 1rem 0; border-radius: 12px; background: var(--muted); font-size: 0.8125rem; line-height: 1.6; }
+.lyte-message :not(pre) > code { padding: 0.15em 0.35em; border-radius: 4px; background: var(--muted); font-size: 0.875em; }
+.lyte-message blockquote { border-left: 1px solid var(--border); padding-left: 1rem; margin: 1rem 0; color: var(--muted-foreground); }
+.lyte-message table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 1rem 0; }
+.lyte-message :is(td, th) { border-bottom: 1px solid var(--border); padding: 0.625rem 0.875rem; text-align: left; }
+.lyte-message th { font-weight: 600; }
+
+/* Portal dialogs must fit the visible area, including Safari's keyboard. */
+[data-slot="dialog-content"] {
+  top: calc(var(--visual-viewport-top) + var(--visual-viewport-height) / 2);
+  max-height: calc(var(--visual-viewport-height) - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (min-width: 768px) {
+  :root { --bottom-nav-height: 0px; }
+}
+
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]), textarea, select {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Markdown compact (card preview) */

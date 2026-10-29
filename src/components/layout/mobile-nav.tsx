@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { type LocalFolder } from "@/lib/db/indexed-db";
@@ -231,8 +232,9 @@ export function MobileNav({
         })}
 
         {/* Lyte assistant — routes to the dedicated assistant screen. */}
-        <button
-          onClick={() => router.push("/assistant")}
+        <Link
+          href="/assistant"
+          prefetch={true}
           className={cn(
             "flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] transition-colors",
             activeView === "assistant" ? "text-primary" : "text-muted-foreground"
@@ -243,7 +245,7 @@ export function MobileNav({
             <Bot className="h-4 w-4" />
           </div>
           <span>Lyte</span>
-        </button>
+        </Link>
       </nav>
 
       {/* Folders Sheet */}

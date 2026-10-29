@@ -153,6 +153,9 @@ export function useLicense() {
       if (raw) cachedEntitlements = JSON.parse(raw) as ComputedEntitlements;
     } catch {}
     setEntitlements(cachedEntitlements);
+    // Local session + account isolation are ready. Network refresh must not
+    // hold the entire workspace behind the startup spinner.
+    setIsLoading(false);
 
     import("@/lib/iap/revenuecat-client")
       .then(({ identifyIAPUser }) => identifyIAPUser(cachedUserId))

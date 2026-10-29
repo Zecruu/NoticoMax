@@ -4,6 +4,12 @@
      coordination protocol from the desktop app at launch, not from this file. -->
 # AgentsHive — `noticomax`
 
+## Current operator workflow
+
+- Work directly with the operator; this project has no Hivemind.
+- Default delivery is to merge validated changes into `main` and push `main`.
+- Preserve unrelated local changes; use an isolated worktree for integration when needed.
+
 This project is coordinated by **AgentsHive**: the ZecruAI desktop app launches AI
 agents in this folder and delivers their runtime coordination protocol at launch.
 This file is intentionally minimal and public — edit it freely with your own

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { useItems } from "@/hooks/use-items";
 import { useFolders } from "@/hooks/use-folders";
 import { type LocalItem } from "@/lib/db/indexed-db";
@@ -8,24 +9,29 @@ import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { MobileNav } from "@/components/layout/mobile-nav";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { ItemList } from "@/components/items/item-list";
-import { ItemDialog } from "@/components/items/item-dialog";
 import { SearchCommand } from "@/components/items/search-bar";
-import { TrashView } from "@/components/items/trash-view";
-import { CalendarView } from "@/components/calendar/calendar-view";
-import { StudyView } from "@/components/study/study-view";
-import { PasswordsView } from "@/components/passwords/passwords-view";
-import { SkillsView } from "@/components/skills/skills-view";
-import { BudgetView } from "@/components/budget/budget-view";
-import { GoalsView } from "@/components/goals/goals-view";
-import { LocationsView } from "@/components/locations/locations-view";
-import { FamilyView } from "@/components/family/family-view";
-import { FamilyFolderView } from "@/components/family/family-folder-view";
 import { DashboardHome } from "@/components/dashboard/dashboard-home";
 import { useLicense } from "@/hooks/use-license";
 import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
 import { toast } from "@/lib/native-toast";
+
+function ViewLoading() {
+  return <div role="status" className="flex items-center gap-2 p-6 text-sm text-muted-foreground"><Loader2 aria-hidden="true" className="size-4 animate-spin" />Opening…</div>;
+}
+
+const ItemList = dynamic(() => import("@/components/items/item-list").then((m) => m.ItemList), { loading: ViewLoading });
+const ItemDialog = dynamic(() => import("@/components/items/item-dialog").then((m) => m.ItemDialog), { loading: ViewLoading });
+const TrashView = dynamic(() => import("@/components/items/trash-view").then((m) => m.TrashView), { loading: ViewLoading });
+const CalendarView = dynamic(() => import("@/components/calendar/calendar-view").then((m) => m.CalendarView), { loading: ViewLoading });
+const StudyView = dynamic(() => import("@/components/study/study-view").then((m) => m.StudyView), { loading: ViewLoading });
+const PasswordsView = dynamic(() => import("@/components/passwords/passwords-view").then((m) => m.PasswordsView), { loading: ViewLoading });
+const SkillsView = dynamic(() => import("@/components/skills/skills-view").then((m) => m.SkillsView), { loading: ViewLoading });
+const BudgetView = dynamic(() => import("@/components/budget/budget-view").then((m) => m.BudgetView), { loading: ViewLoading });
+const GoalsView = dynamic(() => import("@/components/goals/goals-view").then((m) => m.GoalsView), { loading: ViewLoading });
+const LocationsView = dynamic(() => import("@/components/locations/locations-view").then((m) => m.LocationsView), { loading: ViewLoading });
+const FamilyView = dynamic(() => import("@/components/family/family-view").then((m) => m.FamilyView), { loading: ViewLoading });
+const FamilyFolderView = dynamic(() => import("@/components/family/family-folder-view").then((m) => m.FamilyFolderView), { loading: ViewLoading });
 
 export default function Dashboard() {
   const [activeFilter, setActiveFilter] = useState("all");
@@ -251,10 +257,18 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="app-viewport flex flex-col overflow-hidden">
       <Header
         searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
+        onSearchChange={(query) => {
+          setSearchQuery(query);
+          if (query.trim()) {
+            setActiveFilter("all");
+            setActiveFolder(null);
+            setActiveTag(null);
+            setActiveView("list");
+          }
+        }}
         syncing={syncing}
         onSync={syncNow}
         isActivated={isActivated}
@@ -289,7 +303,7 @@ export default function Dashboard() {
         </SheetContent>
       </Sheet>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar
           activeFilter={activeFilter}
           activeFolder={activeFolder}
@@ -310,7 +324,7 @@ export default function Dashboard() {
           onTagChange={setActiveTag}
         />
 
-        <main className="flex-1 overflow-auto pb-[calc(4rem+env(safe-area-inset-bottom)+var(--keyboard-height,0px))] md:pb-[var(--keyboard-height,0px)] scroll-pb-[var(--keyboard-height,0px)]">
+        <main className="min-w-0 flex-1 overflow-auto overscroll-contain pb-[var(--bottom-nav-height)]">
           {activeView === "dashboard" ? (
             <DashboardHome
               noteCount={itemCounts.note ?? 0}
@@ -410,7 +424,7 @@ export default function Dashboard() {
         onViewChange={setActiveView}
       />
 
-      <ItemDialog
+      {dialogOpen && <ItemDialog
         open={dialogOpen}
         onClose={() => {
           setDialogOpen(false);
@@ -425,7 +439,7 @@ export default function Dashboard() {
         defaultType={defaultType}
         defaultReminderDate={defaultReminderDate}
         allTags={allTags}
-      />
+      />}
 
       <SearchCommand onSelect={handleSearchSelect} />
     </div>

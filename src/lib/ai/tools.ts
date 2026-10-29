@@ -132,8 +132,8 @@ export function validateToolCall(name: string, rawArgs: unknown): ToolValidation
 }
 
 /**
- * Gemini function declarations for the assistant's write tools. Passed as
- * `tools[].functionDeclarations` so the model can request a tool; the server
+ * Provider-independent function declarations for the assistant's write tools.
+ * The Responses API adapter adds the function-tool envelope; the server
  * still validates + executes. Descriptions tell the model to use absolute
  * ISO-8601 datetimes (the chat route injects the current time).
  */

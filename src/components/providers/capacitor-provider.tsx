@@ -3,9 +3,15 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { isCapacitorNative, isIOS } from "@/lib/platform";
+import { initKeyboardAvoidance, teardownKeyboardAvoidance } from "@/lib/capacitor/keyboard-avoidance";
 
 export function CapacitorProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+
+  useEffect(() => {
+    initKeyboardAvoidance();
+    return teardownKeyboardAvoidance;
+  }, []);
 
   useEffect(() => {
     if (!isCapacitorNative()) return;

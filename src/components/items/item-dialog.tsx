@@ -325,10 +325,10 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
         onEscapeKeyDown={(e) => { e.preventDefault(); finalizeAndClose(); }}
         onPointerDownOutside={(e) => { e.preventDefault(); finalizeAndClose(); }}
         onInteractOutside={(e) => { e.preventDefault(); }}
-        className="!fixed !inset-0 !top-0 !left-0 !translate-x-0 !translate-y-0 !max-w-none !w-screen !h-[100dvh] !max-h-none !rounded-none !border-0 !p-0 !gap-0 flex flex-col bg-background"
+        className="!fixed !inset-x-0 !bottom-auto !top-[var(--visual-viewport-top,0px)] !translate-x-0 !translate-y-0 !max-w-none !w-full !h-[var(--visual-viewport-height,100dvh)] !max-h-none !rounded-none !border-0 !p-0 !gap-0 !overflow-hidden flex flex-col bg-background"
       >
         {/* Top bar */}
-        <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-b shrink-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="flex items-center justify-between gap-2 px-3 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] border-b shrink-0 bg-background">
           <button
             type="button"
             onClick={finalizeAndClose}
@@ -363,7 +363,7 @@ export function ItemDialog({ open, onClose, onSave, onUpdate, onDelete, editingI
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-[calc(1rem+var(--keyboard-height,0px))]">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           {!editingItem && (
             <Tabs value={type} onValueChange={(v) => setType(v as ItemType)}>
               <TabsList className="w-full">
