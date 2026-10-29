@@ -6,6 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, ChevronRight, CheckCircle2, Circle, Calendar, Plus, Pencil, Trash2, Clock, Repeat } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { reminderOccurrences, REPEAT_LABELS } from "@/lib/items/reminder-schedule";
+
+interface CalendarOccurrence { item: LocalItem; date: Date }
 
 interface CalendarViewProps {
   items: LocalItem[];
@@ -31,7 +34,7 @@ function isSameDay(d1: Date, d2: Date) {
 
 function formatTime(dateStr: string) {
   const d = new Date(dateStr);
-  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
 }
 
 export function CalendarView({ items, onEdit, onDelete, onToggleComplete, onCreateReminder }: CalendarViewProps) {
@@ -44,55 +47,20 @@ export function CalendarView({ items, onEdit, onDelete, onToggleComplete, onCrea
   // across the visible month — the original LocalItem reference is reused
   // (no clone) so edit/complete/delete still target the source row.
   const dateItemMap = useMemo(() => {
-    const map = new Map<string, LocalItem[]>();
+    const map = new Map<string, CalendarOccurrence[]>();
     const monthStart = new Date(currentYear, currentMonth, 1);
-    const monthEnd = new Date(currentYear, currentMonth + 1, 0);
+    const monthEnd = new Date(currentYear, currentMonth + 1, 1, 0, 0, 0, -1);
 
     const push = (d: Date, item: LocalItem) => {
       const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
       if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(item);
+      map.get(key)!.push({ item, date: d });
     };
 
     for (const item of items) {
       if (!item.reminderDate) continue;
-      const start = new Date(item.reminderDate);
-      const rule = item.recurrence ?? "none";
-
-      if (rule === "none") {
-        push(start, item);
-        continue;
-      }
-
-      // Walk forward from `start` by the rule's cadence, dropping any
-      // occurrence outside the visible month. Cap at ~400 iterations as a
-      // safety net so a malformed item can't lock the loop.
-      const cur = new Date(start);
-      // Fast-forward `cur` to inside or just before the visible month so we
-      // don't iterate years for a daily reminder created long ago.
-      if (rule === "daily") {
-        if (cur < monthStart) {
-          const diffDays = Math.floor((monthStart.getTime() - cur.getTime()) / 86400000);
-          cur.setDate(cur.getDate() + diffDays);
-        }
-      } else if (rule === "weekly") {
-        if (cur < monthStart) {
-          const diffWeeks = Math.floor((monthStart.getTime() - cur.getTime()) / (86400000 * 7));
-          cur.setDate(cur.getDate() + diffWeeks * 7);
-        }
-      } else if (rule === "monthly") {
-        while (cur < monthStart) cur.setMonth(cur.getMonth() + 1);
-      } else if (rule === "yearly") {
-        while (cur < monthStart) cur.setFullYear(cur.getFullYear() + 1);
-      }
-
-      let safety = 0;
-      while (cur <= monthEnd && safety++ < 400) {
-        if (cur >= monthStart) push(new Date(cur), item);
-        if (rule === "daily") cur.setDate(cur.getDate() + 1);
-        else if (rule === "weekly") cur.setDate(cur.getDate() + 7);
-        else if (rule === "monthly") cur.setMonth(cur.getMonth() + 1);
-        else if (rule === "yearly") cur.setFullYear(cur.getFullYear() + 1);
+      for (const date of reminderOccurrences(item.reminderDate, item.recurrence, monthStart, monthEnd)) {
+        push(date, item);
       }
     }
     return map;
@@ -145,14 +113,14 @@ export function CalendarView({ items, onEdit, onDelete, onToggleComplete, onCrea
     return dateItemMap.get(key) || [];
   }, [selectedDate, dateItemMap]);
 
-  function getDotColor(itemsForDay: LocalItem[]) {
+  function getDotColor(itemsForDay: CalendarOccurrence[]) {
     const hasOverdue = itemsForDay.some(
-      (i) => !i.reminderCompleted && new Date(i.reminderDate!) < today
+      ({ item, date }) => !item.reminderCompleted && date < today
     );
     const hasUpcoming = itemsForDay.some(
-      (i) => !i.reminderCompleted && new Date(i.reminderDate!) >= today
+      ({ item, date }) => !item.reminderCompleted && date >= today
     );
-    const allComplete = itemsForDay.every((i) => i.reminderCompleted);
+    const allComplete = itemsForDay.every(({ item }) => item.reminderCompleted);
 
     if (allComplete) return "bg-green-500";
     if (hasOverdue) return "bg-red-500";
@@ -168,13 +136,13 @@ export function CalendarView({ items, onEdit, onDelete, onToggleComplete, onCrea
           {MONTHS[currentMonth]} {currentYear}
         </h2>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={goToToday} className="text-xs h-7">
+          <Button variant="ghost" size="sm" onClick={goToToday} className="min-h-11 text-sm">
             Today
           </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={goToPrev}>
+          <Button variant="ghost" size="icon" aria-label="Previous month" className="size-11" onClick={goToPrev}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={goToNext}>
+          <Button variant="ghost" size="icon" aria-label="Next month" className="size-11" onClick={goToNext}>
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
@@ -259,14 +227,15 @@ export function CalendarView({ items, onEdit, onDelete, onToggleComplete, onCrea
             </p>
           ) : (
             <div className="space-y-2">
-              {selectedItems.map((item) => (
+              {selectedItems.map(({ item, date }) => (
                 <div
                   key={item.clientId}
                   className="flex items-center gap-3 rounded-lg border p-3 hover:bg-muted/50 transition-colors"
                 >
                   <button
                     onClick={() => onToggleComplete(item.clientId, !!item.reminderCompleted)}
-                    className="shrink-0"
+                    aria-label={`${item.reminderCompleted ? "Mark incomplete" : "Complete"}: ${item.title}`}
+                    className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
                   >
                     {item.reminderCompleted ? (
                       <CheckCircle2 className="h-5 w-5 text-green-500" />
@@ -283,17 +252,17 @@ export function CalendarView({ items, onEdit, onDelete, onToggleComplete, onCrea
                     >
                       {item.title}
                     </p>
-                    <div className="flex items-center gap-2 mt-0.5">
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
                       {item.reminderDate && (
-                        <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
                           <Clock className="h-3 w-3" />
-                          {formatTime(item.reminderDate)}
+                          {formatTime(date.toISOString())}
                         </span>
                       )}
                       {item.recurrence && item.recurrence !== "none" && (
-                        <span className="flex items-center gap-1 text-[11px] text-primary">
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
                           <Repeat className="h-3 w-3" />
-                          {item.recurrence}
+                          {REPEAT_LABELS[item.recurrence]}
                         </span>
                       )}
                       {item.content && (

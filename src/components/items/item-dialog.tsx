@@ -54,6 +54,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ReminderSchedule } from "./reminder-schedule";
 import {
   hasItemChanges,
   prepareItemDraft,
@@ -620,7 +621,7 @@ export function ItemDialog({
             {type === "reminder" && (
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="min-w-0 space-y-2">
-                  <Label htmlFor="reminderDate">Date and time (optional)</Label>
+                  <Label htmlFor="reminderDate">{recurrence === "none" ? "Date and time (optional)" : "Start date and time"}</Label>
                   <Input
                     id="reminderDate"
                     type="datetime-local"
@@ -646,11 +647,17 @@ export function ItemDialog({
                     className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <option value="none">Does not repeat</option>
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="yearly">Yearly</option>
+                    <option value="daily">Every day</option>
+                    <option value="weekly">Every week</option>
+                    <option value="monthly">Every month</option>
+                    <option value="yearly">Every year</option>
                   </select>
+                  {recurrence === "yearly" && <p className="text-xs leading-5 text-muted-foreground">For birthdays and anniversaries. February 29 uses February 28 in non-leap years.</p>}
+                  {recurrence === "monthly" && <p className="text-xs leading-5 text-muted-foreground">Shorter months use their last day, then return to your chosen day.</p>}
+                </div>
+                <div className="border-t border-border/60 pt-1 sm:col-span-2">
+                  <ReminderSchedule item={{ reminderDate, recurrence, reminderCompleted: editingItem?.reminderCompleted }} />
+                  {recurrence !== "none" && !reminderDate && <p className="mt-2 text-sm text-muted-foreground">Choose a start date to see the next occurrence.</p>}
                 </div>
               </div>
             )}

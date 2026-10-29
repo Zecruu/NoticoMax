@@ -7,9 +7,8 @@ export type ItemType = "note" | "url" | "reminder" | "envvar" | "credential";
  * reminder repeats forever from its original date at the given cadence.
  * Birthdays/anniversaries are yearly; standups are weekly; etc.
  *
- * v1 is client-only — the field doesn't currently round-trip through
- * the Supabase items table schema. Add a `recurrence` text column there
- * if/when you want this to sync across devices.
+ * Synced through the Supabase items.recurrence column (migration 0003).
+ * Missing values on older reminders are treated as "none".
  */
 export type RecurrenceRule = "none" | "daily" | "weekly" | "monthly" | "yearly";
 

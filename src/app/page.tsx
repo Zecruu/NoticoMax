@@ -15,6 +15,7 @@ import { useLicense } from "@/hooks/use-license";
 import { AuthGate } from "@/components/auth-gate";
 import { Loader2 } from "lucide-react";
 import { toast } from "@/lib/native-toast";
+import { reminderTiming } from "@/lib/items/reminder-schedule";
 
 function ViewLoading() {
   return <div role="status" className="flex items-center gap-2 p-6 text-sm text-muted-foreground"><Loader2 aria-hidden="true" className="size-4 animate-spin" />Opening…</div>;
@@ -110,8 +111,8 @@ export default function Dashboard() {
     const weekFromNow = now + 7 * 24 * 60 * 60 * 1000;
     return reminderItems.filter((item) => {
       if (item.reminderCompleted) return false;
-      const t = new Date(item.reminderDate!).getTime();
-      return t >= now && t <= weekFromNow;
+      const date = reminderTiming(item, new Date(now)).date;
+      return !!date && date.getTime() >= now && date.getTime() <= weekFromNow;
     }).length;
   }, [reminderItems, reminderNow]);
 

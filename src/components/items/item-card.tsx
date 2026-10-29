@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/native-toast";
+import { ReminderSchedule } from "./reminder-schedule";
+import { reminderTiming } from "@/lib/items/reminder-schedule";
 import {
   checklistTasks,
   linkLabel,
@@ -115,11 +117,8 @@ export function ItemCard({
   const preview = notePreview(item.content, item.title);
   const safeUrl =
     item.type === "url" && item.url ? normalizeWebUrl(item.url) : null;
-  const overdue =
-    item.type === "reminder" &&
-    !!item.reminderDate &&
-    !item.reminderCompleted &&
-    new Date(item.reminderDate) < new Date();
+  const now = new Date();
+  const overdue = item.type === "reminder" && reminderTiming(item, now).overdue;
   const Icon =
     item.type === "url" ? Link2 : item.type === "reminder" ? Bell : FileText;
   const handleCopy = async () => {
@@ -186,13 +185,14 @@ export function ItemCard({
                 />
               )}
             </span>
+            {item.type === "reminder" && <ReminderSchedule item={item} now={now} />}
             {!tasks.length && preview && (
               <span className="mt-1 block line-clamp-2 break-words text-sm leading-6 text-muted-foreground">
                 {preview}
               </span>
             )}
             <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-5 text-muted-foreground">
-              <span>{formatRelative(item.updatedAt)}</span>
+              <span>{item.type === "reminder" ? "Edited " : ""}{formatRelative(item.updatedAt)}</span>
               {folder && (
                 <>
                   <span aria-hidden="true">·</span>
@@ -209,26 +209,6 @@ export function ItemCard({
               ))}
               {item.tags.length > 2 && <span>+{item.tags.length - 2}</span>}
             </span>
-            {item.type === "reminder" && item.reminderDate && (
-              <span
-                className={cn(
-                  "mt-1 block text-sm",
-                  overdue ? "text-destructive" : "text-muted-foreground"
-                )}
-              >
-                {item.reminderCompleted
-                  ? "Completed · "
-                  : overdue
-                  ? "Overdue · "
-                  : "Due · "}
-                {new Date(item.reminderDate).toLocaleString([], {
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
-              </span>
-            )}
           </button>
           {safeUrl && (
             <a
