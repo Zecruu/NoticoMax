@@ -11,6 +11,7 @@ import {
   Suspense,
 } from "react";
 import Link from "next/link";
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import {
   ArrowLeft,
   ArrowUp,
@@ -25,6 +26,7 @@ import {
   X,
   Loader2,
   RefreshCw,
+  PanelLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +46,8 @@ import {
   type AssistantTransport,
 } from "@/lib/ai/assistant-session";
 import { toast } from "@/lib/native-toast";
+import { ConversationHistory } from "./conversation-history";
+import type { CloudStorage, Conversation, ConversationTurn } from "@/lib/ai/conversation-types";
 
 const AssistantMessage = lazy(() =>
   import("./message").then((module) => ({ default: module.AssistantMessage }))
@@ -54,6 +58,7 @@ interface Memory {
   content: string;
 }
 interface ChatMessage {
+  turnState?: ConversationTurn["status"];
   role: "user" | "assistant";
   content: string;
 }
@@ -105,6 +110,21 @@ export function AssistantChat({
   const [name, setName] = useState("Lyte");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [storage, setStorage] = useState<CloudStorage | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [hasMoreChats, setHasMoreChats] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [olderLoading, setOlderLoading] = useState(false);
+  const [deletingChat, setDeletingChat] = useState(false);
+  const [oldestTurn, setOldestTurn] = useState<number | null>(null);
+  const [hasOlderTurns, setHasOlderTurns] = useState(false);
+  const drafts = useRef(new Map<string, string>());
+  const chatLoadSequence = useRef(0);
+  const historyLoadSequence = useRef(0);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
   const [listening, setListening] = useState(false);
@@ -180,6 +200,23 @@ export function AssistantChat({
     };
   }, []);
 
+  useEffect(() => {
+    if (transport !== browserTransport) return;
+    try {
+      let account: string | null | undefined;
+      const { data } = getSupabaseBrowserClient().auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
+        const next = session?.user.id ?? null;
+        // Clear the entire in-memory workspace on account changes, including
+        // drafts and in-flight replies. Token refreshes keep the same account.
+        if (account !== undefined && account !== next) window.location.reload();
+        account = next;
+      });
+      return () => data.subscription.unsubscribe();
+    } catch {
+      // Session initialization already reports missing/offline configuration.
+    }
+  }, [transport]);
+
   useLayoutEffect(() => {
     const field = composer.current;
     if (!field) return;
@@ -210,10 +247,120 @@ export function AssistantChat({
     }
   }, [authFetch]);
 
+  const refreshHistory = useCallback(async (offset = 0) => {
+    const sequence = ++historyLoadSequence.current;
+    setHistoryLoading(true);
+    setHistoryError("");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const response = await authFetch(`/api/assistant/conversations?offset=${offset}`, { signal: controller.signal });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Couldn't load your chats.");
+      if (!mounted.current || sequence !== historyLoadSequence.current) return;
+      setConversations((previous) => offset
+        ? [...new Map([...previous, ...data.conversations].map((chat: Conversation) => [chat.id, chat])).values()]
+        : data.conversations);
+      setHasMoreChats(data.hasMore);
+      setStorage(data.storage);
+    } catch (error) {
+      if (mounted.current && sequence === historyLoadSequence.current)
+        setHistoryError(error instanceof Error ? error.message : "Couldn't load your chats.");
+    } finally {
+      clearTimeout(timeout);
+      if (mounted.current && sequence === historyLoadSequence.current) setHistoryLoading(false);
+    }
+  }, [authFetch]);
+
+  useEffect(() => {
+    if (status.state !== "loading" && !(status.state === "disabled" && status.signIn))
+      void refreshHistory();
+  }, [status, refreshHistory]);
+
+  const turnMessages = (turns: ConversationTurn[]): ChatMessage[] => turns.flatMap((turn) => [
+    { role: "user" as const, content: turn.user_content, turnState: turn.status },
+    ...(turn.assistant_content ? [{ role: "assistant" as const, content: turn.assistant_content }] : []),
+  ]);
+
+  const openChat = async (id: string, older = false) => {
+    if (sendingLock.current || (older && oldestTurn === null)) return;
+    const sequence = ++chatLoadSequence.current;
+    if (older) setOlderLoading(true); else setChatLoading(true);
+    const previousHeight = transcript.current?.scrollHeight ?? 0;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const response = await authFetch(`/api/assistant/conversations/${id}${older ? `?before=${oldestTurn}` : ""}`, { signal: controller.signal });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Couldn't open this chat.");
+      if (!mounted.current || sequence !== chatLoadSequence.current) return;
+      if (!older) {
+        drafts.current.set(selectedId ?? "new", input);
+        setInput(drafts.current.get(id) ?? "");
+        setSelectedId(id);
+        setSendError("");
+        setShowHistory(false);
+        stickToBottom.current = true;
+      } else stickToBottom.current = false;
+      setMessages((previous) => older ? [...turnMessages(data.turns), ...previous] : turnMessages(data.turns));
+      setOldestTurn(data.turns[0]?.id ?? null);
+      setHasOlderTurns(data.hasMore);
+      if (older) requestAnimationFrame(() => {
+        if (transcript.current) transcript.current.scrollTop += transcript.current.scrollHeight - previousHeight;
+      });
+    } catch (error) {
+      if (mounted.current && sequence === chatLoadSequence.current)
+        toast.error(error instanceof Error ? error.message : "Couldn't open this chat.");
+    } finally {
+      clearTimeout(timeout);
+      if (mounted.current && sequence === chatLoadSequence.current) { setChatLoading(false); setOlderLoading(false); }
+    }
+  };
+
+  const newChat = () => {
+    if (sendingLock.current) return;
+    chatLoadSequence.current++;
+    drafts.current.set(selectedId ?? "new", input);
+    setSelectedId(null);
+    setMessages([]);
+    setInput(selectedId ? drafts.current.get("new") ?? "" : input);
+    setSendError("");
+    setHasOlderTurns(false);
+    setChatLoading(false);
+    setOlderLoading(false);
+    setShowHistory(false);
+    stickToBottom.current = true;
+    composer.current?.focus();
+  };
+
+  const deleteChat = async (id: string) => {
+    setDeletingChat(true);
+    try {
+      const response = await authFetch(`/api/assistant/conversations/${id}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Couldn't delete this chat.");
+      drafts.current.delete(id);
+      if (selectedId === id) {
+        // Do not preserve a draft for a conversation the user chose to remove.
+        setInput(""); setSelectedId(null); setMessages([]); setHasOlderTurns(false); setSendError("");
+      }
+      setConversations((previous) => previous.filter((chat) => chat.id !== id));
+      await refreshHistory();
+      toast.success("Chat deleted. Its storage has been freed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't delete this chat.");
+      throw error;
+    } finally { setDeletingChat(false); }
+  };
+
   const send = async () => {
     const text = input.trim();
-    if (!text || sendingLock.current || status.state !== "ready") return;
+    if (!text || sendingLock.current || chatLoading || deletingChat || status.state !== "ready") return;
     sendingLock.current = true;
+    const conversationId = selectedId ?? crypto.randomUUID();
+    const requestId = crypto.randomUUID();
+    drafts.current.delete(selectedId ?? "new");
+    setSelectedId(conversationId);
     recognition.current?.stop();
     const next: ChatMessage[] = [...messages, { role: "user", content: text }];
     stickToBottom.current = true;
@@ -221,26 +368,27 @@ export function AssistantChat({
     setInput("");
     setSendError("");
     setSending(true);
+    let preflightRejected = false;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45_000);
     try {
       const response = await authFetch("/api/assistant/chat", {
-        method: "POST",
+        method: "POST", signal: controller.signal,
         body: JSON.stringify({
-          messages: next,
+          conversationId, requestId, message: text,
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
       });
       const data = await response.json();
-      if (!response.ok)
-        throw new Error(
-          typeof data.error === "string"
-            ? data.error
-            : "The reply didn't arrive. Please try again."
-        );
+      if (!response.ok) {
+        preflightRejected = response.status === 400 || response.status === 413;
+        throw new Error(typeof data.error === "string" ? data.error : "The reply didn't arrive. Please try again.");
+      }
       if (typeof data.reply !== "string" || !data.reply.trim())
         throw new Error("The reply was empty. Please try again.");
       if (!mounted.current) return;
       setMessages((previous) => [
-        ...previous,
+        ...previous.map((message) => ({ ...message, turnState: undefined })),
         { role: "assistant", content: data.reply },
       ]);
       if (data.savedMemory) {
@@ -251,16 +399,22 @@ export function AssistantChat({
       if (!mounted.current) return;
       // Never put transport errors into model history or automatically replay
       // an uncertain request that may already have performed a write tool.
-      setMessages(messages);
-      setInput((draft) => (draft ? `${text}\n\n${draft}` : text));
+      // Preserve the submitted text on screen. Recovery reads server history;
+      // it never repeats the provider call or its write tools.
+      if (preflightRejected) {
+        setMessages(messages);
+        setInput((draft) => draft ? `${text}\n\n${draft}` : text);
+        setSelectedId(selectedId);
+      } else setMessages([...messages, { role: "user", content: text, turnState: "failed" }]);
       setSendError(
         error instanceof Error
           ? error.message
           : "The reply didn't arrive. Please try again."
       );
     } finally {
+      clearTimeout(timeout);
       sendingLock.current = false;
-      if (mounted.current) setSending(false);
+      if (mounted.current) { setSending(false); void refreshHistory(); }
     }
   };
 
@@ -381,19 +535,30 @@ export function AssistantChat({
     }
   };
 
+  const historyProps = {
+    conversations, selectedId, storage, loading: historyLoading || status.state === "loading", error: status.state === "disabled" && status.signIn ? status.reason : historyError,
+    hasMore: hasMoreChats, disabled: sending || chatLoading || deletingChat,
+    onNew: newChat, onOpen: (id: string) => void openChat(id), onDelete: deleteChat,
+    onMore: () => void refreshHistory(conversations.length), onRetry: () => void refreshHistory(),
+  };
+  const selectedTitle = conversations.find((chat) => chat.id === selectedId)?.title;
+
   return (
     <div className="app-viewport flex flex-col overflow-hidden bg-background pb-[var(--bottom-nav-height)]">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <aside aria-label="Chat history" className="hidden w-64 shrink-0 flex-col border-r border-border/60 bg-muted/30 pt-[env(safe-area-inset-top)] lg:flex">
+        <div className="flex h-16 shrink-0 items-center px-5">
+          <Link href="/" className="inline-flex min-h-11 items-center gap-3 rounded-lg text-sm text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"><ArrowLeft className="size-4" /> Back to NoticoMax</Link>
+        </div>
+        <ConversationHistory {...historyProps} />
+      </aside>
+      <section aria-label="Conversation" className="flex min-w-0 flex-1 flex-col">
       <header className="shrink-0 border-b border-border/60 bg-background pt-[env(safe-area-inset-top)]">
-        <div className="mx-auto flex h-16 max-w-5xl items-center gap-3 px-3 md:px-6">
-          <Link
-            href="/"
-            aria-label="Back to home"
-            className="inline-flex size-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
-          >
-            <ArrowLeft className="size-5" />
-          </Link>
+        <div className="flex h-16 items-center gap-3 px-3 md:px-6">
+          <Button variant="ghost" size="icon" aria-label="Open past conversations" className="size-11 rounded-xl transition-colors lg:hidden" onClick={() => setShowHistory(true)}><PanelLeft className="size-5" /></Button>
           <h1 className="min-w-0 flex-1 truncate text-base font-semibold">
             {name}
+            {selectedTitle && <span className="ml-3 hidden text-sm font-normal text-muted-foreground sm:inline">{selectedTitle}</span>}
           </h1>
           <Button
             variant="ghost"
@@ -401,14 +566,8 @@ export function AssistantChat({
             className="size-11 rounded-xl transition-colors"
             aria-label="New chat"
             title="New chat"
-            disabled={sending || messages.length === 0}
-            onClick={() => {
-              setMessages([]);
-              setInput("");
-              setSendError("");
-              stickToBottom.current = true;
-              composer.current?.focus();
-            }}
+            disabled={sending || deletingChat}
+            onClick={newChat}
           >
             <SquarePen className="size-5" />
           </Button>
@@ -447,6 +606,8 @@ export function AssistantChat({
               : "mx-auto flex min-h-full max-w-2xl flex-col justify-center px-6 py-10"
           }
         >
+          {hasOlderTurns && <Button variant="ghost" className="mx-auto flex min-h-11 transition-colors" disabled={olderLoading || sending} onClick={() => selectedId && void openChat(selectedId, true)}>{olderLoading ? "Loading earlier messages..." : "Load earlier messages"}</Button>}
+          {chatLoading && <p role="status" className="py-2 text-center text-sm text-muted-foreground">Opening chat...</p>}
           {messages.length === 0 ? (
             <div className="pb-6 text-center">
               <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
@@ -485,7 +646,9 @@ export function AssistantChat({
                 }
               >
                 {message.role === "user" ? (
-                  message.content
+                  <>{message.content}
+                    {message.turnState && message.turnState !== "completed" && <p className="mt-3 border-t border-border pt-2 text-xs leading-relaxed text-muted-foreground">{message.turnState === "pending" ? "Reply not confirmed yet. Reopen this chat to check." : "No reply confirmed. Check your saved items before sending this request again."}</p>}
+                  </>
                 ) : (
                   <>
                     <Suspense
@@ -536,6 +699,7 @@ export function AssistantChat({
           {sendError && (
             <p role="alert" className="mb-3 px-1 text-sm text-destructive">
               {sendError}
+              {selectedId && <button type="button" className="ml-2 min-h-11 underline underline-offset-4" onClick={() => void openChat(selectedId)}>Reopen chat</button>}
             </p>
           )}
           {status.state === "disabled" ? (
@@ -576,6 +740,7 @@ export function AssistantChat({
                 aria-label={`Message ${name}`}
                 placeholder={`Message ${name}`}
                 value={input}
+                disabled={chatLoading || deletingChat}
                 rows={1}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={(event) => {
@@ -602,7 +767,7 @@ export function AssistantChat({
                       listening ? "Stop dictation" : "Dictate a message"
                     }
                     aria-pressed={listening}
-                    disabled={sending}
+                    disabled={sending || chatLoading || deletingChat}
                     onClick={toggleMic}
                   >
                     <Mic
@@ -620,7 +785,7 @@ export function AssistantChat({
                   aria-label="Send message"
                   className="size-11 rounded-full transition-colors"
                   disabled={
-                    !input.trim() || sending || status.state !== "ready"
+                    !input.trim() || sending || chatLoading || deletingChat || status.state !== "ready"
                   }
                 >
                   <ArrowUp className="size-5" />
@@ -639,6 +804,18 @@ export function AssistantChat({
         </div>
       </div>
 
+      </section>
+      </div>
+      <Sheet open={showHistory} onOpenChange={setShowHistory}>
+        <SheetContent side="left" showCloseButton={false} className="!top-[var(--visual-viewport-top)] !bottom-auto !h-[var(--visual-viewport-height)] w-[min(88vw,320px)] gap-0 bg-background data-[state=open]:duration-200 data-[state=closed]:duration-150">
+          <SheetHeader className="relative flex h-20 shrink-0 justify-center px-5 pr-16 pt-[max(1rem,env(safe-area-inset-top))]">
+            <SheetTitle>Conversations</SheetTitle>
+            <SheetDescription className="sr-only">Reopen or delete a saved chat.</SheetDescription>
+            <Button variant="ghost" size="icon" aria-label="Close conversations" className="absolute right-2 top-4 size-11 transition-colors" onClick={() => setShowHistory(false)}><X className="size-5" /></Button>
+          </SheetHeader>
+          <ConversationHistory {...historyProps} />
+        </SheetContent>
+      </Sheet>
       <Sheet open={showMemory} onOpenChange={setShowMemory}>
         <SheetContent
           side="right"

@@ -25,7 +25,7 @@ export interface ComputedEntitlements {
   extraSeats?: number;
   /** Active storage tier. Defaults to "free" (100 MB included with Pro). */
   storagePlan?: StoragePlan;
-  /** Bytes consumed (updated by the file-upload service; placeholder until that ships). */
+  /** Cloud bytes consumed, including saved Lyte history and in-progress reply reservations. */
   storageBytesUsed?: number;
   /** Code plan id: plus | platinum | maxxed. Public name for plus is Pro. */
   assistantPlan?: "plus" | "platinum" | "maxxed" | null;
