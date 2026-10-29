@@ -1896,6 +1896,24 @@ export async function addCredential(label: string, username: string, password: s
   }
 }
 
+export async function updateCredential(clientId: string, label: string, username: string, password: string, syncFlag: boolean): Promise<void> {
+  const now = new Date().toISOString();
+  const content = JSON.stringify({ username, password });
+  await db.transaction("rw", db.items, db.syncQueue, async () => {
+    await db.items.where("clientId").equals(clientId).modify({ title: label, content, updatedAt: now });
+    if (syncFlag && syncEnabled) {
+      await db.syncQueue.add({
+        action: "update",
+        entityType: "item",
+        clientId,
+        data: { title: label, content, updatedAt: now },
+        timestamp: now,
+      });
+    }
+  });
+  if (syncFlag && syncEnabled) triggerSync();
+}
+
 export async function removeCredential(clientId: string, syncFlag: boolean): Promise<void> {
   const now = new Date().toISOString();
 

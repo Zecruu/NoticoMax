@@ -1,24 +1,33 @@
-"use client";
+﻿"use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 import {
-  Lock,
-  UserCheck,
-  Variable,
-  Plus,
-  Trash2,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Copy,
   Eye,
   EyeOff,
-  Copy,
-  Cloud,
-  CloudOff,
-  FolderOpen,
-  Pencil,
-  Check,
-  X,
+  MoreHorizontal,
+  Plus,
+  Search,
+  Settings2,
+  ChevronDown,
+  Lock,
 } from "lucide-react";
 import { toast } from "@/lib/native-toast";
 import {
@@ -29,579 +38,702 @@ import {
   type EnvVar,
   getCredentials,
   addCredential,
+  updateCredential,
   removeCredential,
   type Credential,
 } from "@/lib/sync/sync-engine";
 
-interface PasswordsViewProps {
-  initialTab?: "logins" | "envvars";
-}
+type EntryTab = "logins" | "envvars";
+type Removal = { id: string; label: string; tab: EntryTab };
 
-export function PasswordsView({ initialTab = "logins" }: PasswordsViewProps = {}) {
-  const [tab, setTab] = useState<"logins" | "envvars">(initialTab);
-
-  const [envVars, setEnvVars] = useState<EnvVar[]>([]);
-  const [newEnvProject, setNewEnvProject] = useState("");
-  const [newEnvName, setNewEnvName] = useState("");
-  const [newEnvValue, setNewEnvValue] = useState("");
-  const [visibleEnvKeys, setVisibleEnvKeys] = useState<Set<string>>(new Set());
-  const [editingEnvId, setEditingEnvId] = useState<string | null>(null);
-  const [editEnvProject, setEditEnvProject] = useState("");
-  const [editEnvName, setEditEnvName] = useState("");
-  const [editEnvValue, setEditEnvValue] = useState("");
-
+export function PasswordsView({
+  initialTab = "logins",
+}: { initialTab?: EntryTab } = {}) {
+  const [tab, setTab] = useState<EntryTab>(initialTab);
   const [credentials, setCredentials] = useState<Credential[]>([]);
-  const [newCredLabel, setNewCredLabel] = useState("");
-  const [newCredUser, setNewCredUser] = useState("");
-  const [newCredPass, setNewCredPass] = useState("");
-  const [visibleCredKeys, setVisibleCredKeys] = useState<Set<number>>(new Set());
-
+  const [envVars, setEnvVars] = useState<EnvVar[]>([]);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [syncEnabled, setSyncEnabled] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [revealedId, setRevealedId] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
+  const [secret, setSecret] = useState("");
+  const [project, setProject] = useState("");
+  const [removal, setRemoval] = useState<Removal | null>(null);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+
+  const reload = async () => {
+    setLoading(true);
+    try {
+      const [logins, variables] = await Promise.all([
+        getCredentials(),
+        getEnvVars(),
+      ]);
+      setCredentials(logins);
+      setEnvVars(variables);
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    getEnvVars().then(setEnvVars);
-    getCredentials().then(setCredentials);
-    const stored = localStorage.getItem("noticomax_env_sync");
-    setSyncEnabled(stored === "true");
+    void reload();
+    setSyncEnabled(localStorage.getItem("noticomax_env_sync") === "true");
+    const conceal = () => {
+      if (document.hidden) {
+        setRevealedId(null);
+        setExpandedId(null);
+      }
+    };
+    document.addEventListener("visibilitychange", conceal);
+    return () => document.removeEventListener("visibilitychange", conceal);
   }, []);
 
-  const refreshEnvVars = async () => setEnvVars(await getEnvVars());
-  const refreshCredentials = async () => setCredentials(await getCredentials());
+  useEffect(() => {
+    if (!revealedId) return;
+    const timer = window.setTimeout(() => setRevealedId(null), 30_000);
+    return () => window.clearTimeout(timer);
+  }, [revealedId]);
 
-  const toggleSync = () => {
-    const next = !syncEnabled;
-    setSyncEnabled(next);
-    localStorage.setItem("noticomax_env_sync", String(next));
-    toast.success(next ? "Secrets will sync to cloud" : "Secrets are local only");
-  };
-
-  const envVarsByProject = useMemo(() => {
-    const groups = new Map<string, EnvVar[]>();
-    for (const env of envVars) {
-      const key = env.project || "Default";
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(env);
-    }
-    return Array.from(groups.entries())
-      .map(([project, vars]) => ({ project, vars }))
-      .sort((a, b) => a.project.localeCompare(b.project));
-  }, [envVars]);
-
-  const projectNames = useMemo(
-    () => Array.from(new Set(envVars.map((v) => v.project))).sort(),
-    [envVars]
+  const needle = query.trim().toLocaleLowerCase();
+  // Only metadata is searchable. Secret values never participate in results.
+  const logins = credentials.filter((c) =>
+    `${c.label} ${c.username}`.toLocaleLowerCase().includes(needle)
   );
-
-  const handleAddEnvVar = async () => {
-    const name = newEnvName.trim();
-    const value = newEnvValue.trim();
-    const project = newEnvProject.trim() || "Default";
-    if (!name || !value) return;
-    if (envVars.some((v) => v.name === name && v.project === project)) {
-      toast.error(`${name} already exists in ${project}`);
-      return;
+  const groups = useMemo(() => {
+    const result = new Map<string, EnvVar[]>();
+    for (const env of envVars) {
+      const group = env.project || "Default";
+      if (!`${group} ${env.name}`.toLocaleLowerCase().includes(needle))
+        continue;
+      result.set(group, [...(result.get(group) ?? []), env]);
     }
-    await addEnvVar(name, value, project, syncEnabled);
-    await refreshEnvVars();
-    setNewEnvName("");
-    setNewEnvValue("");
-    toast.success(`Added ${name} to ${project}`);
-  };
+    return [...result.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [envVars, needle]);
+  const count =
+    tab === "logins"
+      ? logins.length
+      : groups.reduce((n, [, vars]) => n + vars.length, 0);
 
-  const handleRemoveEnvVar = async (env: EnvVar) => {
-    await removeEnvVar(env.clientId, syncEnabled);
-    setVisibleEnvKeys((prev) => {
-      const next = new Set(prev);
-      next.delete(env.clientId);
-      return next;
-    });
-    await refreshEnvVars();
-    toast.success(`Removed ${env.name}`);
+  const copy = async (value: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(`${label} copied`);
+    } catch {
+      toast.error(
+        "Couldn't copy. Try again, or reveal the value to copy it manually."
+      );
+    }
   };
-
-  const handleCopyEnvVar = (env: EnvVar) => {
-    navigator.clipboard.writeText(`${env.name}=${env.value}`);
-    toast.success(`Copied ${env.name}`);
+  const closeEditor = () => {
+    if (busyRef.current) return;
+    setEditorOpen(false);
+    setEditingId(null);
+    setName("");
+    setUsername("");
+    setSecret("");
+    setProject("");
   };
-
-  const handleCopyProjectEnvVars = (project: string, vars: EnvVar[]) => {
-    if (vars.length === 0) return;
-    const text = vars.map((v) => `${v.name}=${v.value}`).join("\n");
-    navigator.clipboard.writeText(text);
-    toast.success(`Copied ${project} (${vars.length} vars)`);
+  const openEditor = (entry?: EnvVar | Credential) => {
+    setRevealedId(null);
+    setEditingId(entry?.clientId ?? null);
+    setName(entry ? ("label" in entry ? entry.label : entry.name) : "");
+    setSecret(
+      entry ? ("password" in entry ? entry.password : entry.value) : ""
+    );
+    setProject(entry && "project" in entry ? entry.project : "");
+    setUsername(entry && "username" in entry ? entry.username : "");
+    setEditorOpen(true);
   };
-
-  const toggleEnvVisibility = (clientId: string) => {
-    setVisibleEnvKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(clientId)) next.delete(clientId);
-      else next.add(clientId);
-      return next;
-    });
-  };
-
-  const startEditEnvVar = (env: EnvVar) => {
-    setEditingEnvId(env.clientId);
-    setEditEnvProject(env.project);
-    setEditEnvName(env.name);
-    setEditEnvValue(env.value);
-  };
-
-  const cancelEditEnvVar = () => {
-    setEditingEnvId(null);
-    setEditEnvProject("");
-    setEditEnvName("");
-    setEditEnvValue("");
-  };
-
-  const handleSaveEditEnvVar = async () => {
-    if (!editingEnvId) return;
-    const name = editEnvName.trim();
-    const value = editEnvValue.trim();
-    const project = editEnvProject.trim() || "Default";
-    if (!name || !value) return;
+  const save = async () => {
     if (
+      busyRef.current ||
+      !name.trim() ||
+      !secret ||
+      (tab === "logins" && !username.trim())
+    )
+      return;
+    const projectName = project.trim() || "Default";
+    if (
+      tab === "envvars" &&
       envVars.some(
-        (v) =>
-          v.clientId !== editingEnvId &&
-          v.name === name &&
-          v.project === project
+        (e) =>
+          e.clientId !== editingId &&
+          e.name === name.trim() &&
+          e.project === projectName
       )
     ) {
-      toast.error(`${name} already exists in ${project}`);
+      toast.error(`${name.trim()} already exists in ${projectName}`);
       return;
     }
-    await updateEnvVar(editingEnvId, name, value, project, syncEnabled);
-    await refreshEnvVars();
-    cancelEditEnvVar();
-    toast.success(`Updated ${name}`);
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      if (tab === "logins" && editingId)
+        await updateCredential(
+          editingId,
+          name.trim(),
+          username.trim(),
+          secret,
+          syncEnabled
+        );
+      else if (tab === "logins")
+        await addCredential(name.trim(), username.trim(), secret, syncEnabled);
+      else if (editingId)
+        await updateEnvVar(
+          editingId,
+          name.trim(),
+          secret,
+          projectName,
+          syncEnabled
+        );
+      else await addEnvVar(name.trim(), secret, projectName, syncEnabled);
+      // A refresh failure after a successful write must not invite a duplicate save.
+      busyRef.current = false;
+      closeEditor();
+      await reload();
+      toast.success(
+        editingId
+          ? tab === "logins"
+            ? "Login updated"
+            : "Variable updated"
+          : tab === "logins"
+          ? "Login saved"
+          : "Variable saved"
+      );
+    } catch {
+      toast.error("Couldn't save. Your entry is still here. Try again.");
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (!removal || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      if (removal.tab === "logins")
+        await removeCredential(removal.id, syncEnabled);
+      else await removeEnvVar(removal.id, syncEnabled);
+      setRevealedId(null);
+      setExpandedId(null);
+      setRemoval(null);
+      await reload();
+      toast.success("Entry removed");
+    } catch {
+      toast.error("Couldn't remove this entry. Try again.");
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
   };
 
-  const handleAddCredential = async () => {
-    const label = newCredLabel.trim();
-    const username = newCredUser.trim();
-    const password = newCredPass.trim();
-    if (!label || !username || !password) return;
-    await addCredential(label, username, password, syncEnabled);
-    await refreshCredentials();
-    setNewCredLabel("");
-    setNewCredUser("");
-    setNewCredPass("");
-    toast.success(`Added ${label}`);
-  };
-
-  const handleRemoveCredential = async (index: number) => {
-    const cred = credentials[index];
-    await removeCredential(cred.clientId, syncEnabled);
-    setVisibleCredKeys((prev) => {
-      const next = new Set(prev);
-      next.delete(index);
-      return next;
-    });
-    await refreshCredentials();
-    toast.success(`Removed ${cred.label}`);
-  };
-
-  const handleCopyCredential = (cred: Credential) => {
-    navigator.clipboard.writeText(`${cred.username}\n${cred.password}`);
-    toast.success(`Copied ${cred.label} credentials`);
-  };
-
-  const toggleCredVisibility = (index: number) => {
-    setVisibleCredKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(index)) next.delete(index);
-      else next.add(index);
-      return next;
-    });
+  const renderRow = (
+    id: string,
+    title: string,
+    subtitle: string,
+    value: string,
+    env?: EnvVar
+  ) => {
+    const expanded = expandedId === id;
+    const revealed = revealedId === id;
+    return (
+      <div key={id} className="border-b last:border-b-0">
+        <div className="flex items-center gap-1 py-3">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => {
+              setExpandedId(expanded ? null : id);
+              setRevealedId(null);
+            }}
+            className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg px-1 text-left hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            <ChevronDown
+              className={`size-4 shrink-0 text-muted-foreground transition-transform ${
+                expanded ? "rotate-180" : ""
+              }`}
+            />
+            <span className="min-w-0">
+              <span className="block truncate font-medium">{title}</span>
+              <span className="block truncate text-sm text-muted-foreground">
+                {subtitle}
+              </span>
+            </span>
+          </button>
+          <Button
+            variant="ghost"
+            className="h-11 shrink-0 gap-2 px-3"
+            onClick={() => void copy(value, env ? "Value" : "Password")}
+            aria-label={`Copy ${env ? "value for" : "password for"} ${title}`}
+          >
+            <Copy className="size-4" />
+            <span className="hidden sm:inline">
+              Copy {env ? "value" : "password"}
+            </span>
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                className="size-11 shrink-0"
+                aria-label={`Options for ${title}`}
+              >
+                <MoreHorizontal className="size-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {
+                <DropdownMenuItem
+                  className="min-h-11"
+                  onSelect={() =>
+                    openEditor(
+                      env ?? credentials.find((c) => c.clientId === id)
+                    )
+                  }
+                >
+                  {env ? "Edit variable" : "Edit login"}
+                </DropdownMenuItem>
+              }
+              <DropdownMenuItem
+                className="min-h-11"
+                onSelect={() =>
+                  void copy(
+                    env ? `${env.name}=${env.value}` : `${subtitle}\n${value}`,
+                    env ? "Variable" : "Login"
+                  )
+                }
+              >
+                {env ? "Copy as NAME=VALUE" : "Copy username and password"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="min-h-11 text-destructive"
+                onSelect={() => {
+                  setRevealedId(null);
+                  setRemoval({ id, label: title, tab });
+                }}
+              >
+                Remove {env ? "variable" : "login"}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        {expanded && (
+          <div className="space-y-3 pb-5 pl-2 sm:pl-8">
+            <p className="break-words font-medium">{title}</p>
+            {!env && (
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-muted-foreground">
+                    Username or email
+                  </p>
+                  <p className="break-all text-sm">{subtitle}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  className="size-11 shrink-0"
+                  aria-label={`Copy username for ${title}`}
+                  onClick={() => void copy(subtitle, "Username")}
+                >
+                  <Copy className="size-4" />
+                </Button>
+              </div>
+            )}
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-muted-foreground">
+                  {env ? "Value" : "Password"}
+                </p>
+                <p className="break-all font-mono text-sm select-text">
+                  {revealed ? value : "••••••••••••"}
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                className="size-11 shrink-0"
+                aria-label={`${revealed ? "Hide" : "Reveal"} ${
+                  env ? "value" : "password"
+                } for ${title}`}
+                onClick={() => setRevealedId(revealed ? null : id)}
+              >
+                {revealed ? (
+                  <EyeOff className="size-4" />
+                ) : (
+                  <Eye className="size-4" />
+                )}
+              </Button>
+            </div>
+            {revealed && (
+              <p className="text-xs text-muted-foreground">
+                Hides automatically after 30 seconds.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
-    <div className="mx-auto max-w-3xl p-4 md:p-6 space-y-4">
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Lock className="h-4 w-4" />
-              Passwords & Secrets
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                role="switch"
-                aria-checked={syncEnabled}
-                title={syncEnabled ? "Cloud sync on" : "Cloud sync off"}
-                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-                  syncEnabled ? "bg-primary" : "bg-muted"
-                }`}
-                onClick={toggleSync}
-              >
-                <span
-                  className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform ${
-                    syncEnabled ? "translate-x-4" : "translate-x-0"
-                  }`}
-                />
-              </button>
-              {syncEnabled ? (
-                <Cloud className="h-3.5 w-3.5 text-primary" />
-              ) : (
-                <CloudOff className="h-3.5 w-3.5 text-muted-foreground" />
-              )}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Tabs */}
-          <div className="flex rounded-md border p-0.5 w-fit">
-            <button
-              type="button"
-              onClick={() => setTab("logins")}
-              className={`flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-xs font-medium transition-colors ${
-                tab === "logins"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
+    <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 md:px-6 md:py-8">
+      <header className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Passwords</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Your logins and project secrets, easy to find.
+          </p>
+        </div>
+        <Button
+          className="min-h-11 shrink-0 gap-2"
+          onClick={() => openEditor()}
+        >
+          <Plus className="size-4" />
+          {tab === "logins" ? "Add login" : "Add variable"}
+        </Button>
+      </header>
+      <Tabs
+        value={tab}
+        onValueChange={(value) => {
+          setTab(value as EntryTab);
+          setQuery("");
+          setRevealedId(null);
+          setExpandedId(null);
+        }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <TabsList className="group-data-[orientation=horizontal]/tabs:h-12">
+            <TabsTrigger className="min-h-11 px-3" value="logins">
+              Logins ({credentials.length})
+            </TabsTrigger>
+            <TabsTrigger className="min-h-11 px-3" value="envvars">
+              Variables ({envVars.length})
+            </TabsTrigger>
+          </TabsList>
+          <Button
+            variant="ghost"
+            className="size-11 shrink-0"
+            aria-label="Sync settings"
+            aria-expanded={settingsOpen}
+            onClick={() => setSettingsOpen(!settingsOpen)}
+          >
+            <Settings2 className="size-5" />
+          </Button>
+        </div>
+        <TabsContent value={tab} className="space-y-6 mt-4">
+          {settingsOpen && (
+            <section
+              className="space-y-2 rounded-xl bg-muted/50 p-4"
+              aria-label="Sync settings"
             >
-              <UserCheck className="h-3.5 w-3.5" />
-              Logins
-              {credentials.length > 0 && (
-                <span className="rounded-full bg-primary-foreground/20 px-1.5 text-[10px]">
-                  {credentials.length}
-                </span>
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab("envvars")}
-              className={`flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-xs font-medium transition-colors ${
-                tab === "envvars"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Variable className="h-3.5 w-3.5" />
-              Env Variables
-              {envVars.length > 0 && (
-                <span className="rounded-full bg-primary-foreground/20 px-1.5 text-[10px]">
-                  {envVars.length}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {/* Logins */}
-          {tab === "logins" && (
-            <div className="space-y-3">
-              {credentials.length > 0 && (
-                <div className="space-y-2">
-                  {credentials.map((cred, index) => (
-                    <div key={index} className="rounded-md border p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium">{cred.label}</p>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => toggleCredVisibility(index)}
-                            title={visibleCredKeys.has(index) ? "Hide" : "Show"}
-                          >
-                            {visibleCredKeys.has(index) ? (
-                              <EyeOff className="h-3.5 w-3.5" />
-                            ) : (
-                              <Eye className="h-3.5 w-3.5" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => handleCopyCredential(cred)}
-                            title="Copy username & password"
-                          >
-                            <Copy className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-destructive hover:text-destructive"
-                            onClick={() => handleRemoveCredential(index)}
-                            title="Remove"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div
-                          className="rounded bg-muted px-3 py-1.5 cursor-pointer hover:bg-muted/80 transition-colors"
-                          onClick={() => {
-                            navigator.clipboard.writeText(cred.username);
-                            toast.success("Username copied");
-                          }}
-                          title="Click to copy username"
-                        >
-                          <p className="text-[10px] text-muted-foreground mb-0.5">User</p>
-                          <p className="text-xs font-mono truncate">{cred.username}</p>
-                        </div>
-                        <div
-                          className="rounded bg-muted px-3 py-1.5 cursor-pointer hover:bg-muted/80 transition-colors"
-                          onClick={() => {
-                            navigator.clipboard.writeText(cred.password);
-                            toast.success("Password copied");
-                          }}
-                          title="Click to copy password"
-                        >
-                          <p className="text-[10px] text-muted-foreground mb-0.5">Password</p>
-                          <p className="text-xs font-mono truncate">
-                            {visibleCredKeys.has(index)
-                              ? cred.password
-                              : "\u2022".repeat(Math.min(cred.password.length, 20))}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div
-                data-keyboard-keep-visible
-                className="space-y-2 rounded-md border border-dashed p-3"
-              >
-                <Input
-                  placeholder="Service name (e.g., Gmail, GitHub)..."
-                  value={newCredLabel}
-                  onChange={(e) => setNewCredLabel(e.target.value)}
-                  className="h-8 text-sm"
-                />
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Username / Email..."
-                    value={newCredUser}
-                    onChange={(e) => setNewCredUser(e.target.value)}
-                    className="flex-1 h-8 text-sm"
-                  />
-                  <Input
-                    placeholder="Password..."
-                    type="password"
-                    value={newCredPass}
-                    onChange={(e) => setNewCredPass(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleAddCredential();
-                    }}
-                    className="flex-1 h-8 text-sm"
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  className="w-full gap-1.5"
-                  disabled={!newCredLabel.trim() || !newCredUser.trim() || !newCredPass.trim()}
-                  onClick={handleAddCredential}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add Login
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Env Variables */}
-          {tab === "envvars" && (
-            <div className="space-y-4">
-              {envVarsByProject.length > 0 && (
-                <div className="space-y-4">
-                  {envVarsByProject.map(({ project, vars }) => (
-                    <div key={project} className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <FolderOpen className="h-3.5 w-3.5 text-muted-foreground" />
-                        <h3 className="text-sm font-semibold">{project}</h3>
-                        <span className="text-xs text-muted-foreground">
-                          ({vars.length} {vars.length === 1 ? "var" : "vars"})
-                        </span>
-                        <div className="flex-1 h-px bg-border" />
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 px-2 gap-1 text-xs"
-                          onClick={() => handleCopyProjectEnvVars(project, vars)}
-                          title="Copy all in this project"
-                        >
-                          <Copy className="h-3 w-3" />
-                          Copy all
-                        </Button>
-                      </div>
-                      <div className="space-y-1.5 pl-1">
-                        {vars.map((env) =>
-                          editingEnvId === env.clientId ? (
-                            <div
-                              key={env.clientId}
-                              className="space-y-2 rounded-md border border-primary p-2"
-                            >
-                              <Input
-                                placeholder="Project"
-                                value={editEnvProject}
-                                onChange={(e) => setEditEnvProject(e.target.value)}
-                                list="env-project-suggestions"
-                                className="h-8 text-sm"
-                              />
-                              <div className="flex gap-2">
-                                <Input
-                                  placeholder="VARIABLE_NAME"
-                                  value={editEnvName}
-                                  onChange={(e) =>
-                                    setEditEnvName(
-                                      e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "")
-                                    )
-                                  }
-                                  className="flex-1 h-8 text-sm font-mono"
-                                />
-                                <Input
-                                  placeholder="Value..."
-                                  value={editEnvValue}
-                                  onChange={(e) => setEditEnvValue(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") handleSaveEditEnvVar();
-                                    if (e.key === "Escape") cancelEditEnvVar();
-                                  }}
-                                  className="flex-1 h-8 text-sm"
-                                />
-                              </div>
-                              <div className="flex gap-2 justify-end">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 gap-1"
-                                  onClick={cancelEditEnvVar}
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                  Cancel
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  className="h-7 gap-1"
-                                  disabled={!editEnvName.trim() || !editEnvValue.trim()}
-                                  onClick={handleSaveEditEnvVar}
-                                >
-                                  <Check className="h-3.5 w-3.5" />
-                                  Save
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div
-                              key={env.clientId}
-                              className="flex items-center gap-2 rounded-md border p-2"
-                            >
-                              <div
-                                className="flex-1 min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
-                                onClick={() => handleCopyEnvVar(env)}
-                                title="Click to copy as NAME=VALUE"
-                              >
-                                <p className="text-xs font-medium text-muted-foreground">
-                                  {env.name}
-                                </p>
-                                <p className="text-sm font-mono truncate">
-                                  {visibleEnvKeys.has(env.clientId)
-                                    ? env.value
-                                    : "\u2022".repeat(Math.min(env.value.length, 32))}
-                                </p>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 shrink-0"
-                                onClick={() => toggleEnvVisibility(env.clientId)}
-                                title={visibleEnvKeys.has(env.clientId) ? "Hide" : "Show"}
-                              >
-                                {visibleEnvKeys.has(env.clientId) ? (
-                                  <EyeOff className="h-3.5 w-3.5" />
-                                ) : (
-                                  <Eye className="h-3.5 w-3.5" />
-                                )}
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 shrink-0"
-                                onClick={() => startEditEnvVar(env)}
-                                title="Edit"
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 shrink-0 text-destructive hover:text-destructive"
-                                onClick={() => handleRemoveEnvVar(env)}
-                                title="Remove"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          )
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div
-                data-keyboard-keep-visible
-                className="space-y-2 rounded-md border border-dashed p-3"
-              >
-                <Input
-                  placeholder="Project name (e.g., Project 1, my-app)..."
-                  value={newEnvProject}
-                  onChange={(e) => setNewEnvProject(e.target.value)}
-                  list="env-project-suggestions"
-                  className="h-8 text-sm"
-                />
-                <datalist id="env-project-suggestions">
-                  {projectNames.map((p) => (
-                    <option key={p} value={p} />
-                  ))}
-                </datalist>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="VARIABLE_NAME"
-                    value={newEnvName}
-                    onChange={(e) =>
-                      setNewEnvName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ""))
+              <label className="flex min-h-11 cursor-pointer items-center justify-between gap-4 font-medium">
+                <span>Sync changes to cloud</span>
+                <input
+                  type="checkbox"
+                  className="size-5 accent-primary"
+                  checked={syncEnabled}
+                  onChange={(e) => {
+                    try {
+                      localStorage.setItem(
+                        "noticomax_env_sync",
+                        String(e.target.checked)
+                      );
+                      setSyncEnabled(e.target.checked);
+                    } catch {
+                      toast.error("Couldn't save your sync preference.");
                     }
-                    className="flex-1 h-8 text-sm font-mono"
-                  />
-                  <Input
-                    placeholder="Value..."
-                    type="password"
-                    value={newEnvValue}
-                    onChange={(e) => setNewEnvValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleAddEnvVar();
-                    }}
-                    className="flex-1 h-8 text-sm"
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  className="w-full gap-1.5"
-                  disabled={!newEnvName.trim() || !newEnvValue.trim()}
-                  onClick={handleAddEnvVar}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add to {newEnvProject.trim() || "Default"}
+                  }}
+                />
+              </label>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Applies to entries you add or change while account sync is
+                available. Turning this off doesn&apos;t remove copies already
+                in the cloud.
+              </p>
+            </section>
+          )}
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
+            <Input
+              className="h-11 pl-10"
+              aria-label={
+                tab === "logins" ? "Search logins" : "Search variables"
+              }
+              placeholder={
+                tab === "logins"
+                  ? "Search services or usernames"
+                  : "Search variables or projects"
+              }
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setRevealedId(null);
+                setExpandedId(null);
+              }}
+            />
+          </div>
+          {loading ? (
+            <p
+              role="status"
+              className="py-10 text-center text-sm text-muted-foreground"
+            >
+              Loading your entries…
+            </p>
+          ) : loadError ? (
+            <div role="alert" className="space-y-3 py-8 text-center">
+              <p>Couldn&apos;t load your entries.</p>
+              <Button variant="outline" onClick={() => void reload()}>
+                Try again
+              </Button>
+            </div>
+          ) : count === 0 ? (
+            <div className="space-y-3 py-12 text-center">
+              <Lock className="mx-auto size-6 text-muted-foreground" />
+              <h2 className="font-medium">
+                {needle
+                  ? "No matching entries"
+                  : tab === "logins"
+                  ? "Keep your logins together"
+                  : "Keep project variables together"}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {needle
+                  ? "Try a different service, username, or project."
+                  : "Add your first entry. Values stay hidden until you reveal them."}
+              </p>
+              {needle && (
+                <Button variant="outline" onClick={() => setQuery("")}>
+                  Clear search
                 </Button>
-              </div>
+              )}
+            </div>
+          ) : tab === "logins" ? (
+            <div>
+              {logins.map((c) =>
+                renderRow(c.clientId, c.label, c.username, c.password)
+              )}
+            </div>
+          ) : (
+            <div className="space-y-7">
+              {groups.map(([group, vars]) => (
+                <section key={group}>
+                  <div className="flex items-center justify-between gap-2 border-b pb-2">
+                    <h2 className="min-w-0 break-words font-semibold">
+                      {group}
+                    </h2>
+                    <Button
+                      variant="ghost"
+                      className="min-h-11 shrink-0 gap-2"
+                      onClick={() =>
+                        void copy(
+                          vars.map((e) => `${e.name}=${e.value}`).join("\n"),
+                          `${group} variables`
+                        )
+                      }
+                    >
+                      <Copy className="size-4" />
+                      Copy {needle ? "matches" : "all"}
+                    </Button>
+                  </div>
+                  {vars.map((e) =>
+                    renderRow(
+                      e.clientId,
+                      e.name,
+                      "Project variable",
+                      e.value,
+                      e
+                    )
+                  )}
+                </section>
+              ))}
             </div>
           )}
-        </CardContent>
-      </Card>
-
-      {/* Keyboard-open-only trailing spacer: gives the bottom add-login form
-          enough room to scroll fully above the iOS keyboard. Collapses to 0
-          when the keyboard is closed, so the layout is unchanged. */}
-      <div aria-hidden style={{ height: "var(--keyboard-height, 0px)" }} />
+        </TabsContent>
+      </Tabs>
+      <Dialog
+        open={editorOpen}
+        onOpenChange={(open) => {
+          if (!open) closeEditor();
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-md [&_[data-slot=dialog-close]]:size-11 [&_[data-slot=dialog-close]]:top-2 [&_[data-slot=dialog-close]]:right-2"
+          onEscapeKeyDown={(e) => {
+            if (busy) e.preventDefault();
+          }}
+          onPointerDownOutside={(e) => {
+            if (busy) e.preventDefault();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>
+              {editingId
+                ? tab === "logins"
+                  ? "Edit login"
+                  : "Edit variable"
+                : tab === "logins"
+                ? "Add a login"
+                : "Add a variable"}
+            </DialogTitle>
+            <DialogDescription>
+              {tab === "logins"
+                ? "Save a service, username, and password."
+                : "Group variables by project so you can copy them together."}
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
+          >
+            <fieldset
+              disabled={busy}
+              className="space-y-4"
+              data-keyboard-keep-visible
+            >
+              {tab === "envvars" && (
+                <div className="space-y-2">
+                  <Label htmlFor="secret-project">Project (optional)</Label>
+                  <Input
+                    id="secret-project"
+                    className="h-11"
+                    list="secret-projects"
+                    placeholder="Default"
+                    value={project}
+                    onChange={(e) => setProject(e.target.value)}
+                  />
+                  <datalist id="secret-projects">
+                    {[...new Set(envVars.map((e) => e.project))].map((p) => (
+                      <option key={p} value={p} />
+                    ))}
+                  </datalist>
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="secret-name">
+                  {tab === "logins" ? "Service name" : "Variable name"}
+                </Label>
+                <Input
+                  id="secret-name"
+                  className="h-11"
+                  autoFocus
+                  required
+                  placeholder={tab === "logins" ? "e.g. Gmail" : "e.g. API_KEY"}
+                  value={name}
+                  autoCapitalize={tab === "envvars" ? "characters" : "words"}
+                  onChange={(e) =>
+                    setName(
+                      tab === "envvars"
+                        ? e.target.value
+                            .toUpperCase()
+                            .replace(/[^A-Z0-9_]/g, "")
+                        : e.target.value
+                    )
+                  }
+                />
+              </div>
+              {tab === "logins" && (
+                <div className="space-y-2">
+                  <Label htmlFor="secret-username">Username or email</Label>
+                  <Input
+                    id="secret-username"
+                    className="h-11"
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    required
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                  />
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="secret-value">
+                  {tab === "logins" ? "Password" : "Value"}
+                </Label>
+                <Input
+                  id="secret-value"
+                  className="h-11"
+                  type="password"
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  required
+                  value={secret}
+                  onChange={(e) => setSecret(e.target.value)}
+                />
+              </div>
+            </fieldset>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                className="min-h-11"
+                variant="outline"
+                disabled={busy}
+                onClick={closeEditor}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="min-h-11"
+                disabled={
+                  busy ||
+                  !name.trim() ||
+                  !secret ||
+                  (tab === "logins" && !username.trim())
+                }
+              >
+                {busy ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={!!removal}
+        onOpenChange={(open) => {
+          if (!open && !busyRef.current) setRemoval(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md [&_[data-slot=dialog-close]]:size-11 [&_[data-slot=dialog-close]]:top-2 [&_[data-slot=dialog-close]]:right-2">
+          <DialogHeader>
+            <DialogTitle>Remove {removal?.label}?</DialogTitle>
+            <DialogDescription>
+              This removes the saved entry. You can&apos;t undo this action.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              className="min-h-11"
+              disabled={busy}
+              onClick={() => setRemoval(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              className="min-h-11"
+              disabled={busy}
+              onClick={() => void remove()}
+            >
+              {busy ? "Removing…" : "Remove"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
