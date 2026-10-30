@@ -40,8 +40,8 @@ export function HouseholdsCard() {
   } = useHouseholds();
   const { entitlements } = useLicense();
 
-  // Family Plan unlocks household creation. Lifetime Pro is grandfathered.
-  const canCreateFamily = !!entitlements.familyPlanActive || !!entitlements.lifetimePro;
+  // One free family (five total members); preserve existing paid allowances.
+  const canCreateFamily = !!entitlements.familyPlanActive || !!entitlements.lifetimePro || !households.some((h) => h.role === "owner");
 
   const [creatingName, setCreatingName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -199,7 +199,7 @@ export function HouseholdsCard() {
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-xs text-muted-foreground">
-          Share notes, reminders, lists and a budget with your family. Admin creates the family and
+          Share notes, reminders, links and optional manual check-ins for free. The owner creates the family and
           shares a 6-character code; others paste it below to request to join.
         </p>
 
@@ -407,7 +407,7 @@ export function HouseholdsCard() {
           </div>
         </div>
 
-        {/* Create new — gated on Family Plan entitlement */}
+        {/* One free owned family; existing paid allowances remain unchanged. */}
         <div className="space-y-2 pt-2 border-t">
           <Label className="text-xs">Create a new family</Label>
           {canCreateFamily ? (
@@ -440,12 +440,10 @@ export function HouseholdsCard() {
                 <span className="text-sm font-semibold">Family sharing</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Create a shared family folder (notes, reminders, lists, passwords) and a shared
-                budget with your household. You can still join an existing family with a code
-                above.
+                You already own a family. Open its shared folder to use free notes, links, reminders and optional check-ins. You can still join another family with a code above.
               </p>
               <Link href="/pricing" className="inline-block text-xs font-medium text-primary hover:underline">
-                See plans
+                Additional plans
               </Link>
             </div>
           )}

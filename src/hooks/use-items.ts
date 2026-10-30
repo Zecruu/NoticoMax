@@ -13,10 +13,10 @@ import {
   purgeOldTrash,
   initialSync,
   setupSyncListeners,
-  setOnSyncComplete,
   setOnSyncError,
   performSync,
-  setSyncEnabled,
+  setSyncContext,
+  subscribeSyncComplete,
 } from "@/lib/sync/sync-engine";
 import { toast } from "@/lib/native-toast";
 import { filterLibraryItems } from "@/lib/items/library";
@@ -25,7 +25,8 @@ export function useItems(
   typeFilter?: string,
   searchQuery?: string,
   folderFilter?: string | null,
-  syncEnabledFlag: boolean = false
+  syncEnabledFlag: boolean = false,
+  familyUserId: string | null = null
 ) {
   const [allItems, setAllItems] = useState<LocalItem[]>([]);
   const [trashedItems, setTrashedItems] = useState<LocalItem[]>([]);
@@ -46,8 +47,8 @@ export function useItems(
   }, []);
 
   useEffect(() => {
-    setSyncEnabled(syncEnabledFlag);
-  }, [syncEnabledFlag]);
+    setSyncContext(syncEnabledFlag, familyUserId);
+  }, [syncEnabledFlag, familyUserId]);
 
   const refresh = useCallback(async () => {
     const request = ++requestRef.current;
@@ -73,7 +74,7 @@ export function useItems(
       await refresh();
 
       // Then sync with server (only for activated users)
-      if (mounted && syncEnabledFlag) {
+      if (mounted && (syncEnabledFlag || familyUserId)) {
         setSyncing(true);
         try {
           await initialSync();
@@ -86,7 +87,7 @@ export function useItems(
 
     // Register callback so background syncs (polling, online, visibility)
     // automatically refresh the UI
-    setOnSyncComplete(() => {
+    const unsubscribeSync = subscribeSyncComplete(() => {
       if (mounted) refresh();
     });
 
@@ -109,11 +110,11 @@ export function useItems(
 
     return () => {
       mounted = false;
-      setOnSyncComplete(null);
+      unsubscribeSync();
       setOnSyncError(null);
       cleanupListeners();
     };
-  }, [refresh, syncEnabledFlag]);
+  }, [refresh, syncEnabledFlag, familyUserId]);
 
   const addItem = useCallback(
     async (
@@ -169,12 +170,12 @@ export function useItems(
   );
 
   const syncNow = useCallback(async () => {
-    if (!syncEnabledFlag) return;
+    if (!syncEnabledFlag && !familyUserId) return;
     setSyncing(true);
     await performSync();
     await refresh();
     setSyncing(false);
-  }, [refresh, syncEnabledFlag]);
+  }, [refresh, syncEnabledFlag, familyUserId]);
 
   return {
     items,

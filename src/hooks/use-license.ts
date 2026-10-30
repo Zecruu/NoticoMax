@@ -19,7 +19,7 @@ export interface ComputedEntitlements {
   source?: string | null;
   expiresAt?: string | null;
   lifetimePro?: boolean;
-  /** True when the user has an active Family Plan subscription. Required to create a household. */
+  /** True when the user has an active paid Family Plan. Basic Family collaboration is free. */
   familyPlanActive?: boolean;
   /** Number of extra seats the user has purchased (each adds 1 to a household's max_seats). */
   extraSeats?: number;

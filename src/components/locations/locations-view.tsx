@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocations } from "@/hooks/use-locations";
 import { type LocalLocation } from "@/lib/db/indexed-db";
 import { getCurrentCoords, mapsUrl, formatCoords } from "@/lib/geolocation";
+import { closeFamilyMap, hasNativeFamilyMap, openFamilyMap } from "@/lib/capacitor/family-map";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,6 +48,7 @@ const EMPTY_DRAFT: DraftLocation = {
 };
 
 function parseCoord(value: string): number | null {
+  if (!value.trim()) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -60,13 +62,32 @@ export function LocationsView() {
   const [draft, setDraft] = useState<DraftLocation>(EMPTY_DRAFT);
   const [capturing, setCapturing] = useState(false);
 
+  const [saving, setSaving] = useState(false);
+  const operation = useRef(0);
+  const busy = useRef(false);
+  useEffect(() => () => { operation.current++; void closeFamilyMap().catch(() => {}); }, []);
+  const dismiss = () => { operation.current++; busy.current = false; setCapturing(false); setSaving(false); setDialogOpen(false); void closeFamilyMap().catch(() => {}); };
+  const showMap = async (pick: boolean) => {
+    if (busy.current) return;
+    const version = ++operation.current;
+    busy.current = true; setCapturing(true);
+    try {
+      const place = await openFamilyMap(locations.map(loc => ({ title: loc.name, address: loc.address ?? "", latitude: loc.latitude, longitude: loc.longitude })), pick, pick ? "Choose a personal place" : "Personal places");
+      if (version !== operation.current || !place) return;
+      setEditing(null); setDraft({ name: place.title, address: place.address, latitude: String(place.latitude), longitude: String(place.longitude), notes: "" }); setDialogOpen(true);
+    } catch (error) { if (version === operation.current) toast.error(error instanceof Error ? error.message : "Maps could not open."); }
+    finally { if (version === operation.current) { busy.current = false; setCapturing(false); } }
+  };
+
   const openCreate = () => {
+    operation.current++; busy.current = false; setCapturing(false);
     setEditing(null);
     setDraft(EMPTY_DRAFT);
     setDialogOpen(true);
   };
 
   const openEdit = (loc: LocalLocation) => {
+    operation.current++; busy.current = false; setCapturing(false);
     setEditing(loc);
     setDraft({
       name: loc.name,
@@ -79,9 +100,12 @@ export function LocationsView() {
   };
 
   const captureCurrentLocation = async () => {
+    if (busy.current) return;
+    const version = ++operation.current; busy.current = true;
     setCapturing(true);
     try {
       const coords = await getCurrentCoords();
+      if (version !== operation.current) return;
       setDraft((d) => ({
         ...d,
         latitude: String(coords.latitude),
@@ -89,16 +113,19 @@ export function LocationsView() {
       }));
       toast.success("Captured current location");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to get location");
+      if (version === operation.current) toast.error(err instanceof Error ? err.message : "Failed to get location");
     } finally {
-      setCapturing(false);
+      if (version === operation.current) { busy.current = false; setCapturing(false); }
     }
   };
 
   const saveCurrentLocationDirect = async () => {
+    if (busy.current) return;
+    const version = ++operation.current; busy.current = true;
     setCapturing(true);
     try {
       const coords = await getCurrentCoords();
+      if (version !== operation.current) return;
       const stamp = new Date().toLocaleString(undefined, {
         month: "short",
         day: "numeric",
@@ -112,15 +139,16 @@ export function LocationsView() {
         tags: [],
         pinned: false,
       });
-      toast.success("Current location saved");
+      if (version === operation.current) toast.success("Personal location saved");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save location");
+      if (version === operation.current) toast.error(err instanceof Error ? err.message : "Failed to save location");
     } finally {
-      setCapturing(false);
+      if (version === operation.current) { busy.current = false; setCapturing(false); }
     }
   };
 
   const handleSave = async () => {
+    if (busy.current) return;
     const name = draft.name.trim();
     const lat = parseCoord(draft.latitude);
     const lng = parseCoord(draft.longitude);
@@ -145,17 +173,16 @@ export function LocationsView() {
       notes: draft.notes.trim() || undefined,
     };
 
-    if (editing) {
-      await editLocation(editing.clientId, payload);
-      toast.success("Location updated");
-    } else {
-      await addLocation({ ...payload, tags: [], pinned: false });
-      toast.success("Location saved");
-    }
+    const version = ++operation.current; busy.current = true; setSaving(true);
+    try {
+      if (editing) await editLocation(editing.clientId, payload);
+      else await addLocation({ ...payload, tags: [], pinned: false });
+      if (version !== operation.current) return;
+      toast.success(editing ? "Personal location updated" : "Personal location saved");
+      setDialogOpen(false); setEditing(null); setDraft(EMPTY_DRAFT);
+    } catch (error) { if (version === operation.current) toast.error(error instanceof Error ? error.message : "Location could not be saved."); }
+    finally { if (version === operation.current) { busy.current = false; setSaving(false); } }
 
-    setDialogOpen(false);
-    setEditing(null);
-    setDraft(EMPTY_DRAFT);
   };
 
   const handleDelete = async (loc: LocalLocation) => {
@@ -170,26 +197,30 @@ export function LocationsView() {
         <MapPin className="h-6 w-6 text-primary mt-0.5" />
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight">Locations</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Personal places</h1>
             <span className="rounded-full bg-primary/15 text-primary px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider">
               Beta
             </span>
           </div>
           <p className="text-sm text-muted-foreground">
-            Save your favorite spots and quick-snapshots of where you are. Open any saved spot in Maps with one tap.
+            Private saved spots, separate from Family places and temporary check-ins. Saving here never shares your location with your family.
           </p>
         </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Button onClick={saveCurrentLocationDirect} disabled={capturing} className="gap-1.5">
+        <Button onClick={saveCurrentLocationDirect} disabled={capturing || saving} className="gap-1.5">
           {capturing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Crosshair className="h-4 w-4" />}
           Save Current Location
         </Button>
-        <Button variant="outline" onClick={openCreate} className="gap-1.5">
+        <Button variant="outline" disabled={saving || capturing} onClick={openCreate} className="gap-1.5">
           <Plus className="h-4 w-4" />
           Add Manually
         </Button>
+        {hasNativeFamilyMap() && <>
+          <Button variant="outline" disabled={capturing || saving} onClick={() => void showMap(true)}>Choose in Apple Maps</Button>
+          {locations.length > 0 && <Button variant="outline" disabled={capturing || saving} onClick={() => void showMap(false)}>View my places</Button>}
+        </>}
       </div>
 
       <Input
@@ -264,12 +295,12 @@ export function LocationsView() {
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) dismiss(); }}>
         <DialogContent className="sm:max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit Location" : "New Location"}</DialogTitle>
             <DialogDescription>
-              Pin a favorite spot, or grab your current coordinates with one tap.
+              Only saved to Personal. Nothing is shared with Family.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 pb-[var(--keyboard-height,0px)]">
@@ -319,7 +350,7 @@ export function LocationsView() {
               variant="outline"
               size="sm"
               onClick={captureCurrentLocation}
-              disabled={capturing}
+              disabled={capturing || saving}
               className="w-full gap-1.5"
             >
               {capturing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Crosshair className="h-3.5 w-3.5" />}
@@ -337,8 +368,8 @@ export function LocationsView() {
             </div>
           </div>
           <div className="sticky bottom-0 -mx-6 -mb-6 px-6 py-3 flex justify-end gap-2 bg-background/95 backdrop-blur border-t supports-[backdrop-filter]:bg-background/80">
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave}>{editing ? "Save Changes" : "Save Location"}</Button>
+            <Button variant="outline" onClick={dismiss}>Cancel</Button>
+            <Button disabled={saving || capturing} onClick={handleSave}>{editing ? "Save Changes" : "Save Location"}</Button>
           </div>
         </DialogContent>
       </Dialog>

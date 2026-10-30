@@ -18,8 +18,8 @@ export async function POST(request: NextRequest) {
   const userId = claims.claims.sub as string;
 
   const body = await request.json().catch(() => ({}));
-  const rawCode = typeof body.code === "string" ? body.code.trim() : "";
-  if (!rawCode || rawCode.length < 4 || rawCode.length > 12) {
+  const rawCode = typeof body?.code === "string" ? body.code.trim() : "";
+  if (!/^[A-Z2-9]{6}$/i.test(rawCode)) {
     return NextResponse.json({ error: "Family code required" }, { status: 400 });
   }
   // Codes are stored uppercase; normalize the input.
@@ -58,6 +58,8 @@ export async function POST(request: NextRequest) {
     .eq("household_id", household.id)
     .eq("invited_user_id", userId)
     .eq("status", "requested")
+    .gt("expires_at", new Date().toISOString())
+    .limit(1)
     .maybeSingle();
   if (existingRequest) {
     return NextResponse.json({
@@ -86,7 +88,7 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (insertErr) {
-    return NextResponse.json({ error: insertErr.message }, { status: 500 });
+    return NextResponse.json({ error: "Could not request to join. Please try again." }, { status: 500 });
   }
 
   return NextResponse.json({

@@ -16,7 +16,14 @@ export interface LocalItem {
   id?: number;
   clientId: string;
   serverId?: string;
+  /** Original author; never reassigned when a collaborator edits. */
+  ownerUserId?: string;
+  /** Account whose authorized snapshot populated this local shared row. */
+  familyAccountId?: string;
+  canWrite?: boolean;
   type: ItemType;
+  /** Structured collaborative checklist; entries are changed atomically online. */
+  isChecklist?: boolean;
   title: string;
   content: string;
   url?: string;
@@ -39,6 +46,9 @@ export interface LocalItem {
 export type FolderShareMode = "all" | "select";
 
 export interface LocalFolder {
+  ownerUserId?: string;
+  familyAccountId?: string;
+  canWrite?: boolean;
   id?: number;
   clientId: string;
   serverId?: string;

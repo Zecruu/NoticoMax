@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { LocalItem, LocalFolder } from "@/lib/db/indexed-db";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -98,6 +99,9 @@ export function ItemCard({
   onToggleComplete,
   onUpdateContent,
 }: ItemCardProps) {
+  const readOnly = item.canWrite === false || folder?.canWrite === false;
+  const [reading, setReading] = useState(false);
+  const openItem = () => readOnly ? setReading(true) : onEdit(item);
   const updatingRef = useRef(false);
   const [updating, setUpdating] = useState(false);
   const update = async (action: () => void | Promise<void>) => {
@@ -132,9 +136,18 @@ export function ItemCard({
   };
 
   return (
+    <>
+    <Dialog open={reading} onOpenChange={setReading}>
+      <DialogContent className="max-h-[85dvh] overflow-auto">
+        <DialogHeader><DialogTitle>{item.title}</DialogTitle></DialogHeader>
+        <p className="text-xs text-muted-foreground">Read-only family content</p>
+        <div className="whitespace-pre-wrap break-words text-sm">{item.content}</div>
+        {safeUrl && <a href={safeUrl} target="_blank" rel="noopener noreferrer" className="break-all text-primary underline">{safeUrl}</a>}
+      </DialogContent>
+    </Dialog>
     <article className="group relative border-b border-border/60 py-1 last:border-b-0">
       <div className="flex items-start gap-1 sm:gap-2">
-        {item.type === "reminder" && onToggleComplete ? (
+        {item.type === "reminder" && onToggleComplete && !readOnly ? (
           <button
             type="button"
             disabled={updating}
@@ -165,7 +178,7 @@ export function ItemCard({
         <div className="min-w-0 flex-1">
           <button
             type="button"
-            onClick={() => onEdit(item)}
+            onClick={openItem}
             aria-label={`Open ${item.title}`}
             className="block w-full rounded-lg px-2 py-3 text-left hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring sm:px-3"
           >
@@ -232,7 +245,7 @@ export function ItemCard({
                   role="checkbox"
                   aria-checked={task.checked}
                   aria-label={task.text}
-                  disabled={!onUpdateContent || updating}
+                  disabled={readOnly || !onUpdateContent || updating}
                   onClick={() =>
                     void update(() =>
                       onUpdateContent?.(
@@ -261,7 +274,7 @@ export function ItemCard({
               {tasks.length > 3 && (
                 <button
                   type="button"
-                  onClick={() => onEdit(item)}
+                  onClick={openItem}
                   className="min-h-11 text-sm text-muted-foreground underline-offset-4 hover:underline"
                 >
                   View {tasks.length - 3} more{" "}
@@ -286,12 +299,13 @@ export function ItemCard({
             align="end"
             className="min-w-44 [&_[role=menuitem]]:min-h-11"
           >
-            <DropdownMenuItem onClick={() => onEdit(item)}>
+            <DropdownMenuItem onClick={openItem}>
               <Pencil />
-              Edit
+              {readOnly ? "View" : "Edit"}
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={() => onTogglePin(item.clientId, item.pinned)}
+              disabled={readOnly}
+              onClick={() => void update(() => onTogglePin(item.clientId, item.pinned))}
             >
               {item.pinned ? <PinOff /> : <Pin />}
               {item.pinned ? "Unpin" : "Pin to top"}
@@ -301,6 +315,7 @@ export function ItemCard({
               {item.type === "url" ? "Copy link" : "Copy text"}
             </DropdownMenuItem>
             <DropdownMenuItem
+              disabled={!!item.householdId}
               onClick={async () => {
                 try {
                   const res = await fetch("/api/share", {
@@ -329,6 +344,7 @@ export function ItemCard({
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
+              disabled={readOnly}
               className="text-destructive"
               onClick={() => {
                 if (confirm(`Move "${item.title}" to trash?`))
@@ -342,5 +358,6 @@ export function ItemCard({
         </DropdownMenu>
       </div>
     </article>
+    </>
   );
 }

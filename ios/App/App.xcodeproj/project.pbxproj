@@ -19,6 +19,8 @@
 		8CAF46C5C5496D1895389D2F /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0FB4B2661F0DF4494C6E97D1 /* Foundation.framework */; };
 		CB1CD97E79FB98FC6B038F1D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 8B806203E6F8C0FEA38390A5 /* PrivacyInfo.xcprivacy */; };
 		D9107AC325F10BEC25BE6418 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0336AA354DE11F475E4B79A /* ShareViewController.swift */; };
+		FA1000000000000000000001 /* FamilyMapPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1000000000000000000002 /* FamilyMapPlugin.swift */; };
+		FA1000000000000000000003 /* FamilyBridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1000000000000000000004 /* FamilyBridgeViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -62,6 +64,8 @@
 		8B806203E6F8C0FEA38390A5 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		E0336AA354DE11F475E4B79A /* ShareViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		FA1000000000000000000002 /* FamilyMapPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyMapPlugin.swift; sourceTree = "<group>"; };
+		FA1000000000000000000004 /* FamilyBridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyBridgeViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -127,6 +131,8 @@
 			children = (
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
+				FA1000000000000000000004 /* FamilyBridgeViewController.swift */,
+				FA1000000000000000000002 /* FamilyMapPlugin.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
@@ -257,6 +263,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
+				FA1000000000000000000003 /* FamilyBridgeViewController.swift in Sources */,
+				FA1000000000000000000001 /* FamilyMapPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

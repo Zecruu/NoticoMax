@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { type LocalFolder } from "@/lib/db/indexed-db";
 import {
   FileText,
-  Link2,
+  Users,
   Plus,
   Home,
   LayoutDashboard,
@@ -56,11 +56,11 @@ const navItems = [
   { label: "Home", value: "dashboard", icon: Home },
   { label: "Notes", value: "note", icon: FileText },
   { label: "New", value: "new", icon: Plus },
-  { label: "URLs", value: "url", icon: Link2 },
+  { label: "Family", value: "family", icon: Users },
   { label: "Budget", value: "budget", icon: Wallet },
 ];
 
-const VIEW_NAV_VALUES = new Set(["dashboard", "budget", "study", "goals", "locations", "calendar"]);
+const VIEW_NAV_VALUES = new Set(["dashboard", "family", "budget", "study", "goals", "locations", "calendar"]);
 
 interface MobileNavProps {
   activeFilter: string;
@@ -164,8 +164,8 @@ export function MobileNav({
       router.push("/");
       return;
     }
-    if (value === "budget") {
-      router.push("/?view=budget");
+    if (value === "budget" || value === "family") {
+      router.push(`/?view=${value}`);
       return;
     }
     if (value === "note" || value === "url") {

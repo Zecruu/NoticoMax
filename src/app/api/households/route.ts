@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { familyRpcError } from "@/lib/family/checkins";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 // GET /api/households — everything the Settings UI needs in one payload:
 //   { households: [{ id, name, role, members: [...] }], pendingInvites: [...] }
@@ -15,10 +17,12 @@ export async function GET() {
   const userId = claims.claims.sub as string;
 
   // The user's memberships → load households + their member rosters
-  const { data: myMemberships } = await supabase
+  const { data: myMemberships, error: membershipError } = await supabase
     .from("household_members")
     .select("household_id, role, joined_at")
     .eq("user_id", userId);
+
+  if (membershipError) return NextResponse.json({ error: "Could not load family memberships." }, { status: 503 });
 
   const householdIds = (myMemberships ?? []).map((m) => m.household_id);
 
@@ -31,47 +35,53 @@ export async function GET() {
 
   // Fetch household + all member rows + pending invites + pending requests in parallel.
   const [
-    { data: households },
-    { data: allMembers },
-    { data: invites },
-    { data: pendingRequests },
+    { data: households, error: householdsError },
+    { data: allMembers, error: membersError },
+    { data: invites, error: invitesError },
+    { data: pendingRequests, error: requestsError },
   ] = await Promise.all([
     householdIds.length
       ? supabase
           .from("households")
           .select("id, name, owner_user_id, created_at, family_code, max_seats, subscription_plan")
           .in("id", householdIds)
-      : Promise.resolve({ data: [] }),
+      : Promise.resolve({ data: [], error: null }),
     householdIds.length
       ? supabase.from("household_members").select("household_id, user_id, role, joined_at").in("household_id", householdIds)
-      : Promise.resolve({ data: [] }),
+      : Promise.resolve({ data: [], error: null }),
     supabase
       .from("household_invites")
       .select("token, household_id, invited_email, invited_by, status, expires_at, created_at")
       .eq("invited_user_id", userId)
-      .eq("status", "pending"),
+      .eq("status", "pending")
+      .gt("expires_at", new Date().toISOString()),
     ownedHouseholdIds.length
       ? supabase
           .from("household_invites")
           .select("token, household_id, invited_user_id, invited_by, status, expires_at, created_at")
           .in("household_id", ownedHouseholdIds)
           .eq("status", "requested")
-      : Promise.resolve({ data: [] }),
+          .gt("expires_at", new Date().toISOString())
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
-  // Resolve member + requester emails via one auth.admin.listUsers call.
+  if (householdsError || membersError || invitesError || requestsError) {
+    return NextResponse.json({ error: "Could not load family information." }, { status: 503 });
+  }
+
+  // Resolve only users already proven visible above; never scan the entire account directory.
   const memberUserIds = Array.from(new Set((allMembers ?? []).map((m) => m.user_id)));
   const requesterUserIds = Array.from(new Set((pendingRequests ?? []).map((r) => r.invited_user_id)));
-  const lookupUserIds = Array.from(new Set([...memberUserIds, ...requesterUserIds]));
+  const inviterIds = Array.from(new Set((invites ?? []).map((i) => i.invited_by)));
+  const lookupUserIds = Array.from(new Set([...memberUserIds, ...requesterUserIds, ...inviterIds])).filter(Boolean);
   let userById: Record<string, { email: string | null }> = {};
   if (lookupUserIds.length) {
     const admin = getSupabaseAdminClient();
-    const { data: list } = await admin.auth.admin.listUsers({ perPage: 1000 });
-    userById = Object.fromEntries(
-      list.users
-        .filter((u) => lookupUserIds.includes(u.id))
-        .map((u) => [u.id, { email: u.email ?? null }]),
-    );
+    const users = await Promise.all(lookupUserIds.map(async (id) => {
+      const { data } = await admin.auth.admin.getUserById(id);
+      return [id, { email: data.user?.email ?? null }] as const;
+    }));
+    userById = Object.fromEntries(users);
   }
 
   const enrichedHouseholds = (households ?? []).map((h) => {
@@ -113,25 +123,15 @@ export async function GET() {
   });
 
   // Pending invites also need the inviter's email + household name
-  const inviterIds = Array.from(new Set((invites ?? []).map((i) => i.invited_by)));
   const inviteHouseholdIds = Array.from(new Set((invites ?? []).map((i) => i.household_id)));
-  let inviterById: Record<string, string | null> = {};
   let inviteHouseholdById: Record<string, string> = {};
-  if (inviterIds.length) {
-    const admin = getSupabaseAdminClient();
-    const { data: list } = await admin.auth.admin.listUsers({ perPage: 1000 });
-    inviterById = Object.fromEntries(
-      list.users
-        .filter((u) => inviterIds.includes(u.id))
-        .map((u) => [u.id, u.email ?? null]),
-    );
-  }
   if (inviteHouseholdIds.length) {
     const admin = getSupabaseAdminClient();
-    const { data: rows } = await admin
+    const { data: rows, error: inviteNamesError } = await admin
       .from("households")
       .select("id, name")
       .in("id", inviteHouseholdIds);
+    if (inviteNamesError) return NextResponse.json({ error: "Could not load family invitations." }, { status: 503 });
     inviteHouseholdById = Object.fromEntries((rows ?? []).map((r) => [r.id, r.name as string]));
   }
 
@@ -139,7 +139,7 @@ export async function GET() {
     token: i.token,
     householdId: i.household_id,
     householdName: inviteHouseholdById[i.household_id] ?? "Unknown",
-    invitedByEmail: inviterById[i.invited_by] ?? null,
+    invitedByEmail: userById[i.invited_by]?.email ?? null,
     expiresAt: i.expires_at,
     createdAt: i.created_at,
   }));
@@ -147,7 +147,7 @@ export async function GET() {
   return NextResponse.json({
     households: enrichedHouseholds,
     pendingInvites: enrichedInvites,
-  });
+  }, { headers: { "Cache-Control": "private, no-store" } });
 }
 
 // POST /api/households — body { name }
@@ -161,74 +161,21 @@ export async function POST(request: NextRequest) {
   const userId = claims.claims.sub as string;
 
   const body = await request.json().catch(() => ({}));
-  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const name = typeof body?.name === "string" ? body.name.trim() : "";
   if (!name || name.length > 60) {
     return NextResponse.json({ error: "Name required (max 60 chars)" }, { status: 400 });
   }
 
-  // Use admin to perform the insert + membership atomically. RLS on
-  // households allows the owner insert, but the members insert has no policy
-  // (intentional — only the server should add members).
-  const admin = getSupabaseAdminClient();
-
-  // Gate: creator must have an active Family Plan (or lifetime Pro grandfathered in).
-  // Lifetime Pro users get Family for free since they pre-date the SKU.
-  const { data: ent } = await admin
-    .from("entitlements")
-    .select("family_plan_active, lifetime_pro, extra_seats")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (!ent?.family_plan_active && !ent?.lifetime_pro) {
-    return NextResponse.json(
-      { error: "Family Plan required to create a family. See Plans for details.", upgradeRequired: true },
-      { status: 402 },
-    );
+  // Basic family collaboration is free and independent of personal Pro sync.
+  // The RPC atomically creates the family, owner membership and default folder,
+  // and serializes the one-owned-family limit. Legacy paid seats are preserved.
+  const { data: household, error } = await supabase.rpc("create_family_household", { p_name: name });
+  if (error) {
+    const result = familyRpcError(error);
+    return NextResponse.json({ error: result.error }, { status: result.status });
   }
-  const ownerExtraSeats = ent?.extra_seats ?? 0;
-
-  // family_code + max_seats + subscription_plan default via DB trigger / column defaults.
-  // If the owner has purchased extra seats, apply them now (5 base + extras).
-  const initialMaxSeats = 5 + ownerExtraSeats;
-  const initialPlan = ent?.lifetime_pro ? "family" : "family";
-  const { data: household, error: hErr } = await admin
-    .from("households")
-    .insert({
-      name,
-      owner_user_id: userId,
-      max_seats: initialMaxSeats,
-      subscription_plan: initialPlan,
-    })
-    .select("id, name, owner_user_id, created_at, family_code, max_seats, subscription_plan")
-    .single();
-  if (hErr || !household) {
-    return NextResponse.json({ error: hErr?.message || "Failed to create" }, { status: 500 });
-  }
-
-  const { error: mErr } = await admin
-    .from("household_members")
-    .insert({ household_id: household.id, user_id: userId, role: "owner" });
-  if (mErr) {
-    // Best-effort cleanup if member insert failed
-    await admin.from("households").delete().eq("id", household.id);
-    return NextResponse.json({ error: mErr.message }, { status: 500 });
-  }
-
-  // Auto-create a default folder for the new household so the owner has
-  // something tangible to put shared notes/reminders/lists into right away.
-  // Name it after the household (e.g. "Demchak Family"). Share mode 'all' =
-  // every member can read & write by default — they can tighten later.
-  const folderColor = "#10B981"; // brand emerald
-  const { error: fErr } = await admin.from("folders").insert({
-    user_id: userId,
-    name,
-    color: folderColor,
-    household_id: household.id,
-    share_mode: "all",
-  });
-  if (fErr) {
-    // Don't roll back the household if the folder fails — it's a nice-to-have.
-    // Log so we notice if it starts failing systematically.
-    console.warn("[households] auto-folder failed:", fErr.message);
+  if (!household) {
+    return NextResponse.json({ error: "Family creation was not confirmed. Refresh before trying again." }, { status: 503 });
   }
 
   return NextResponse.json({

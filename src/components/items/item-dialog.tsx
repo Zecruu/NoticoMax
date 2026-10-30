@@ -511,6 +511,11 @@ export function ItemDialog({
           Write a {kind}. Save or go back to keep your changes. Extra
           organization is optional.
         </DialogDescription>
+        {folder?.householdId && (
+          <p className="shrink-0 border-b bg-primary/5 px-5 py-2 text-sm">
+            Shared with family members who can access {folder.name}. Saving changes updates it for them too.
+          </p>
+        )}
         {error && (
           <div
             role="alert"
@@ -802,6 +807,7 @@ export function ItemDialog({
                     <div className="space-y-2">
                       <Label htmlFor="folder-select">Folder</Label>
                       <Select
+                        disabled={!!editingItem?.householdId}
                         value={folderId || "none"}
                         onValueChange={(value) =>
                           setFolderId(value === "none" ? undefined : value)
@@ -815,7 +821,7 @@ export function ItemDialog({
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">No folder</SelectItem>
-                          {folders.map((entry) => (
+                          {folders.filter((entry) => !entry.householdId || entry.canWrite === true || entry.clientId === folderId).map((entry) => (
                             <SelectItem
                               key={entry.clientId}
                               value={entry.clientId}
@@ -830,7 +836,7 @@ export function ItemDialog({
                       </Select>
                       {folder?.householdId && (
                         <p className="text-sm text-muted-foreground">
-                          Items in this folder are shared with your household.
+                          Items in this folder are shared with accepted family members who have access.
                         </p>
                       )}
                     </div>

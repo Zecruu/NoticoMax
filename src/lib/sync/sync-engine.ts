@@ -15,48 +15,60 @@ import {
 } from "@/lib/capacitor/local-notifications";
 import { getDeviceId, saveDeviceNameMapping, getDeviceName } from "@/lib/device";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { RealtimeChannel } from "@supabase/supabase-js";
+import type { AuthChangeEvent, Session, RealtimeChannel } from "@supabase/supabase-js";
 
 const SYNC_KEY = "notico_last_sync";
 
-// ─── SYNC GATE ───
-// When false, all writes still go to IndexedDB but don't enqueue server sync.
-
+// Personal Pro sync and free Family collaboration are separate entitlements.
 let syncEnabled = false;
+let familyUserId: string | null = null;
 let currentUserId: string | null = null;
+let syncGeneration = 0;
 
-export function setSyncEnabled(enabled: boolean) {
-  syncEnabled = enabled;
-  if (enabled) {
-    void getCurrentUserId();
-  } else {
-    currentUserId = null;
+export function setSyncContext(personalEnabled: boolean, userId: string | null) {
+  if (familyUserId !== userId || syncEnabled !== personalEnabled) {
+    syncGeneration++;
     teardownRealtime();
   }
+  const previousUser = familyUserId;
+  syncEnabled = personalEnabled;
+  familyUserId = userId;
+  currentUserId = userId;
+  if (previousUser && previousUser !== userId) {
+    void clearFamilyCache().then(notifySyncComplete).catch((error) => console.error("Could not clear Family cache", error));
+  }
 }
 
-/** Backward-compat wrapper used by hooks that still pass a licenseKey. */
-export function setSyncLicenseKey(key: string | null) {
-  setSyncEnabled(!!key);
+export function setSyncEnabled(enabled: boolean) {
+  setSyncContext(enabled, familyUserId);
 }
+
+/** Backward compatibility; this never grants free access to personal sync. */
+export function setSyncLicenseKey(key: string | null) { setSyncEnabled(!!key); }
 
 async function getCurrentUserId(): Promise<string | null> {
-  if (currentUserId) return currentUserId;
-  const supabase = getSupabaseBrowserClient();
-  const { data } = await supabase.auth.getUser();
-  currentUserId = data.user?.id ?? null;
-  return currentUserId;
+  const { data, error } = await getSupabaseBrowserClient().auth.getUser();
+  if (error) throw error;
+  const id = data.user?.id ?? null;
+  if (familyUserId && id !== familyUserId) return null;
+  currentUserId = id;
+  return id;
 }
 
-function getLastSync(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(SYNC_KEY);
-}
-
-function setLastSync(timestamp: string) {
-  if (typeof window !== "undefined") {
-    localStorage.setItem(SYNC_KEY, timestamp);
-  }
+async function clearFamilyCache() {
+  const items = (await db.items.toArray()).filter((row) => !!row.householdId);
+  const folders = (await db.folders.toArray()).filter((row) => !!row.householdId);
+  await db.transaction("rw", db.items, db.folders, db.syncQueue, async () => {
+    for (const row of items) {
+      await db.items.where("clientId").equals(row.clientId).delete();
+      await db.syncQueue.where("clientId").equals(row.clientId).delete();
+    }
+    for (const row of folders) {
+      await db.folders.where("clientId").equals(row.clientId).delete();
+      await db.syncQueue.where("clientId").equals(row.clientId).delete();
+    }
+  });
+  for (const row of items) cancelReminderNotification(row.clientId);
 }
 
 // ─── FIELD MAPPING (LocalItem ↔ Supabase row) ───
@@ -65,6 +77,7 @@ interface SupabaseItem {
   client_id: string;
   user_id: string;
   type: string;
+  is_checklist?: boolean;
   title: string;
   content: string;
   url: string | null;
@@ -118,8 +131,9 @@ interface SupabaseLocation {
 function localToSupabaseItem(item: LocalItem, userId: string): Partial<SupabaseItem> {
   return {
     client_id: item.clientId,
-    user_id: userId,
+    user_id: item.ownerUserId ?? userId,
     type: item.type,
+    is_checklist: item.isChecklist ?? false,
     title: item.title,
     content: item.content,
     url: item.url ?? null,
@@ -142,7 +156,11 @@ function localToSupabaseItem(item: LocalItem, userId: string): Partial<SupabaseI
 function supabaseToLocalItem(row: SupabaseItem): LocalItem {
   return {
     clientId: row.client_id,
+    serverId: row.client_id,
+    ownerUserId: row.user_id,
+    familyAccountId: row.household_id ? familyUserId ?? undefined : undefined,
     type: row.type as LocalItem["type"],
+    isChecklist: row.is_checklist ?? false,
     title: row.title,
     content: row.content ?? "",
     url: row.url ?? undefined,
@@ -165,7 +183,7 @@ function supabaseToLocalItem(row: SupabaseItem): LocalItem {
 function localToSupabaseFolder(folder: LocalFolder, userId: string): Partial<SupabaseFolder> {
   return {
     client_id: folder.clientId,
-    user_id: userId,
+    user_id: folder.ownerUserId ?? userId,
     name: folder.name,
     color: folder.color ?? null,
     household_id: folder.householdId ?? null,
@@ -179,6 +197,9 @@ function localToSupabaseFolder(folder: LocalFolder, userId: string): Partial<Sup
 function supabaseToLocalFolder(row: SupabaseFolder): LocalFolder {
   return {
     clientId: row.client_id,
+    serverId: row.client_id,
+    ownerUserId: row.user_id,
+    familyAccountId: row.household_id ? familyUserId ?? undefined : undefined,
     name: row.name,
     color: row.color ?? undefined,
     householdId: row.household_id ?? undefined,
@@ -261,11 +282,7 @@ interface SupabaseBudgetTransaction {
   updated_at: string;
 }
 
-interface SupabaseBudgetSettings {
-  user_id: string;
-  monthly_income: number;
-  updated_at: string;
-}
+
 
 function localToSupabaseBudgetCategory(c: LocalBudgetCategory, userId: string): Partial<SupabaseBudgetCategory> {
   return {
@@ -436,7 +453,27 @@ function supabaseToLocalGoal(row: SupabaseGoal): LocalGoal {
 async function resolveHouseholdIdFromFolder(folderId: string | undefined): Promise<string | undefined> {
   if (!folderId) return undefined;
   const folder = await db.folders.where("clientId").equals(folderId).first();
-  return folder?.householdId ?? undefined;
+  if (!folder || folder.deleted) throw new Error("This folder is no longer available.");
+  assertFamilyWritable(folder);
+  return folder.householdId;
+}
+
+function assertFamilyWritable(row: LocalItem | LocalFolder) {
+  if (row.householdId && (!familyUserId || row.familyAccountId !== familyUserId || row.canWrite !== true)) {
+    throw new Error("This family content is read-only or unavailable. Refresh Family access before editing.");
+  }
+}
+
+async function refreshReminderNotification(item: LocalItem, requestPermission: boolean) {
+  if (item.type !== "reminder") return;
+  try {
+    if (item.deleted || item.reminderCompleted || !item.reminderDate || Date.parse(item.reminderDate) <= Date.now()) {
+      await cancelReminderNotification(item.clientId);
+    } else {
+      await scheduleReminderNotification(item.clientId, item.title, item.content.substring(0, 100),
+        new Date(item.reminderDate), requestPermission);
+    }
+  } catch (error) { console.warn("Device reminder could not be scheduled", error); }
 }
 
 export async function createItem(
@@ -445,13 +482,18 @@ export async function createItem(
   const now = new Date().toISOString();
   const clientId = uuidv4();
   const deviceId = getDeviceId();
-  const householdId = item.householdId ?? (await resolveHouseholdIdFromFolder(item.folderId));
+  const householdId = await resolveHouseholdIdFromFolder(item.folderId);
+  if (item.householdId && item.householdId !== householdId) throw new Error("Choose an accessible family folder.");
+  if (householdId && !["note", "url", "reminder"].includes(item.type)) throw new Error("Only notes, links and reminders can be shared here.");
 
   const localItem: LocalItem = {
     ...item,
     clientId,
     deviceId,
     householdId,
+    ownerUserId: currentUserId ?? undefined,
+    familyAccountId: householdId ? familyUserId ?? undefined : undefined,
+    canWrite: true,
     deleted: false,
     createdAt: now,
     updatedAt: now,
@@ -468,14 +510,7 @@ export async function createItem(
     timestamp: now,
   });
 
-  if (localItem.type === "reminder" && localItem.reminderDate) {
-    scheduleReminderNotification(
-      clientId,
-      localItem.title,
-      localItem.content.substring(0, 100),
-      new Date(localItem.reminderDate)
-    );
-  }
+  void refreshReminderNotification(localItem, true);
 
   triggerSync();
   return localItem;
@@ -487,17 +522,28 @@ export async function updateItem(
 ): Promise<LocalItem | undefined> {
   const now = new Date().toISOString();
   const item = await db.items.where("clientId").equals(clientId).first();
-  if (!item) return undefined;
+  if (!item) throw new Error("This note is no longer available. Keep your draft and refresh Family access.");
+  assertFamilyWritable(item);
 
   // If the folder changed (or this is the first save and householdId wasn't
   // set explicitly), re-resolve the householdId from the destination folder.
-  // Moving a note into the family folder → shares it. Moving out → un-shares.
+  // Moving a private note into an accessible family folder shares it.
+  // Moving existing shared notes is intentionally unavailable in this increment.
   let householdIdPatch: { householdId?: string } = {};
-  if (updates.folderId !== undefined && updates.folderId !== item.folderId) {
+  if (Object.prototype.hasOwnProperty.call(updates, "folderId") && updates.folderId !== item.folderId) {
     householdIdPatch = { householdId: await resolveHouseholdIdFromFolder(updates.folderId) };
   }
 
-  const updatedData = { ...updates, ...householdIdPatch, updatedAt: now };
+  if (item.householdId && Object.prototype.hasOwnProperty.call(updates, "folderId") && updates.folderId !== item.folderId) {
+    throw new Error("Shared items cannot be moved in this version. Copy your own content to a new note instead.");
+  }
+  const updatedData = { ...updates, householdId: item.householdId, ...householdIdPatch, ownerUserId: item.ownerUserId ?? currentUserId ?? undefined,
+    canWrite: item.canWrite, familyAccountId: item.familyAccountId, updatedAt: now };
+  if (updatedData.householdId && !["note", "url", "reminder"].includes(updates.type ?? item.type)) throw new Error("Only notes, links and reminders can be shared here.");
+  if (updatedData.householdId && !item.householdId) {
+    updatedData.familyAccountId = familyUserId ?? undefined;
+    updatedData.canWrite = true;
+  }
   await db.items.where("clientId").equals(clientId).modify((i) => {
     Object.assign(i, updatedData);
   });
@@ -510,12 +556,16 @@ export async function updateItem(
     timestamp: now,
   });
 
+  void refreshReminderNotification({ ...item, ...updatedData }, true);
   triggerSync();
   return { ...item, ...updatedData };
 }
 
 export async function deleteItem(clientId: string): Promise<void> {
   const now = new Date().toISOString();
+  const item = await db.items.where("clientId").equals(clientId).first();
+  if (!item) return;
+  assertFamilyWritable(item);
 
   await db.items.where("clientId").equals(clientId).modify((i) => {
     i.deleted = true;
@@ -547,7 +597,7 @@ export async function getItems(
     items = await db.items.toArray();
   }
 
-  items = items.filter((item) => !item.deleted && item.type !== "envvar" && item.type !== "credential");
+  items = items.filter((item) => (!item.householdId || item.familyAccountId === familyUserId) && !item.deleted && item.type !== "envvar" && item.type !== "credential");
 
   if (folderId) {
     items = items.filter((item) => item.folderId === folderId);
@@ -574,7 +624,7 @@ export async function getItems(
 export async function getDeletedItems(): Promise<LocalItem[]> {
   const items = await db.items.toArray();
   return items
-    .filter((item) => item.deleted && item.type !== "envvar" && item.type !== "credential")
+    .filter((item) => (!item.householdId || item.familyAccountId === familyUserId) && item.deleted && item.type !== "envvar" && item.type !== "credential")
     .sort((a, b) => {
       const aTime = a.deletedAt ? new Date(a.deletedAt).getTime() : 0;
       const bTime = b.deletedAt ? new Date(b.deletedAt).getTime() : 0;
@@ -584,6 +634,9 @@ export async function getDeletedItems(): Promise<LocalItem[]> {
 
 export async function restoreItem(clientId: string): Promise<void> {
   const now = new Date().toISOString();
+  const item = await db.items.where("clientId").equals(clientId).first();
+  if (!item) return;
+  assertFamilyWritable(item);
 
   await db.items.where("clientId").equals(clientId).modify((i) => {
     i.deleted = false;
@@ -603,6 +656,24 @@ export async function restoreItem(clientId: string): Promise<void> {
 }
 
 export async function permanentlyDeleteItem(clientId: string): Promise<void> {
+  const item = await db.items.where("clientId").equals(clientId).first();
+  if (!item) return;
+  if (item.householdId) {
+    assertFamilyWritable(item);
+    if (!item.deleted) throw new Error("Move this shared item to trash first.");
+    if (!navigator.onLine) throw new Error("Connect to permanently delete a shared item for everyone.");
+    const generation = syncGeneration;
+    const userId = await getCurrentUserId();
+    if (!userId || generation !== syncGeneration) throw new Error("Sign in again before deleting shared content.");
+    await getSupabaseBrowserClient().from("items").delete().eq("client_id", clientId)
+      .select("client_id").single().throwOnError();
+    if (generation !== syncGeneration) return;
+    await db.transaction("rw", db.items, db.syncQueue, async () => {
+      await db.items.where("clientId").equals(clientId).delete();
+      await db.syncQueue.where("clientId").equals(clientId).delete();
+    });
+    return;
+  }
   await db.items.where("clientId").equals(clientId).delete();
 }
 
@@ -619,6 +690,8 @@ export async function purgeOldTrash(): Promise<void> {
   );
 
   for (const item of toPurge) {
+    // Never discard the only payload of a pending offline deletion.
+    if (await db.syncQueue.where("clientId").equals(item.clientId).count()) continue;
     await db.items.where("clientId").equals(item.clientId).delete();
   }
 }
@@ -630,6 +703,8 @@ export async function createFolder(
 ): Promise<LocalFolder> {
   const now = new Date().toISOString();
   const clientId = uuidv4();
+
+  if (folder.householdId) throw new Error("Create the default shared folder from Family settings.");
 
   const localFolder: LocalFolder = {
     ...folder,
@@ -660,6 +735,9 @@ export async function updateFolder(
   const now = new Date().toISOString();
   const folder = await db.folders.where("clientId").equals(clientId).first();
   if (!folder) return undefined;
+  assertFamilyWritable(folder);
+  if (folder.householdId && folder.ownerUserId !== familyUserId) throw new Error("Only the folder creator can change this folder.");
+  if (updates.householdId !== undefined && updates.householdId !== folder.householdId) throw new Error("Create a family from Family settings instead.");
 
   const updatedData = { ...updates, updatedAt: now };
   await db.folders.where("clientId").equals(clientId).modify((f) => {
@@ -680,6 +758,10 @@ export async function updateFolder(
 
 export async function deleteFolder(clientId: string): Promise<void> {
   const now = new Date().toISOString();
+  const folder = await db.folders.where("clientId").equals(clientId).first();
+  if (!folder) return;
+  assertFamilyWritable(folder);
+  if (folder.householdId) throw new Error("Shared folders are managed in Family settings. Delete the family there instead.");
 
   await db.folders.where("clientId").equals(clientId).modify((f) => {
     f.deleted = true;
@@ -715,7 +797,7 @@ export async function deleteFolder(clientId: string): Promise<void> {
 
 export async function getFolders(): Promise<LocalFolder[]> {
   const folders = await db.folders.toArray();
-  return folders.filter((f) => !f.deleted).sort((a, b) => a.name.localeCompare(b.name));
+  return folders.filter((f) => !f.deleted && (!f.householdId || f.familyAccountId === familyUserId)).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // ─── LOCATION OPERATIONS ───
@@ -1127,316 +1209,332 @@ export async function deleteGoal(clientId: string): Promise<void> {
 
 let syncInProgress = false;
 
-export async function performSync(): Promise<boolean> {
-  if (!syncEnabled) return false;
-  if (syncInProgress || !navigator.onLine) return false;
-
-  const userId = await getCurrentUserId();
-  if (!userId) return false;
-
-  syncInProgress = true;
-  const supabase = getSupabaseBrowserClient();
-
-  try {
-    const queue = await db.syncQueue.orderBy("timestamp").toArray();
-    if (queue.length === 0) {
-      // No outgoing changes — pull anyway in case there are server changes since last sync
-      await pullChanges(userId);
-      return true;
-    }
-
-    // Deduplicate per (entityType, clientId), keeping latest action.
-    const itemOps = new Map<string, (typeof queue)[0]>();
-    const folderOps = new Map<string, (typeof queue)[0]>();
-    const locationOps = new Map<string, (typeof queue)[0]>();
-    const budgetCategoryOps = new Map<string, (typeof queue)[0]>();
-    const budgetTransactionOps = new Map<string, (typeof queue)[0]>();
-    const budgetOverrideOps = new Map<string, (typeof queue)[0]>();
-    const goalOps = new Map<string, (typeof queue)[0]>();
-    let budgetSettingsOp: (typeof queue)[0] | null = null;
-    for (const entry of queue) {
-      if (entry.entityType === "folder") folderOps.set(entry.clientId, entry);
-      else if (entry.entityType === "location") locationOps.set(entry.clientId, entry);
-      else if (entry.entityType === "budget_category") budgetCategoryOps.set(entry.clientId, entry);
-      else if (entry.entityType === "budget_transaction") budgetTransactionOps.set(entry.clientId, entry);
-      else if (entry.entityType === "budget_category_override") budgetOverrideOps.set(entry.clientId, entry);
-      else if (entry.entityType === "budget_settings") budgetSettingsOp = entry;
-      else if (entry.entityType === "goal") goalOps.set(entry.clientId, entry);
-      else itemOps.set(entry.clientId, entry);
-    }
-
-    // Folders first (items may reference them via folder_id).
-    for (const op of folderOps.values()) {
-      if (op.action === "delete") {
-        await supabase
-          .from("folders")
-          .update({ deleted: true, updated_at: op.timestamp })
-          .eq("client_id", op.clientId);
-      } else {
-        const folder = await db.folders.where("clientId").equals(op.clientId).first();
-        if (folder) {
-          await supabase
-            .from("folders")
-            .upsert(localToSupabaseFolder(folder, userId), { onConflict: "client_id" });
-        }
-      }
-    }
-
-    for (const op of itemOps.values()) {
-      if (op.action === "delete") {
-        await supabase
-          .from("items")
-          .update({ deleted: true, deleted_at: op.timestamp, updated_at: op.timestamp })
-          .eq("client_id", op.clientId);
-      } else {
-        const item = await db.items.where("clientId").equals(op.clientId).first();
-        if (item) {
-          await supabase
-            .from("items")
-            .upsert(localToSupabaseItem(item, userId), { onConflict: "client_id" });
-        }
-      }
-    }
-
-    for (const op of locationOps.values()) {
-      if (op.action === "delete") {
-        await supabase
-          .from("locations")
-          .update({ deleted: true, deleted_at: op.timestamp, updated_at: op.timestamp })
-          .eq("client_id", op.clientId);
-      } else {
-        const loc = await db.locations.where("clientId").equals(op.clientId).first();
-        if (loc) {
-          await supabase
-            .from("locations")
-            .upsert(localToSupabaseLocation(loc, userId), { onConflict: "client_id" });
-        }
-      }
-    }
-
-    // Budget categories first (transactions FK them via category_id).
-    for (const op of budgetCategoryOps.values()) {
-      if (op.action === "delete") {
-        await supabase
-          .from("budget_categories")
-          .update({ deleted: true, deleted_at: op.timestamp, updated_at: op.timestamp })
-          .eq("client_id", op.clientId);
-        // Cascade tombstone to transactions server-side.
-        await supabase
-          .from("budget_transactions")
-          .update({ deleted: true, deleted_at: op.timestamp, updated_at: op.timestamp })
-          .eq("category_id", op.clientId);
-      } else {
-        const cat = await db.budgetCategories.where("clientId").equals(op.clientId).first();
-        if (cat) {
-          await supabase
-            .from("budget_categories")
-            .upsert(localToSupabaseBudgetCategory(cat, userId), { onConflict: "client_id" });
-        }
-      }
-    }
-
-    for (const op of budgetTransactionOps.values()) {
-      if (op.action === "delete") {
-        await supabase
-          .from("budget_transactions")
-          .update({ deleted: true, deleted_at: op.timestamp, updated_at: op.timestamp })
-          .eq("client_id", op.clientId);
-      } else {
-        const txn = await db.budgetTransactions.where("clientId").equals(op.clientId).first();
-        if (txn) {
-          await supabase
-            .from("budget_transactions")
-            .upsert(localToSupabaseBudgetTransaction(txn, userId), { onConflict: "client_id" });
-        }
-      }
-    }
-
-    for (const op of budgetOverrideOps.values()) {
-      if (op.action === "delete") {
-        await supabase
-          .from("budget_category_overrides")
-          .update({ deleted: true, deleted_at: op.timestamp, updated_at: op.timestamp })
-          .eq("client_id", op.clientId);
-      } else {
-        const ov = await db.budgetCategoryOverrides.where("clientId").equals(op.clientId).first();
-        if (ov) {
-          await supabase
-            .from("budget_category_overrides")
-            .upsert(localToSupabaseBudgetCategoryOverride(ov, userId), { onConflict: "client_id" });
-        }
-      }
-    }
-
-    if (budgetSettingsOp) {
-      const data = budgetSettingsOp.data as { monthly_income?: number; updated_at?: string } | undefined;
-      const incomeValue = data?.monthly_income;
-      const updatedAt = data?.updated_at ?? budgetSettingsOp.timestamp;
-      if (typeof incomeValue === "number") {
-        await supabase
-          .from("budget_settings")
-          .upsert(
-            { user_id: userId, monthly_income: incomeValue, updated_at: updatedAt },
-            { onConflict: "user_id" },
-          );
-      }
-    }
-
-    for (const op of goalOps.values()) {
-      if (op.action === "delete") {
-        await supabase
-          .from("goals")
-          .update({ deleted: true, deleted_at: op.timestamp, updated_at: op.timestamp })
-          .eq("client_id", op.clientId);
-      } else {
-        const goal = await db.goals.where("clientId").equals(op.clientId).first();
-        if (goal) {
-          await supabase
-            .from("goals")
-            .upsert(localToSupabaseGoal(goal, userId), { onConflict: "client_id" });
-        }
-      }
-    }
-
-    await db.syncQueue.clear();
-    await pullChanges(userId);
-    setLastSync(new Date().toISOString());
-    return true;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("Sync error:", message);
-    if (onSyncError) onSyncError(message);
-    return false;
-  } finally {
-    syncInProgress = false;
+/** A complete RLS snapshot is required before any Family write or cache eviction.
+ * The RPC uses one database snapshot and fails rather than truncating large families.
+ */
+async function pullFamilyChanges(userId: string, generation: number): Promise<void> {
+  const { data, error } = await getSupabaseBrowserClient().rpc("family_content_snapshot");
+  if (error) throw error;
+  if (!data || data.user_id !== userId || !Array.isArray(data.folders) || !Array.isArray(data.items)) {
+    throw new Error("Incomplete Family sync response. Local changes were kept.");
   }
+  if (generation !== syncGeneration) throw new Error("Account changed during sync.");
+  const folders = (data.folders as (SupabaseFolder & { can_write: boolean })[]).map((row) => ({
+    ...supabaseToLocalFolder(row), canWrite: row.can_write,
+  }));
+  const items = (data.items as (SupabaseItem & { can_write: boolean })[]).map((row) => ({
+    ...supabaseToLocalItem(row), canWrite: row.can_write,
+  }));
+  const visibleFolders = new Map(folders.map((row) => [row.clientId, row]));
+  const visibleItems = new Set(items.map((row) => row.clientId));
+  const removedReminders: string[] = [];
+  const changedReminders: LocalItem[] = [];
+  await db.transaction("rw", db.items, db.folders, db.syncQueue, async () => {
+    if (generation !== syncGeneration) throw new Error("Account changed during sync.");
+    const pending = await db.syncQueue.toArray();
+    const pendingIds = new Set(pending.map((op) => op.clientId));
+    // Revoked access removes cached shared content and its outgoing operations.
+    // Never remove personal rows; never run this on failed/partial responses.
+    for (const local of await db.items.toArray()) {
+      if (!local.householdId || visibleItems.has(local.clientId)) continue;
+      const folder = local.folderId ? visibleFolders.get(local.folderId) : undefined;
+      const newDraft = local.ownerUserId === userId && local.familyAccountId === userId
+        && folder && !folder.deleted && pending.some((op) => op.clientId === local.clientId && (op.action === "create" || !!op.data?.householdId));
+      if (newDraft) {
+        await db.items.where("clientId").equals(local.clientId).modify((row) => { row.canWrite = folder.canWrite; });
+        continue;
+      }
+      await db.items.where("clientId").equals(local.clientId).delete();
+      await db.syncQueue.where("clientId").equals(local.clientId).delete();
+      removedReminders.push(local.clientId);
+    }
+    for (const local of await db.folders.toArray()) {
+      if (!local.householdId || visibleFolders.has(local.clientId)) continue;
+      await db.folders.where("clientId").equals(local.clientId).delete();
+      await db.syncQueue.where("clientId").equals(local.clientId).delete();
+    }
+    for (const row of folders) {
+      const local = await db.folders.where("clientId").equals(row.clientId).first();
+      if (!local) await db.folders.add(row);
+      else await db.folders.update(local.id!, pendingIds.has(row.clientId)
+        ? { ownerUserId: row.ownerUserId, familyAccountId: userId, serverId: row.serverId, canWrite: row.canWrite } : row);
+    }
+    for (const row of items) {
+      const local = await db.items.where("clientId").equals(row.clientId).first();
+      if (!pendingIds.has(row.clientId) && row.type === "reminder" && (!local || local.updatedAt !== row.updatedAt)) changedReminders.push(row);
+      if (!local) await db.items.add(row);
+      else await db.items.update(local.id!, pendingIds.has(row.clientId)
+        ? { ownerUserId: row.ownerUserId, familyAccountId: userId, serverId: row.serverId, canWrite: row.canWrite } : row);
+    }
+  });
+  for (const id of removedReminders) void cancelReminderNotification(id).catch(() => {});
+  if (generation === syncGeneration) for (const row of changedReminders) void refreshReminderNotification(row, false);
 }
 
-async function pullChanges(userId: string): Promise<void> {
-  const supabase = getSupabaseBrowserClient();
-  const lastSync = getLastSync();
+export async function performSync(): Promise<boolean> {
+  if ((!syncEnabled && !familyUserId) || syncInProgress || !navigator.onLine) return false;
+  syncInProgress = true;
+  const generation = syncGeneration;
+  const errors: string[] = [];
+  try {
+    const userId = await getCurrentUserId();
+    if (!userId || generation !== syncGeneration) return false;
+    const supabase = getSupabaseBrowserClient();
+    if (familyUserId) await pullFamilyChanges(userId, generation);
+    const queue = await db.syncQueue.orderBy("timestamp").toArray();
+    const latest = new Map<string, (typeof queue)[0]>();
+    for (const op of queue) latest.set(`${op.entityType}:${op.clientId}`, op);
+    // Parent rows before their children. Acknowledgments refer only to this snapshot.
+    const order = ["folder", "item", "location", "budget_category", "budget_transaction", "budget_category_override", "budget_settings", "goal"];
+    const operations = [...latest.values()].sort((a, b) => order.indexOf(a.entityType) - order.indexOf(b.entityType));
+    for (const op of operations) {
+      if (generation !== syncGeneration) return false;
+      try {
+        if (op.entityType === "budget_settings") {
+          if (!syncEnabled) continue;
+          const income = op.data?.monthly_income;
+          if (typeof income !== "number") throw new Error("Invalid budget sync entry.");
+          await supabase.from("budget_settings").upsert({ user_id: userId, monthly_income: income,
+            updated_at: op.data?.updated_at ?? op.timestamp }, { onConflict: "user_id" }).throwOnError();
+        } else {
+          let table: string;
+          let payload: Record<string, unknown>;
+          let familyRow: LocalItem | LocalFolder | undefined;
+          switch (op.entityType) {
+            case "folder": {
+              const row = await db.folders.where("clientId").equals(op.clientId).first();
+              if (!row) continue;
+              familyRow = row; table = "folders"; payload = localToSupabaseFolder(row, userId); break;
+            }
+            case "item": {
+              const row = await db.items.where("clientId").equals(op.clientId).first();
+              if (!row) continue;
+              familyRow = row; table = "items"; payload = localToSupabaseItem(row, userId); break;
+            }
+            case "location": {
+              if (!syncEnabled) continue;
+              const row = await db.locations.where("clientId").equals(op.clientId).first();
+              if (!row) continue;
+              table = "locations"; payload = localToSupabaseLocation(row, userId); break;
+            }
+            case "budget_category": {
+              if (!syncEnabled) continue;
+              const row = await db.budgetCategories.where("clientId").equals(op.clientId).first();
+              if (!row) continue;
+              table = "budget_categories"; payload = localToSupabaseBudgetCategory(row, userId); break;
+            }
+            case "budget_transaction": {
+              if (!syncEnabled) continue;
+              const row = await db.budgetTransactions.where("clientId").equals(op.clientId).first();
+              if (!row) continue;
+              table = "budget_transactions"; payload = localToSupabaseBudgetTransaction(row, userId); break;
+            }
+            case "budget_category_override": {
+              if (!syncEnabled) continue;
+              const row = await db.budgetCategoryOverrides.where("clientId").equals(op.clientId).first();
+              if (!row) continue;
+              table = "budget_category_overrides"; payload = localToSupabaseBudgetCategoryOverride(row, userId); break;
+            }
+            case "goal": {
+              if (!syncEnabled) continue;
+              const row = await db.goals.where("clientId").equals(op.clientId).first();
+              if (!row) continue;
+              table = "goals"; payload = localToSupabaseGoal(row, userId); break;
+            }
+            default: continue;
+          }
+          if (familyRow?.householdId) {
+            assertFamilyWritable(familyRow);
+            if (op.entityType === "item" && !["note", "url", "reminder"].includes(String(payload.type))) continue;
+          } else if (!syncEnabled) continue;
+          if (generation !== syncGeneration) return false;
+          // Upserting another member's existing row fails INSERT RLS and must
+          // never replace user_id. UPDATE preserves the original creator.
+          if (familyRow?.serverId || (op.action === "delete" && !familyRow)) {
+            const { client_id: _id, user_id: _owner, ...updates } = payload;
+            void _id; void _owner;
+            await supabase.from(table).update(updates).eq("client_id", op.clientId)
+              .select("client_id").single().throwOnError();
+          } else {
+            await supabase.from(table).upsert(payload, { onConflict: "client_id" })
+              .select("client_id").single().throwOnError();
+          }
+          if (op.entityType === "budget_category" && op.action === "delete") {
+            await supabase.from("budget_transactions").update({ deleted: true, deleted_at: op.timestamp,
+              updated_at: op.timestamp }).eq("category_id", op.clientId).throwOnError();
+          }
+        }
+        if (generation !== syncGeneration) return false;
+        const ids = queue.filter((entry) => entry.entityType === op.entityType && entry.clientId === op.clientId)
+          .flatMap((entry) => entry.id === undefined ? [] : [entry.id]);
+        await db.syncQueue.bulkDelete(ids);
+      } catch (error) {
+        // Keep this operation and any concurrent/newer writes for a later retry.
+        errors.push(error instanceof Error ? error.message : "A change could not be synced. Your pending edit is kept on this device.");
+      }
+    }
+    if (generation !== syncGeneration) return false;
+    if (syncEnabled) await pullChanges(userId, generation);
+    if (familyUserId) await pullFamilyChanges(userId, generation);
+    notifySyncComplete();
+    if (errors.length) throw new Error(errors[0]);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Sync is unavailable. Your changes were kept on this device.";
+    console.error("Sync error:", message);
+    if (generation === syncGeneration && onSyncError) onSyncError(message);
+    return false;
+  } finally { syncInProgress = false; }
+}
 
-  // No user_id filter here — RLS already returns owned items + items the user
-  // can see through household membership. Filtering by user_id would exclude
-  // household-shared content owned by other members.
-  let itemsQuery = supabase.from("items").select("*");
-  if (lastSync) itemsQuery = itemsQuery.gt("updated_at", lastSync);
-  const { data: items } = await itemsQuery;
+async function pullChanges(userId: string, generation: number): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  const assertCurrent = () => { if (generation !== syncGeneration) throw new Error("Account changed during sync."); };
+  // Personal data is paged separately and never enables a free household user's
+  // private cloud sync. No eviction uses these pages; only the atomic Family RPC
+  // can revoke shared cache entries.
+  const readRows = async (table: string, privateOnly = false, ownerOnly = false) => {
+    const rows: Record<string, unknown>[] = [];
+    let after: string | undefined;
+    for (;;) {
+      let query = supabase.from(table).select("*").order("client_id").limit(250);
+      if (privateOnly) query = query.is("household_id", null);
+      if (ownerOnly) query = query.eq("user_id", userId);
+      if (after) query = query.gt("client_id", after);
+      const { data } = await query.throwOnError();
+      assertCurrent();
+      if (!data?.length) break;
+      rows.push(...data);
+      after = String(data[data.length - 1].client_id);
+    }
+    return rows;
+  };
+
+  // Shared notes and folders are reconciled only by the Family snapshot.
+  const items = await readRows("items", true, true);
 
   if (items) {
-    for (const row of items as SupabaseItem[]) {
+    for (const row of items as unknown as SupabaseItem[]) {
       const mapped = supabaseToLocalItem(row);
       const existing = await db.items.where("clientId").equals(mapped.clientId).first();
+      assertCurrent();
       if (existing) {
         const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
         if (hasPending === 0) {
+          assertCurrent();
           await db.items.where("clientId").equals(mapped.clientId).modify((i) => {
             Object.assign(i, mapped);
           });
         }
       } else {
+        assertCurrent();
         await db.items.add(mapped);
       }
     }
   }
 
-  let foldersQuery = supabase.from("folders").select("*");
-  if (lastSync) foldersQuery = foldersQuery.gt("updated_at", lastSync);
-  const { data: folders } = await foldersQuery;
+  const folders = await readRows("folders", true, true);
 
   if (folders) {
-    for (const row of folders as SupabaseFolder[]) {
+    for (const row of folders as unknown as SupabaseFolder[]) {
       const mapped = supabaseToLocalFolder(row);
       const existing = await db.folders.where("clientId").equals(mapped.clientId).first();
+      assertCurrent();
       if (existing) {
         const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
         if (hasPending === 0) {
+          assertCurrent();
           await db.folders.where("clientId").equals(mapped.clientId).modify((f) => {
             Object.assign(f, mapped);
           });
         }
       } else {
+        assertCurrent();
         await db.folders.add(mapped);
       }
     }
   }
 
-  let locationsQuery = supabase.from("locations").select("*");
-  if (lastSync) locationsQuery = locationsQuery.gt("updated_at", lastSync);
-  const { data: locations } = await locationsQuery;
+  const locations = await readRows("locations");
 
   if (locations) {
-    for (const row of locations as SupabaseLocation[]) {
+    for (const row of locations as unknown as SupabaseLocation[]) {
       const mapped = supabaseToLocalLocation(row);
       const existing = await db.locations.where("clientId").equals(mapped.clientId).first();
+      assertCurrent();
       if (existing) {
         const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
         if (hasPending === 0) {
+          assertCurrent();
           await db.locations.where("clientId").equals(mapped.clientId).modify((l) => {
             Object.assign(l, mapped);
           });
         }
       } else {
+        assertCurrent();
         await db.locations.add(mapped);
       }
     }
   }
 
-  let bcQuery = supabase.from("budget_categories").select("*");
-  if (lastSync) bcQuery = bcQuery.gt("updated_at", lastSync);
-  const { data: budgetCats } = await bcQuery;
+  const budgetCats = await readRows("budget_categories");
   if (budgetCats) {
-    for (const row of budgetCats as SupabaseBudgetCategory[]) {
+    for (const row of budgetCats as unknown as SupabaseBudgetCategory[]) {
       const mapped = supabaseToLocalBudgetCategory(row);
       const existing = await db.budgetCategories.where("clientId").equals(mapped.clientId).first();
+      assertCurrent();
       if (existing) {
         const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
         if (hasPending === 0) {
+          assertCurrent();
           await db.budgetCategories.where("clientId").equals(mapped.clientId).modify((c) => {
             Object.assign(c, mapped);
           });
         }
       } else {
+        assertCurrent();
         await db.budgetCategories.add(mapped);
       }
     }
   }
 
-  let btQuery = supabase.from("budget_transactions").select("*");
-  if (lastSync) btQuery = btQuery.gt("updated_at", lastSync);
-  const { data: budgetTxns } = await btQuery;
+  const budgetTxns = await readRows("budget_transactions");
   if (budgetTxns) {
-    for (const row of budgetTxns as SupabaseBudgetTransaction[]) {
+    for (const row of budgetTxns as unknown as SupabaseBudgetTransaction[]) {
       const mapped = supabaseToLocalBudgetTransaction(row);
       const existing = await db.budgetTransactions.where("clientId").equals(mapped.clientId).first();
+      assertCurrent();
       if (existing) {
         const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
         if (hasPending === 0) {
+          assertCurrent();
           await db.budgetTransactions.where("clientId").equals(mapped.clientId).modify((t) => {
             Object.assign(t, mapped);
           });
         }
       } else {
+        assertCurrent();
         await db.budgetTransactions.add(mapped);
       }
     }
   }
 
-  let bovQuery = supabase.from("budget_category_overrides").select("*");
-  if (lastSync) bovQuery = bovQuery.gt("updated_at", lastSync);
-  const { data: budgetOverrides } = await bovQuery;
+  const budgetOverrides = await readRows("budget_category_overrides");
   if (budgetOverrides) {
-    for (const row of budgetOverrides as SupabaseBudgetCategoryOverride[]) {
+    for (const row of budgetOverrides as unknown as SupabaseBudgetCategoryOverride[]) {
       const mapped = supabaseToLocalBudgetCategoryOverride(row);
       const existing = await db.budgetCategoryOverrides.where("clientId").equals(mapped.clientId).first();
+      assertCurrent();
       if (existing) {
         const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
         if (hasPending === 0) {
+          assertCurrent();
           await db.budgetCategoryOverrides.where("clientId").equals(mapped.clientId).modify((o) => {
             Object.assign(o, mapped);
           });
         }
       } else {
+        assertCurrent();
         await db.budgetCategoryOverrides.add(mapped);
       }
     }
@@ -1448,7 +1546,8 @@ async function pullChanges(userId: string): Promise<void> {
     .from("budget_settings")
     .select("monthly_income, updated_at")
     .eq("user_id", userId)
-    .maybeSingle();
+    .maybeSingle().throwOnError();
+  assertCurrent();
   if (settings && typeof window !== "undefined") {
     const pending = await db.syncQueue
       .where("entityType")
@@ -1459,21 +1558,22 @@ async function pullChanges(userId: string): Promise<void> {
     }
   }
 
-  let goalsQuery = supabase.from("goals").select("*").eq("user_id", userId);
-  if (lastSync) goalsQuery = goalsQuery.gt("updated_at", lastSync);
-  const { data: goals } = await goalsQuery;
+  const goals = await readRows("goals", false, true);
   if (goals) {
-    for (const row of goals as SupabaseGoal[]) {
+    for (const row of goals as unknown as SupabaseGoal[]) {
       const mapped = supabaseToLocalGoal(row);
       const existing = await db.goals.where("clientId").equals(mapped.clientId).first();
+      assertCurrent();
       if (existing) {
         const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
         if (hasPending === 0) {
+          assertCurrent();
           await db.goals.where("clientId").equals(mapped.clientId).modify((g) => {
             Object.assign(g, mapped);
           });
         }
       } else {
+        assertCurrent();
         await db.goals.add(mapped);
       }
     }
@@ -1483,7 +1583,7 @@ async function pullChanges(userId: string): Promise<void> {
 let syncTimeout: ReturnType<typeof setTimeout> | null = null;
 
 export function triggerSync() {
-  if (!syncEnabled) return;
+  if (!syncEnabled && !familyUserId) return;
   if (syncTimeout) clearTimeout(syncTimeout);
   syncTimeout = setTimeout(() => {
     performSync();
@@ -1491,22 +1591,8 @@ export function triggerSync() {
 }
 
 export async function initialSync(): Promise<void> {
-  if (!syncEnabled) return;
-  if (!navigator.onLine) return;
-
-  const userId = await getCurrentUserId();
-  if (!userId) return;
-
-  // Full pull, ignoring lastSync. Safe because we merge by client_id.
-  const previousLastSync = localStorage.getItem(SYNC_KEY);
-  localStorage.removeItem(SYNC_KEY);
-  try {
-    await pullChanges(userId);
-    setLastSync(new Date().toISOString());
-  } catch (error) {
-    if (previousLastSync) localStorage.setItem(SYNC_KEY, previousLastSync);
-    console.error("Initial sync error:", error);
-  }
+  if (typeof window !== "undefined") localStorage.removeItem(SYNC_KEY);
+  await performSync();
 }
 
 // ─── REALTIME ───
@@ -1523,173 +1609,26 @@ function teardownRealtime() {
 
 async function setupRealtime() {
   teardownRealtime();
+  const generation = syncGeneration;
   const userId = await getCurrentUserId();
-  if (!userId) return;
-
+  if (!userId || generation !== syncGeneration) return;
   const supabase = getSupabaseBrowserClient();
-  realtimeChannel = supabase
-    .channel(`user-${userId}`)
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "items", filter: `user_id=eq.${userId}` },
-      async (payload: { new: unknown; old: unknown }) => {
-        const row = (payload.new ?? payload.old) as SupabaseItem | undefined;
-        if (!row) return;
-        const mapped = supabaseToLocalItem(row);
-        const existing = await db.items.where("clientId").equals(mapped.clientId).first();
-        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
-        if (hasPending === 0) {
-          if (existing) {
-            await db.items.where("clientId").equals(mapped.clientId).modify((i) => {
-              Object.assign(i, mapped);
-            });
-          } else {
-            await db.items.add(mapped);
-          }
-        }
-        if (onSyncComplete) onSyncComplete();
-      }
-    )
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "folders", filter: `user_id=eq.${userId}` },
-      async (payload: { new: unknown; old: unknown }) => {
-        const row = (payload.new ?? payload.old) as SupabaseFolder | undefined;
-        if (!row) return;
-        const mapped = supabaseToLocalFolder(row);
-        const existing = await db.folders.where("clientId").equals(mapped.clientId).first();
-        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
-        if (hasPending === 0) {
-          if (existing) {
-            await db.folders.where("clientId").equals(mapped.clientId).modify((f) => {
-              Object.assign(f, mapped);
-            });
-          } else {
-            await db.folders.add(mapped);
-          }
-        }
-        if (onSyncComplete) onSyncComplete();
-      }
-    )
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "locations", filter: `user_id=eq.${userId}` },
-      async (payload: { new: unknown; old: unknown }) => {
-        const row = (payload.new ?? payload.old) as SupabaseLocation | undefined;
-        if (!row) return;
-        const mapped = supabaseToLocalLocation(row);
-        const existing = await db.locations.where("clientId").equals(mapped.clientId).first();
-        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
-        if (hasPending === 0) {
-          if (existing) {
-            await db.locations.where("clientId").equals(mapped.clientId).modify((l) => {
-              Object.assign(l, mapped);
-            });
-          } else {
-            await db.locations.add(mapped);
-          }
-        }
-        if (onSyncComplete) onSyncComplete();
-      }
-    )
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "budget_categories", filter: `user_id=eq.${userId}` },
-      async (payload: { new: unknown; old: unknown }) => {
-        const row = (payload.new ?? payload.old) as SupabaseBudgetCategory | undefined;
-        if (!row) return;
-        const mapped = supabaseToLocalBudgetCategory(row);
-        const existing = await db.budgetCategories.where("clientId").equals(mapped.clientId).first();
-        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
-        if (hasPending === 0) {
-          if (existing) {
-            await db.budgetCategories.where("clientId").equals(mapped.clientId).modify((c) => {
-              Object.assign(c, mapped);
-            });
-          } else {
-            await db.budgetCategories.add(mapped);
-          }
-        }
-        if (onSyncComplete) onSyncComplete();
-      }
-    )
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "budget_transactions", filter: `user_id=eq.${userId}` },
-      async (payload: { new: unknown; old: unknown }) => {
-        const row = (payload.new ?? payload.old) as SupabaseBudgetTransaction | undefined;
-        if (!row) return;
-        const mapped = supabaseToLocalBudgetTransaction(row);
-        const existing = await db.budgetTransactions.where("clientId").equals(mapped.clientId).first();
-        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
-        if (hasPending === 0) {
-          if (existing) {
-            await db.budgetTransactions.where("clientId").equals(mapped.clientId).modify((t) => {
-              Object.assign(t, mapped);
-            });
-          } else {
-            await db.budgetTransactions.add(mapped);
-          }
-        }
-        if (onSyncComplete) onSyncComplete();
-      }
-    )
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "budget_category_overrides", filter: `user_id=eq.${userId}` },
-      async (payload: { new: unknown; old: unknown }) => {
-        const row = (payload.new ?? payload.old) as SupabaseBudgetCategoryOverride | undefined;
-        if (!row) return;
-        const mapped = supabaseToLocalBudgetCategoryOverride(row);
-        const existing = await db.budgetCategoryOverrides.where("clientId").equals(mapped.clientId).first();
-        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
-        if (hasPending === 0) {
-          if (existing) {
-            await db.budgetCategoryOverrides.where("clientId").equals(mapped.clientId).modify((o) => {
-              Object.assign(o, mapped);
-            });
-          } else {
-            await db.budgetCategoryOverrides.add(mapped);
-          }
-        }
-        if (onSyncComplete) onSyncComplete();
-      }
-    )
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "budget_settings", filter: `user_id=eq.${userId}` },
-      async (payload: { new: unknown; old: unknown }) => {
-        const row = (payload.new ?? payload.old) as SupabaseBudgetSettings | undefined;
-        if (!row) return;
-        const pending = await db.syncQueue.where("entityType").equals("budget_settings").count();
-        if (pending === 0 && typeof window !== "undefined") {
-          localStorage.setItem(MONTHLY_INCOME_KEY, String(Number(row.monthly_income) || 0));
-        }
-        if (onSyncComplete) onSyncComplete();
-      }
-    )
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "goals", filter: `user_id=eq.${userId}` },
-      async (payload: { new: unknown; old: unknown }) => {
-        const row = (payload.new ?? payload.old) as SupabaseGoal | undefined;
-        if (!row) return;
-        const mapped = supabaseToLocalGoal(row);
-        const existing = await db.goals.where("clientId").equals(mapped.clientId).first();
-        const hasPending = await db.syncQueue.where("clientId").equals(mapped.clientId).count();
-        if (hasPending === 0) {
-          if (existing) {
-            await db.goals.where("clientId").equals(mapped.clientId).modify((g) => {
-              Object.assign(g, mapped);
-            });
-          } else {
-            await db.goals.add(mapped);
-          }
-        }
-        if (onSyncComplete) onSyncComplete();
-      }
-    )
-    .subscribe();
+  let channel = supabase.channel(`library-${userId}`);
+  for (const table of ["items", "folders", "household_members", "folder_member_permissions",
+    ...(syncEnabled ? ["locations", "budget_categories", "budget_transactions", "budget_category_overrides", "budget_settings", "goals"] : [])]) {
+    channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, () => triggerSync());
+  }
+  realtimeChannel = channel.subscribe();
+}
+
+const syncSubscribers = new Set<() => void>();
+export function subscribeSyncComplete(callback: () => void) {
+  syncSubscribers.add(callback);
+  return () => { syncSubscribers.delete(callback); };
+}
+function notifySyncComplete() {
+  onSyncComplete?.();
+  for (const callback of syncSubscribers) callback();
 }
 
 let onSyncComplete: (() => void) | null = null;
@@ -1710,7 +1649,7 @@ export function setupSyncListeners(): () => void {
 
   const onOnline = async () => {
     const didSync = await performSync();
-    if (didSync && onSyncComplete) onSyncComplete();
+    if (didSync) notifySyncComplete();
   };
 
   window.addEventListener("online", onOnline);
@@ -1718,17 +1657,39 @@ export function setupSyncListeners(): () => void {
   // Realtime supersedes polling — but pull on visibility change in case realtime
   // dropped a message while the tab was hidden.
   const onVisibilityChange = async () => {
-    if (document.visibilityState === "visible" && syncEnabled && navigator.onLine) {
+    if (document.visibilityState === "visible" && (syncEnabled || familyUserId) && navigator.onLine) {
       const didSync = await performSync();
-      if (didSync && onSyncComplete) onSyncComplete();
+      if (didSync) notifySyncComplete();
     }
   };
   document.addEventListener("visibilitychange", onVisibilityChange);
 
+  let unsubscribeAuth: (() => void) | undefined;
+  try {
+    const { data } = getSupabaseBrowserClient().auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+      if (event === "SIGNED_OUT" || (familyUserId && session?.user.id && session.user.id !== familyUserId)) {
+        // Do not fetch inside Supabase's auth callback. Disable old-user writes
+        // immediately; the license hook enables the new context after its wipe.
+        syncGeneration++;
+        syncEnabled = false;
+        familyUserId = null;
+        currentUserId = null;
+        window.setTimeout(() => { teardownRealtime(); void clearFamilyCache().then(notifySyncComplete); }, 0);
+      }
+    });
+    unsubscribeAuth = () => data.subscription.unsubscribe();
+  } catch { /* Not configured; the auth screen handles it. */ }
+
   // Spin up realtime if we're already enabled
-  if (syncEnabled) void setupRealtime();
+  if (syncEnabled || familyUserId) void setupRealtime().catch(() => { /* Polling retries after reconnect. */ });
+  // Membership revocations may not emit readable realtime events to the removed member.
+  const interval = window.setInterval(() => {
+    if (document.visibilityState === "visible") void performSync();
+  }, 30_000);
 
   return () => {
+    unsubscribeAuth?.();
+    window.clearInterval(interval);
     window.removeEventListener("online", onOnline);
     document.removeEventListener("visibilitychange", onVisibilityChange);
     teardownRealtime();

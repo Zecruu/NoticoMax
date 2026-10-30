@@ -14,7 +14,8 @@ export async function scheduleReminderNotification(
   id: string,
   title: string,
   body: string,
-  scheduledDate: Date
+  scheduledDate: Date,
+  requestPermission = true
 ) {
   if (!isCapacitorNative()) return;
 
@@ -22,7 +23,10 @@ export async function scheduleReminderNotification(
     "@capacitor/local-notifications"
   );
 
-  const perm = await LocalNotifications.requestPermissions();
+  // Syncing another member's reminder must never open an unsolicited OS prompt.
+  const perm = requestPermission
+    ? await LocalNotifications.requestPermissions()
+    : await LocalNotifications.checkPermissions();
   if (perm.display !== "granted") return;
 
   await LocalNotifications.schedule({

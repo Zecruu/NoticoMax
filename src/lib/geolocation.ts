@@ -2,6 +2,7 @@ export interface Coordinates {
   latitude: number;
   longitude: number;
   accuracy?: number;
+  capturedAt: string;
 }
 
 export async function getCurrentCoords(): Promise<Coordinates> {
@@ -15,6 +16,7 @@ export async function getCurrentCoords(): Promise<Coordinates> {
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
           accuracy: pos.coords.accuracy,
+          capturedAt: new Date(pos.timestamp).toISOString(),
         });
       },
       (err) => {

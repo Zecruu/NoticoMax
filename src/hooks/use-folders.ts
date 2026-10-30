@@ -7,7 +7,7 @@ import {
   updateFolder,
   deleteFolder,
   getFolders,
-  setOnSyncComplete,
+  subscribeSyncComplete,
 } from "@/lib/sync/sync-engine";
 
 export function useFolders() {
@@ -25,19 +25,18 @@ export function useFolders() {
     let mounted = true;
 
     // Load local folders immediately
-    refresh();
+    const initial = window.setTimeout(() => { if (mounted) void refresh(); }, 0);
 
     // Register to refresh when sync brings in new server data
-    // Chain with the previous callback (from useItems) so both refresh
-    const prevCallback = setOnSyncComplete(() => {
+    // Each consumer owns its subscription; remount order cannot replace callbacks.
+    const unsubscribeSync = subscribeSyncComplete(() => {
       if (mounted) refresh();
-      if (prevCallback) prevCallback();
     });
 
     return () => {
       mounted = false;
-      // Restore previous callback (from useItems)
-      setOnSyncComplete(prevCallback);
+      window.clearTimeout(initial);
+      unsubscribeSync();
     };
   }, [refresh]);
 

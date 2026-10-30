@@ -50,7 +50,7 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>Use Face ID to unlock Notico Max</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Save your current location to your favorite spots so you can find them again later.</string>
+	<string>Use your location only when you choose to save a place or share a one-time family check-in.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

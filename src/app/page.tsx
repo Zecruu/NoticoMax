@@ -32,10 +32,10 @@ const BudgetView = dynamic(() => import("@/components/budget/budget-view").then(
 const GoalsView = dynamic(() => import("@/components/goals/goals-view").then((m) => m.GoalsView), { loading: ViewLoading });
 const LocationsView = dynamic(() => import("@/components/locations/locations-view").then((m) => m.LocationsView), { loading: ViewLoading });
 const FamilyView = dynamic(() => import("@/components/family/family-view").then((m) => m.FamilyView), { loading: ViewLoading });
-const FamilyFolderView = dynamic(() => import("@/components/family/family-folder-view").then((m) => m.FamilyFolderView), { loading: ViewLoading });
 
 export default function Dashboard() {
   const [activeFilter, setActiveFilter] = useState("all");
+  const [familyListToOpen, setFamilyListToOpen] = useState<{ id: string; folderId: string } | null>(null);
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   // Initial view = the new dashboard tile grid. The user's previous view is
   // intentionally NOT persisted: every fresh launch lands on the calm
@@ -50,7 +50,7 @@ export default function Dashboard() {
   const [skippedActivation, setSkippedActivation] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const { isActivated, isPro, isLoading, isLoggedIn, entitlements, login, loginWithApple, register } = useLicense();
+  const { isActivated, isPro, isLoading, isLoggedIn, userId, entitlements, login, loginWithApple, register } = useLicense();
 
   const { folders, addFolder, editFolder, removeFolder } = useFolders();
   const {
@@ -66,12 +66,12 @@ export default function Dashboard() {
     restoreItem,
     permanentlyDeleteItem,
     syncNow,
-  } = useItems(activeFilter, searchQuery, activeFolder, isPro);
+  } = useItems(activeFilter, searchQuery, activeFolder, isPro, isLoggedIn ? userId : null);
 
   // Counts for sidebar (type-based, ignoring folder filter)
   const itemCounts = useMemo(() => {
     const counts: Record<string, number> = { note: 0, url: 0, reminder: 0 };
-    for (const item of allItems) {
+    for (const item of allItems.filter((row) => !row.householdId)) {
       counts[item.type] = (counts[item.type] || 0) + 1;
     }
     return counts;
@@ -80,7 +80,7 @@ export default function Dashboard() {
   // Collect all unique tags from items
   const allTags = useMemo(() => {
     const tagSet = new Set<string>();
-    for (const item of allItems) {
+    for (const item of allItems.filter((row) => !row.householdId)) {
       for (const tag of item.tags) {
         tagSet.add(tag);
       }
@@ -90,13 +90,14 @@ export default function Dashboard() {
 
   // Filter items by active tag
   const displayedItems = useMemo(() => {
-    if (!activeTag) return items;
-    return items.filter((item) => item.tags.includes(activeTag));
+    const personal = items.filter((item) => !item.householdId);
+    if (!activeTag) return personal;
+    return personal.filter((item) => item.tags.includes(activeTag));
   }, [items, activeTag]);
 
   // Get reminder items for calendar
   const reminderItems = useMemo(() => {
-    return allItems.filter((item) => item.type === "reminder" && item.reminderDate);
+    return allItems.filter((item) => !item.householdId && item.type === "reminder" && item.reminderDate);
   }, [allItems]);
 
   // Reminders due in the next 7 days (and not yet completed). Powers the
@@ -149,10 +150,10 @@ export default function Dashboard() {
         setActiveFilter(filter);
         setActiveView("list");
         consumed = true;
-      } else if (view === "budget") {
+      } else if (view === "budget" || view === "family") {
         setActiveFolder(null);
         setActiveFilter("all");
-        setActiveView("budget");
+        setActiveView(view);
         consumed = true;
       }
 
@@ -247,6 +248,10 @@ export default function Dashboard() {
   );
 
   const handleSearchSelect = useCallback((item: LocalItem) => {
+    if (item.isChecklist && item.householdId && item.folderId) {
+      setFamilyListToOpen({ id: item.clientId, folderId: item.folderId });
+      setActiveFolder(item.folderId); setActiveView("list"); setDialogOpen(false); return;
+    }
     setEditingItem(item);
     setDialogOpen(true);
   }, []);
@@ -384,23 +389,13 @@ export default function Dashboard() {
             <GoalsView />
           ) : activeView === "locations" ? (
             <LocationsView />
-          ) : activeView === "family" ? (
-            <FamilyView />
-          ) : activeFolder && folders.find((f) => f.clientId === activeFolder)?.householdId ? (
-            (() => {
-              const sharedFolder = folders.find((f) => f.clientId === activeFolder)!;
-              return (
-                <FamilyFolderView
-                  folder={sharedFolder}
-                  onCreateItem={(type, folderId) => {
-                    setActiveFolder(folderId);
-                    handleCreateWithType(type);
-                  }}
-                  onEditItem={handleEdit}
-                  onOpenBudget={() => setActiveView("budget")}
-                />
-              );
-            })()
+          ) : activeView === "family" || (activeFolder && folders.find((f) => f.clientId === activeFolder)?.householdId) ? (
+            <FamilyView key={activeView === "family" ? "family" : activeFolder} folders={folders}
+              initialFolderId={activeView === "family" ? undefined : activeFolder ?? undefined}
+              initialListId={activeView !== "family" && familyListToOpen?.folderId === activeFolder ? familyListToOpen.id : undefined}
+              onCreateItem={(type, folderId) => { setActiveFolder(folderId); handleCreateWithType(type); }}
+              onEditItem={handleEdit}
+              onPersonal={() => { setFamilyListToOpen(null); setActiveFolder(null); setActiveFilter("all"); setActiveView("list"); }} />
           ) : (
             <ItemList
               items={displayedItems}
